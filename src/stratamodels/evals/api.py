@@ -115,12 +115,15 @@ def mount(app, scheduler):
             ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
             for n, a in enumerate(ok):
                 for b in ok[n + 1:]:
-                    key = (C.result_key(s, s.candidate(a), it), C.result_key(s, s.candidate(b), it))
-                    if key not in sims: sims[key] = SIM.similarity(outs[a][i][0], outs[b][i][0], s.similarity or None)
+                    oa, ob = outs[a][i][0], outs[b][i][0]
+                    key = (s.similarity, hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest())    # the outputs themselves: a rerun after forget, or another kind, is scored again
+                    if key not in sims: sims[key] = SIM.similarity(oa, ob, s.similarity or None)
                     if sims[key] < 0.9999: pairs.append((sims[key], i, a, b))                                    # identical outputs teach nothing: not shown
         if s.primary == 'judged': pairs = [p for p in pairs if s.baseline in p[2:]]                                          # decided head to head with the baseline: only those pairs
         if not pairs: return dict(pair=None)
-        with C.session(engine()) as ses: judged = {(j.item_id, frozenset((j.a, j.b))) for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))}
+        current = {(c.name, it['id']): C.result_key(s, c, it) for c in s.candidates for it in ds.items}
+        with C.session(engine()) as ses:                                                                     # a judgment of outputs that are no longer the candidates' does not count
+            judged = {(j.item_id, frozenset((j.a, j.b))) for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name)) if j.a_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key}
         fresh = [p for p in pairs if (ds.items[p[1]]['id'], frozenset(p[2:])) not in judged] or pairs                  # pairs not judged yet first,
         least = min(p[0] for p in fresh); sim, i, a, b = random.choice([p for p in fresh if p[0] <= least + 0.02])          # and of those the most different
         if random.random() < 0.5: a, b = b, a                                                                               # which side is X is random
