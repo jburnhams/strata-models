@@ -343,6 +343,20 @@ def stage_text(output):
     return t
 
 
+def stage_keys(engine, cand, item):
+    """The cache keys of a candidate's stages for one item, as far as they can be known: each from the stage before's cached answer, so the walk
+    stops after a failed stage (whose key is included: forgetting it lets the stage run again)."""
+    inp, out = dict(item['input']), []
+    for stage in cand.stages:
+        try: k = stage_key(stage, stage_params(stage, inp), item)
+        except EvalError: break
+        out.append(k); r = cached(engine, [k]).get(k)
+        if r is None or r.error: break
+        try: inp[stage['into']] = stage_text(r.output)
+        except EvalError: break
+    return out
+
+
 def without_pipeline(o):
     """An output as a judge sees it: the end result only, no intermediate steps (they would tell the candidates apart)."""
     return {k: v for k, v in o.items() if k != 'pipeline'} if isinstance(o, dict) and 'pipeline' in o else o
@@ -401,7 +415,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
         queued = {k for _, _, k in todo}
         todo += [(c, it, k) for k, it in keys.items() if k not in have and k not in queued]       # two candidates that are the same job run it once
     total = len(cands) * len(items); log(f'{spec.name}: {total - len(todo)} of {total} outputs cached, {len(todo)} to run'); failed = 0
-    staged = _run_stages(spec, engine, executor, todo, ds, log, batch)
+    ran = len(todo); staged = _run_stages(spec, engine, executor, todo, ds, log, batch)
     broken = [(c, it, k) for c, it, k in todo if k in staged and staged[k][0] is None]
     if broken:                                                                                       # a failed stage fails the candidate's output, without running its job
         save(engine, [EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=None, error=staged[k][1]) for c, it, k in broken]); failed += len(broken)
@@ -420,7 +434,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
                                    error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=run_s, load_s=j.get('load_s'), job_id=j.get('id')))
         failed += sum(1 for *_, j in done if j['status'] != 'done'); save(engine, rows)
         log(f'  {min(i + batch, len(todo))} of {len(todo)} run')
-    out = dict(ran=len(todo), cached=total - len(todo), failed=failed)
+    out = dict(ran=ran, cached=total - ran, failed=failed)
     if spec.score: out['scored'] = score_outputs(spec, engine, executor, [result_key(spec, c, it) for c in cands for it in items], log, batch)
     return out
 
@@ -481,8 +495,8 @@ def forget(spec, engine, candidate=None, stages=False):
     """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights).
     `stages`: a pipeline's stage outputs too (they are shared with other candidates that make the same first steps, so kept by default)."""
     ds = load_dataset(spec.dataset, engine=engine); keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
+    if stages: keys += [k for c in spec.candidates if candidate in (None, c.name) and c.stages for it in ds.items for k in stage_keys(engine, c, it)]
     with session(engine) as s:
-        if stages: keys += [t['key'] for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys))) for t in ((r.output or {}).get('pipeline') or []) if t.get('key')]
         n = 0
         for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys))): s.delete(r); n += 1
         s.commit(); return n

@@ -118,6 +118,11 @@ def test_a_failed_stage_fails_the_output_without_running_the_job(pipe, scheduler
         ds, outs, _ = C.outputs_for(s, engine)
         assert 'no text model' in outs['bad'][0][1] and outs['bad'][0][0] is None and 'stage 1' in outs['notext'][0][1] and 'does not have' in outs['missing'][0][1]
         assert R.pipelines(s, outs, ds.items)['bad']['failed'] == 6
+        assert C.run(s, engine, C.SchedulerExecutor(scheduler))['ran'] == 0                         # failures are cached like any output...
+        assert C.forget(s, engine, 'bad') == 6 and C.run(s, engine, C.SchedulerExecutor(scheduler))['ran'] == 6     # ...forgetting the output alone reuses the failed stage
+        assert C.stage_keys(engine, s.candidate('bad'), ds.items[0]) and C.stage_keys(engine, s.candidate('missing'), ds.items[0]) == []
+        log = []; assert C.forget(s, engine, 'bad', stages=True) == 12                               # with stages=True the failed stage goes too, and runs again
+        C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=['bad'], log=log.append); assert any('stage 1: 0 of 6 cached, 6 to run' in m for m in log)
     finally: stop.set()
 
 
