@@ -99,7 +99,7 @@ vram_gb = 7.5
 licence = "Apache-2.0"
 source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
 used_by = ["strata-360"]
-options = { model = "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", mmproj = "unsloth/Qwen3.5-9B-GGUF:mmproj-F16.gguf", ctx = 8192 }
+options = { model = "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", mmproj = "unsloth/Qwen3.5-9B-GGUF:mmproj-F16.gguf", ctx = 16384 }
 
 [models."gemma-4-12b-vl"]
 runtime = "llama-server"
@@ -109,7 +109,7 @@ vram_gb = 9.0
 licence = "Gemma Terms of Use"
 source = "https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF"
 used_by = []
-options = { model = "unsloth/gemma-4-12B-it-qat-GGUF:gemma-4-12B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-12B-it-qat-GGUF:mmproj-F16.gguf", ctx = 8192 }
+options = { model = "unsloth/gemma-4-12B-it-qat-GGUF:gemma-4-12B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-12B-it-qat-GGUF:mmproj-F16.gguf", ctx = 16384 }
 
 [models."gemma-4-26b-a4b-vl"]
 runtime = "llama-server"
@@ -120,7 +120,7 @@ licence = "Gemma Terms of Use"
 source = "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF"
 used_by = []
 # 14 GB of weights: --fit puts as many expert layers on the card as fit and the rest in RAM (active parameters are 4B, so this stays usable).
-options = { model = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:mmproj-F16.gguf", ctx = 8192, args = ["--fit", "on"] }
+options = { model = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:mmproj-F16.gguf", ctx = 16384, args = ["--fit", "on"] }
 
 [models."qwen3.8-27b-vl"]
 runtime = "llama-server"
@@ -130,7 +130,7 @@ vram_gb = 11.0
 licence = "Apache-2.0"
 source = "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF"
 used_by = []
-options = { model = "unsloth/Qwen3.8-27B-GGUF:Qwen3.8-27B-UD-IQ3_XXS.gguf", mmproj = "unsloth/Qwen3.8-27B-GGUF:mmproj-F16.gguf", ctx = 8192, args = ["--fit", "on"] }
+options = { model = "unsloth/Qwen3.8-27B-GGUF:Qwen3.8-27B-UD-IQ3_XXS.gguf", mmproj = "unsloth/Qwen3.8-27B-GGUF:mmproj-F16.gguf", ctx = 16384, args = ["--fit", "on"] }
 
 [models."sonnet-photos-v1"]
 runtime = "recorded"
