@@ -2,7 +2,7 @@
 
 strata-models: the one service that owns the GPU and serves local models to every app (see README.md). Python backend (FastAPI + CLI, `src/stratamodels/`), React frontend on strata-react (`web/`), a standalone client package (`client/`), hermetic unit and integration suites, coverage ratchets, GitHub Actions CI.
 
-- Model code lives in `src/stratamodels/runtimes/` (one module per runtime: `load`, `run`, `unload`; heavy imports inside `load`). The queue and VRAM budget are `scheduler.py`; job rows `store.py` (omarchy-db, schema `stratamodels`); roles and models `models.toml` + `registry.py`. A new role = a runtime module, an entry in `runtimes.RUNTIMES`/`NEEDS`, a role in `models.toml`, a test in `tests/gpu`.
+- Model code lives in `src/stratamodels/runtimes/` (one module per runtime: `load`, `run`, `unload`; heavy imports inside `load`). The queue and VRAM budget are `scheduler.py`; job rows `store.py` (omarchy-db, schema `stratamodels`, every table in `db/models.py`, see docs/database.md); roles and models `registry.py`, read from the database, seeded from `models.toml`. Tests never touch the shared database (conftest pins a tmp SQLite URL); only the deployed service migrates the live one. A new role = a runtime module, an entry in `runtimes.RUNTIMES`/`NEEDS`, a role in `models.toml`, a test in `tests/gpu`.
 - The client (`client/strata_models_client`) is standard library only: keep it that way, apps install it into their own venvs.
 
 - Python application code lives in `src/stratamodels/`; the React web app lives in `web/src/` and builds into `src/stratamodels/server/static/`, which `./strata-models serve` serves at `/`.
