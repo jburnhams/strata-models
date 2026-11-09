@@ -143,7 +143,8 @@ def test_status_reports_budget_queue_and_events(scheduler):
     st = scheduler.status()
     b = st['budget']
     assert b['total_mb'] == 12288 and b['own_mb'] == 2048 and b['other_mb'] == 500 and b['reserve_mb'] == 1024 and b['free_for_models_mb'] == 12288 - 2548 - 1024
-    assert st['resident'][0]['model'] == 'small' and st['queued'][0]['note'] == 'render' and st['current'] is None
+    assert st['resident'][0]['model'] == 'small' and st['queued'][0]['note'] == 'render' and st['current'] is None and st['lease'] is None
+    scheduler.step(); assert scheduler.status()['lease']['note'] == 'render'
     assert st['events'][0]['text'].startswith('loaded small')
 
 

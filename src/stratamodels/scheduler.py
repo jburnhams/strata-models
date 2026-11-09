@@ -105,10 +105,10 @@ class Scheduler:
     def status(self, state=None):
         state = self.probe() if state is None else state
         with self.cv: res = [r.to_json() for r in self.resident.values()]; cur = self.current
-        q = self.store.queued(); budget = None
+        q = self.store.queued(); budget = None; lease = next((j for j in self.store.running() if j['kind'] == 'lease'), None)
         if state:
             own = gpu.own_used_mb(state); budget = dict(total_mb=state['total_mb'], used_mb=state['used_mb'], own_mb=own, other_mb=max(state['used_mb'] - own, 0.0), reserve_mb=self.reserve_mb, free_for_models_mb=max(self.free_mb(state), 0.0))
-        return dict(gpu=state, budget=budget, resident=res, current=cur, queued=q, events=list(self.events)[-30:])
+        return dict(gpu=state, budget=budget, resident=res, current=cur, lease=lease, queued=q, events=list(self.events)[-30:])
 
     def free_mb(self, state):
         """MB the service may still fill: the card's free memory less the reserve kept for the desktop and other processes."""

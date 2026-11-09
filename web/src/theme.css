@@ -1,6 +1,6 @@
-/* Product layer for strata-listory: what Strata names but does not choose.
-   Seed: the warm brown of a book cloth binding (#8a4b2a), run through palette.mjs into theme.generated.css (never hand-edited).
-   Status roles are a pale tint plus a dark ink of one hue, ink at least 6:1 on its tint; the review screen leans on them to say how sure the model is. */
+/* Product layer for strata-models: what Strata names but does not choose.
+   Seed: the deep green of a circuit board's solder mask (#1f6b52), run through palette.mjs into theme.generated.css (never hand-edited).
+   Status roles are a pale tint plus a dark ink of one hue, ink at least 6:1 on its tint: job states (running, done, failed, expired) lean on them. */
 :root {
   --success-subtle: oklch(95.4% 0.035 150.6);
   --success: oklch(45.9% 0.109 150.1);
