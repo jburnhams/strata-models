@@ -1,0 +1,33 @@
+name = "transcribe-race"
+question = "Which Whisper model and beam size hear real race speech best (wind, breathing, footsteps, other runners)?"
+role = "transcribe"
+dataset = "legends-speech"       # scripts/evals/strata360_speech.py on a strata-360 project; SILVER reference (Whisper turbo + Gemini 3.5 Transcribe word fixes)
+metrics = ["wer", "cer", "latency_s", "failed"]
+judge = true                     # the reference leans to large-v3-turbo: blind judging with the audio settles the disagreements
+
+[decision]
+primary = "wer"
+baseline = "large-v3-turbo"      # what strata-360 transcribes with today
+min_effect = 0.01
+guards = { latency_s = 2.5 }
+
+[[candidates]]
+name = "large-v3-turbo"
+model = "whisper-large-v3-turbo"
+params = { beam_size = 5, condition_on_previous_text = false }
+note = "strata-360's settings"
+
+[[candidates]]
+name = "large-v3"
+model = "whisper-large-v3"
+params = { beam_size = 5, condition_on_previous_text = false }
+
+[[candidates]]
+name = "large-v3-turbo-beam1"
+model = "whisper-large-v3-turbo"
+params = { beam_size = 1, condition_on_previous_text = false }
+
+[[candidates]]
+name = "small"
+model = "whisper-small"
+params = { beam_size = 5, condition_on_previous_text = false }

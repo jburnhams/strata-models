@@ -132,6 +132,7 @@ class Spec:
     min_effect: float = 0.0
     guards: dict = dataclasses.field(default_factory=dict)
     judge: bool = False                    # offer the blind A/B judging page for this experiment
+    similarity: str = ''                   # how outputs are compared to order judging (evals.similarity: text, image, json); '' picks from the outputs
     source: str = ''
 
     def candidate(self, name):
@@ -141,7 +142,7 @@ class Spec:
 
     def to_json(self):
         return dict(name=self.name, question=self.question, role=self.role, dataset=self.dataset, metrics=self.metrics, candidates=[c.to_json() for c in self.candidates],
-                    primary=self.primary, baseline=self.baseline, min_effect=self.min_effect, guards=self.guards, judge=self.judge, source=self.source)
+                    primary=self.primary, baseline=self.baseline, min_effect=self.min_effect, guards=self.guards, judge=self.judge, similarity=self.similarity, source=self.source)
 
 
 def parse_spec(d, source=''):
@@ -149,10 +150,12 @@ def parse_spec(d, source=''):
         dec = d.get('decision') or {}; cands = [Candidate(name=str(c['name']), model=str(c['model']), params=dict(c.get('params') or {}), options=dict(c.get('options') or {}), note=str(c.get('note', ''))) for c in d['candidates']]
         s = Spec(name=str(d['name']), question=str(d['question']), role=str(d['role']), dataset=str(d['dataset']), metrics=list(d['metrics']), candidates=cands,
                  primary=str(dec.get('primary') or d['metrics'][0]), baseline=str(dec.get('baseline') or cands[0].name), min_effect=float(dec.get('min_effect', 0.0)),
-                 guards={k: float(v) for k, v in (dec.get('guards') or {}).items()}, judge=bool(d.get('judge', False)), source=source)
+                 guards={k: float(v) for k, v in (dec.get('guards') or {}).items()}, judge=bool(d.get('judge', False)), similarity=str(d.get('similarity', '')), source=source)
     except (KeyError, TypeError, ValueError, IndexError) as e: raise EvalError(f'{source or "spec"}: {e!r}')
     unknown = [m for m in s.metrics + [s.primary] + list(s.guards) if m not in M.METRICS]
     if unknown: raise EvalError(f'{s.name}: unknown metrics {unknown} (known: {", ".join(M.METRICS)})')
+    from stratamodels.evals import similarity as SIM
+    if s.similarity and s.similarity not in SIM.KINDS: raise EvalError(f'{s.name}: unknown similarity {s.similarity!r} (known: {", ".join(SIM.KINDS)})')
     if s.primary not in s.metrics: s.metrics.insert(0, s.primary)
     for g in s.guards:
         if g not in s.metrics: s.metrics.append(g)
