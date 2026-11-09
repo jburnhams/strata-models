@@ -17,7 +17,7 @@ model = "buffalo_l"
 
 [roles.transcribe]
 description = "Speech to text with word timings"
-model = "whisper-large-v3"
+model = "whisper-large-v3-turbo"             # eval transcribe-en, 2026-11-09: WER 1.8 % against large-v3's 3.6 % on LibriSpeech, twice as fast (docs repo: tech/code/strata-models/evals/)
 
 [roles.transcribe-fast]
 description = "Speech to text where speed matters more than the last few words (lyrics, previews)"
