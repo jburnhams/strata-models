@@ -50,6 +50,7 @@ describe('An experiment', () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
     expect(await screen.findByText('ask knot')).toBeInTheDocument()
     expect(screen.getByText('Reference: ask not')).toBeInTheDocument()
+    expect(screen.getByText(/38% different · 12\spairs not judged yet, most different first/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'X is better' }))
     await user.click(await screen.findByRole('button', { name: 'About the same' }))
     await waitFor(() => expect(mock.calls).toEqual(['judge x', 'judge tie']))

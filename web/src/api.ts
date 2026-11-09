@@ -86,7 +86,7 @@ export interface Analysis {
   judgments?: { n: number; strength: Record<string, [number, number, number]> }
 }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
-export interface Pair { item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
+export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
 
 export const evalsApi = {
   list: () => get<Evals>('/api/evals'),
@@ -94,7 +94,7 @@ export const evalsApi = {
   status: (name: string) => get<RunStatus>(`/api/evals/${encodeURIComponent(name)}/status`),
   run: (name: string) => send<RunStatus>('POST', `/api/evals/${encodeURIComponent(name)}/run`),
   report: async (name: string) => { const r = await fetch(withBase(`/api/evals/${encodeURIComponent(name)}/report`)); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text() },
-  pair: (name: string) => get<{ pair: Pair | null }>(`/api/evals/${encodeURIComponent(name)}/pair`),
+  pair: (name: string) => get<{ pair: Pair | null; remaining?: number }>(`/api/evals/${encodeURIComponent(name)}/pair`),
   judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
   mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
 }
