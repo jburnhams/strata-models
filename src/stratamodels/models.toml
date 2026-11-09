@@ -178,3 +178,25 @@ licence = "Qwen Research licence (non-commercial)"
 source = "https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF"
 used_by = []
 options = { diffusion = "unsloth/Qwen-Image-2.1-Turbo-GGUF:qwen-image-2.1-turbo-Q4_K_M.gguf", llm = "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", vae = "unsloth/Qwen-Image-2.1-FP8:vae/qwen_image_2.1_vae_bf16.safetensors", steps = 8, cfg_scale = 1.0, sampler = "euler", args = ["--clip-on-cpu", "--diffusion-fa"] }
+
+[roles.image-embed]
+description = "One vector per picture or prompt (CLIP): scene labels by similarity to prompts, search, near duplicates"
+model = "clip-vit-b-32"
+
+[models.clip-vit-b-32]
+runtime = "open-clip"
+name = "ViT-B-32:laion2b_s34b_b79k"
+roles = ["image-embed"]
+vram_gb = 0.6
+licence = "MIT (weights: LAION, CC-BY-4.0 data)"
+source = "https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+used_by = ["strata-stills"]
+
+[models.clip-vit-bigg]
+runtime = "open-clip"
+name = "ViT-bigG-14:laion2b_s39b_b160k"
+roles = ["image-embed"]
+vram_gb = 6.0
+licence = "MIT (weights: LAION)"
+source = "https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
+used_by = ["strata-stills"]
