@@ -29,6 +29,7 @@ def locked(fn):
 class Store:
     def __init__(self, engine, clock=time.time):
         self.engine, self.clock, self.lock = engine, clock, threading.RLock()
+        engine.stratamodels_lock = self.lock               # evals open their own sessions on this engine: they take the same lock (see evals.core.session)
 
     @classmethod
     def connect(cls, url_or_app='stratamodels', migrate=True):
@@ -36,6 +37,7 @@ class Store:
         from omarchy_db import Project, connect
         import os
         e = connect(url_or_app)
+        if e.dialect.name == 'postgresql': fast_commits(e)
         if migrate: Project.load(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'pyproject.toml')).upgrade(e)
         return cls(e)
 
@@ -110,6 +112,19 @@ class Store:
         with Session(self.engine) as s:
             n = s.execute(sa.update(Job).where(Job.finished_at < self.clock() - keep_s, Job.result.is_not(None)).values(result=None)).rowcount
             s.commit(); return n
+
+
+def fast_commits(engine):
+    """Commit without waiting for the WAL flush (synchronous_commit off) on the service's own connections: each commit was 17 ms on omarchy,
+    and a job takes three (queued, started, finished), which was most of a quick job's overhead. A crash can lose the last few hundred
+    milliseconds of job rows, never corrupt them; the apps that asked get their answer over HTTP either way."""
+    from sqlalchemy import event
+
+    @event.listens_for(engine, 'connect')
+    def _off(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor(); cur.execute('SET synchronous_commit TO OFF'); cur.close()
+        if not getattr(dbapi_conn, 'autocommit', True): dbapi_conn.commit()
+    return engine
 
 
 def memory_store(clock=time.time):

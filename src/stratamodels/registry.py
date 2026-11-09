@@ -83,9 +83,21 @@ class Registry:
         """The model a job for `role` runs on: the role's own, or `model` if it is listed under that role. Raises RegistryError otherwise."""
         if role not in self.roles: raise RegistryError(f'no role {role!r} (known: {", ".join(sorted(self.roles))})')
         key = model or self.roles[role].model
-        m = self.models.get(key)
+        m = self.models.get(key) or self.models.get(key.split('~')[0])
+        if m is not None and m.key != key and '~' in key: m = None                  # a variant that is not registered (yet) is not its base model
         if m is None or role not in m.roles: raise RegistryError(f'model {key!r} does not serve role {role!r}')
         if not m.served: raise RegistryError(f'model {key!r} ({m.runtime}) is known but not served here yet; the apps listed load it themselves')
         return m
+
+    def variant(self, key, options):
+        """`key` with some load options changed (an eval candidate: det_size 1024, int8): a model of its own, `key~<hash>`, loaded and freed apart
+        from the original. Registered on first use; listed on the Models page while it exists."""
+        import hashlib, json
+        base = self.models.get(key)
+        if base is None: raise RegistryError(f'no model {key!r}')
+        if not options: return base
+        merged = {**base.options, **options}; vkey = f'{base.key}~{hashlib.sha256(json.dumps(merged, sort_keys=True).encode()).hexdigest()[:8]}'
+        if vkey not in self.models: self.models[vkey] = dataclasses.replace(base, key=vkey, options=merged, used_by=('evals',))
+        return self.models[vkey]
 
     def to_json(self): return dict(roles=[r.to_json() for r in self.roles.values()], models=[m.to_json() for m in self.models.values()])
