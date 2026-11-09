@@ -34,11 +34,10 @@ class Store:
     @classmethod
     def connect(cls, url_or_app='stratamodels', migrate=True):
         """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server), migrated to head."""
-        from omarchy_db import Project, connect
-        import os
+        from omarchy_db import connect
         e = connect(url_or_app)
         if e.dialect.name == 'postgresql': fast_commits(e)
-        if migrate: Project.load(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'pyproject.toml')).upgrade(e)
+        if migrate: _project().upgrade(e)
         return cls(e)
 
     @locked
@@ -127,7 +126,14 @@ def fast_commits(engine):
     return engine
 
 
+def _project():
+    from omarchy_db import Project
+    import os
+    return Project.load(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'pyproject.toml'))
+
+
 def memory_store(clock=time.time):
-    """An in-memory SQLite store with the tables created from the models (tests, and `serve --memory` for a demo without a database)."""
+    """An in-memory SQLite store built by the migrations, not create_all, so the tests exercise them (tests, and `serve --memory` for a demo
+    without a database)."""
     from sqlalchemy.pool import StaticPool
-    e = sa.create_engine('sqlite://', connect_args=dict(check_same_thread=False), poolclass=StaticPool); Base.metadata.create_all(e); return Store(e, clock)
+    e = sa.create_engine('sqlite://', connect_args=dict(check_same_thread=False), poolclass=StaticPool); _project().upgrade(e); return Store(e, clock)
