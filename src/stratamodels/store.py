@@ -62,7 +62,7 @@ class Store:
         """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server). `migrate`: True brings it to
         head (the service, at start); 'new' only creates the tables of a database that has none and refuses one at another revision (the CLI:
         a command run from a branch must never migrate the live database under the running service); False leaves it as it is."""
-        from omarchy_db import Project, connect
+        from omarchy_db import connect
         e = connect(url_or_app)
         if e.dialect.name == 'postgresql': fast_commits(e)
         if migrate == 'new':
@@ -194,6 +194,7 @@ def fast_commits(engine):
 
 
 def memory_store(clock=time.time):
-    """An in-memory SQLite store with the tables created from the models (tests, and `serve --memory` for a demo without a database)."""
+    """An in-memory SQLite store built by the migrations, not create_all, so the tests exercise them (tests, and `serve --memory` for a demo
+    without a database)."""
     from sqlalchemy.pool import StaticPool
-    e = sa.create_engine('sqlite://', connect_args=dict(check_same_thread=False), poolclass=StaticPool); Base.metadata.create_all(e); return Store(e, clock)
+    e = sa.create_engine('sqlite://', connect_args=dict(check_same_thread=False), poolclass=StaticPool); project().upgrade(e); return Store(e, clock)

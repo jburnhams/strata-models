@@ -1,0 +1,16 @@
+name: Database
+
+# Migrations (dbtool check) and the database tests on SQLite and on a throwaway PostgreSQL 18, through the shared workflow in
+# jburnhams/database. The unit workflow runs everything else.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  database:
+    uses: jburnhams/database/.github/workflows/app-db.yml@main
+    with:
+      install: pip install -r requirements-test.txt
+      tests: tests/unit/test_database.py tests/unit/test_store.py

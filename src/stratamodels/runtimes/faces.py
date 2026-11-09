@@ -3,9 +3,11 @@ pack's landmark_3d_68 module is loaded, the 68 3D landmarks and head pose. One l
 
 params: path (an image file), or paths (several, answered in order); max_side (shrink larger pictures first, the boxes are given back in the
 original's pixels); det_thresh; fields (subset of bbox, kps, det_score, embedding, landmark_3d_68, pose; default all but landmark_3d_68);
-views (one image only): a list of ways to look at it again, each {crop: [x, y, w, h], rotate: 90 | 270 (degrees clockwise, applied after the
-crop)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
-look harder for children lying down or small in the background, without sending the image itself."""
+views (one image only): a list of ways to look at it again, each {crop: [x, y, w, h], pad: factor (1-4: the picture centred on a
+mid-grey canvas that many times its size, so a face that fills the frame shrinks into the detector's range; after the crop), rotate: 90 | 270
+(degrees clockwise, applied last)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
+look harder for children lying down or small in the background, without sending the image itself; strata-stills uses pad for close-ups
+(buffalo_l at det_size 640 misses about 1 in 5 faces over 20 % of the frame; a pad 2 view finds most of them)."""
 import collections, os
 
 from stratamodels.runtimes import RunError
@@ -70,6 +72,12 @@ def _view(img, v):
         x, y = max(x, 0), max(y, 0); w, h = min(w, W - x), min(h, H - y)
         if w <= 0 or h <= 0: raise RunError(f'crop {v["crop"]} is outside the {W}x{H} picture')
         img, ox, oy = img[y:y + h, x:x + w], x, y
+    if v.get('pad') is not None:
+        try: k = float(v['pad'])
+        except (TypeError, ValueError): raise RunError(f'pad must be a number from 1 to 4, not {v["pad"]!r}')
+        if not 1 <= k <= 4: raise RunError(f'pad must be a number from 1 to 4, not {v["pad"]!r}')
+        h, w = img.shape[:2]; px, py = int(round(w * (k - 1) / 2)), int(round(h * (k - 1) / 2))
+        img = cv2.copyMakeBorder(img, py, py, px, px, cv2.BORDER_CONSTANT, value=(128, 128, 128)); ox, oy = ox - px, oy - py
     h, w = img.shape[:2]; rot = int(v.get('rotate') or 0) % 360
     if rot == 90: img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE); back = lambda px, py: (py + ox, h - 1 - px + oy)
     elif rot == 270: img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE); back = lambda px, py: (w - 1 - py + ox, px + oy)
@@ -97,7 +105,7 @@ def run(handle, params):
         if not isinstance(params['views'], list) or params.get('paths') is not None: raise RunError('views is a list, for one image (path)')
         img = _read(params.get('path')); out = []
         for v in params['views']:
-            if not isinstance(v, dict): raise RunError(f'a view is {{crop?, rotate?}}, not {v!r}')
+            if not isinstance(v, dict): raise RunError(f'a view is {{crop?, pad?, rotate?}}, not {v!r}')
             vimg, back = _view(img, v); found = detect(handle, vimg, params.get('max_side'), params.get('det_thresh'), fields)
             out.append(dict(view=v, faces=[_unview(f, back) for f in found['faces']]))
         return dict(path=params['path'], width=img.shape[1], height=img.shape[0], views=out)
