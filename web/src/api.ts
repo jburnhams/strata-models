@@ -4,7 +4,7 @@ import { fetchJson } from 'strata-react'
 export interface Health { ok: boolean; version: string; gpu: boolean }
 export interface GpuProcess { pid: number; used_mb: number; command: string; ours: boolean }
 export interface Gpu { name: string; total_mb: number; used_mb: number; free_mb: number; util_pct: number | null; temp_c: number | null; power_w: number | null; power_limit_w: number | null; processes: GpuProcess[] }
-export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; free_for_models_mb: number }
+export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; reserved_mb?: number; free_for_models_mb: number }
 export interface Resident { model: string; runtime: string; roles: string[]; vram_mb: number; load_s: number; loaded_at: number; last_used: number; jobs: number }
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'expired'
 export interface Job {
@@ -13,7 +13,7 @@ export interface Job {
   vram_gb: number | null; ttl_s: number | null; started_at: number | null; finished_at: number | null; heartbeat_at: number | null; load_s: number | null; run_s: number | null; wait_s?: number
 }
 export interface ServiceEvent { at: number; text: string }
-export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; lease: Job | null; queued: Job[]; events: ServiceEvent[] }
+export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; lease: Job | null; leases?: Job[]; queued: Job[]; events: ServiceEvent[] }
 export interface Sample { at: number; util_pct: number | null; used_mb: number; own_mb: number }
 export interface History { every_s: number | null; samples: Sample[] }
 export interface Role { key: string; description: string; model: string }
@@ -62,4 +62,64 @@ export const api = {
   usage: (hours: number) => get<Usage>(`/api/usage?hours=${hours}`),
   settings: () => get<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => send<Settings>('PUT', '/api/settings', s),
+}
+
+// ---- evals -------------------------------------------------------------------------------------------------------------------------------
+export interface Candidate { name: string; model: string; params: Record<string, unknown>; options: Record<string, unknown>; note: string }
+export interface Experiment {
+  name: string; question?: string; role?: string; dataset?: string; metrics?: string[]; candidates?: Candidate[]; primary?: string; baseline?: string
+  min_effect?: number; guards?: Record<string, number>; judge?: boolean; outputs?: number; total?: number; running?: boolean; error?: string
+}
+export interface DatasetInfo { name: string; version?: string; n?: number; description?: string; tags?: string[]; error?: string }
+export interface Evals { experiments: Experiment[]; datasets: DatasetInfo[] }
+export interface MetricInfo { name: string; shape: 'mean' | 'binary' | 'ratio' | 'dataset'; better: 'lower' | 'higher'; description: string; unit: string }
+export interface Interval { value: number; low: number; high: number; n: number; p95?: number }
+export interface Comparison { n: number; mean_a: number; mean_b: number; diff: number; low: number; high: number; p: number; p_holm?: number; improves: boolean | null; only_baseline?: number; only_candidate?: number }
+export interface Verdict { verdict: 'adopt' | 'reject' | 'unclear'; why: string; gain: number }
+export interface Analysis {
+  experiment: Experiment & { candidates: Candidate[]; metrics: string[]; primary: string; baseline: string }
+  dataset: DatasetInfo & { compared: number; n: number }
+  candidates: Record<string, { done: number; failed: number; load_s: number | null; metrics: Record<string, Interval> }>
+  comparisons: Record<string, Record<string, Comparison>>
+  metrics: Record<string, MetricInfo>
+  decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }
+  judgments?: { n: number; strength: Record<string, [number, number, number]> }
+}
+export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
+export interface Pair { item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
+
+export const evalsApi = {
+  list: () => get<Evals>('/api/evals'),
+  analysis: (name: string) => get<Analysis>(`/api/evals/${encodeURIComponent(name)}`),
+  status: (name: string) => get<RunStatus>(`/api/evals/${encodeURIComponent(name)}/status`),
+  run: (name: string) => send<RunStatus>('POST', `/api/evals/${encodeURIComponent(name)}/run`),
+  report: async (name: string) => { const r = await fetch(withBase(`/api/evals/${encodeURIComponent(name)}/report`)); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text() },
+  pair: (name: string) => get<{ pair: Pair | null }>(`/api/evals/${encodeURIComponent(name)}/pair`),
+  judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
+  mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
+}
+
+// ---- image generation ----------------------------------------------------------------------------------------------------------------------
+export interface GeneratedImage { id: number; app: string; model: string; prompt: string; finished_at: number; path: string; width: number; height: number; seed: number; steps: number; seconds: number; peak_vram_mb: number }
+export interface ImagePage { items: GeneratedImage[]; next: number | null }
+export interface GenerateParams { prompt: string; width?: number; height?: number; seed?: number; steps?: number; cfg_scale?: number; ref_images?: string[] }
+
+export const imagesApi = {
+  list: (before?: number) => get<ImagePage>(`/api/images?limit=24${before ? `&before=${before}` : ''}`),
+  fileUrl: (path: string) => withBase(`/api/images/file?path=${encodeURIComponent(path)}`),
+  upload: async (f: File) => {
+    const r = await fetch(withBase(`/api/images/upload?name=${encodeURIComponent(f.name)}`), { method: 'POST', body: f })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((d as { detail?: string }).detail || `${r.status} ${r.statusText}`)
+    return d as { path: string }
+  },
+  /** Queue an interactive job, then wait for it (long polls); throws with the job's error when it fails. */
+  generate: async (model: string | undefined, params: GenerateParams) => {
+    const j = await send<Job>('POST', '/api/jobs', { role: 'image-generate', params, app: 'strata-models web', priority: 'interactive', model: model || null })
+    for (;;) {
+      const r = await get<Job>(`/api/jobs/${j.id}?wait=30`)
+      if (r.status === 'done') return r
+      if (r.status === 'failed' || r.status === 'cancelled') throw new Error(r.error || `the job was ${r.status}`)
+    }
+  },
 }

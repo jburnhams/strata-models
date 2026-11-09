@@ -8,3 +8,5 @@ nvidia-cudnn-cu12
 nvidia-cuda-runtime-cu12   # onnxruntime-gpu's CUDA provider also loads these three
 nvidia-curand-cu12
 nvidia-cufft-cu12
+torch                      # image-embed (open_clip). It brings its own CUDA 13 libraries under nvidia/cu13, which the launcher keeps off the library path
+open-clip-torch

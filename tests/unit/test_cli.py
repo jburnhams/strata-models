@@ -48,3 +48,25 @@ def test_set_and_serve(capsys, monkeypatch):
     from stratamodels.server import app as server_app
     called = []; monkeypatch.setattr(server_app, 'main', lambda argv: called.append(argv))
     assert cli.main(['serve', '--port', '9000', '--memory']) == 0 and called == [['--host', '127.0.0.1', '--port', '9000', '--memory']]
+
+
+def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
+    monkeypatch.setenv('STRATAMODELS_DATABASE_URL', 'sqlite:///' + str(tmp_path / 'db.sqlite'))
+    assert cli.main(['eval', 'list']) == 0; out = capsys.readouterr().out; assert 'fake-asr' in out and 'dataset speech' in out
+    with pytest.raises(SystemExit, match='name the experiment'): cli.main(['eval', 'report'])
+    with pytest.raises(SystemExit, match='no experiment'): cli.main(['eval', 'report', 'nope'])
+    import sys, types
+    monkeypatch.setitem(sys.modules, 'strata_models_client', types.SimpleNamespace(available=lambda: False, url=lambda: 'http://x'))
+    with pytest.raises(SystemExit, match='not running'): cli.main(['eval', 'run', 'fake-asr'])
+    assert cli.main(['eval', 'report', 'fake-asr', '--out', str(tmp_path / 'r.md')]) == 0 and (tmp_path / 'r.md').read_text().startswith('# fake-asr')
+    capsys.readouterr()
+    assert cli.main(['eval', 'report', 'fake-asr']) == 0 and '## Answer' in capsys.readouterr().out
+    assert cli.main(['eval', 'report', 'fake-asr', '--json']) == 0 and '"decision"' in capsys.readouterr().out
+    assert cli.main(['eval', 'forget', 'fake-asr', '--candidate', 'same']) == 0 and '0 outputs forgotten' in capsys.readouterr().out
+    calls = []
+    class SM:
+        available = staticmethod(lambda: True)
+        def submit(self, *a): calls.append(a); return dict(id=len(calls))
+        def wait_job(self, i): return dict(id=i, status='done', result=dict(segments=[dict(text='x')]))
+    sm = SM(); monkeypatch.setitem(sys.modules, 'strata_models_client', sm)
+    assert cli.main(['eval', 'run', 'fake-asr', '--limit', '2']) == 0 and '"ran": 6' in capsys.readouterr().out and len(calls) == 6

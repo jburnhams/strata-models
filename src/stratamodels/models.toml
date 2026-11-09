@@ -17,7 +17,7 @@ model = "buffalo_l"
 
 [roles.transcribe]
 description = "Speech to text with word timings"
-model = "whisper-large-v3"
+model = "whisper-large-v3-turbo"             # eval transcribe-en, 2026-11-09: WER 1.8 % against large-v3's 3.6 % on LibriSpeech, twice as fast (docs repo: tech/code/strata-models/evals/)
 
 [roles.transcribe-fast]
 description = "Speech to text where speed matters more than the last few words (lyrics, previews)"
@@ -84,7 +84,7 @@ options = { compute_type = "float16" }
 [models.whisper-small]
 runtime = "faster-whisper"
 name = "small"
-roles = ["transcribe-fast"]
+roles = ["transcribe-fast", "transcribe"]
 vram_gb = 1.0
 licence = "MIT"
 source = "https://huggingface.co/Systran/faster-whisper-small"
@@ -152,4 +152,51 @@ roles = ["nsfw"]
 vram_gb = 0.3
 licence = "AGPL-3.0"
 source = "https://github.com/notAI-tech/NudeNet"
+used_by = ["strata-stills"]
+
+[roles.image-generate]
+description = "Pictures from a prompt, optionally edited from reference images"
+model = "flux3-klein"
+
+[models.flux3-klein]
+runtime = "sd-cpp"
+name = "FLUX.3 [klein] UD-Q4_K_XL"
+roles = ["image-generate"]
+vram_gb = 7.0
+licence = "FLUX Kommunity licence (accept it on Hugging Face: black-forest-labs/flux-3-image-klein is gated)"
+source = "https://huggingface.co/unsloth/flux-3-image-klein-GGUF"
+used_by = []
+# The text encoder is Qwen3-VL-4B (as GGUF here); the VAE comes from the gated BFL repo. Untried until sd-cli is installed.
+options = { diffusion = "unsloth/flux-3-image-klein-GGUF:flux-3-image-klein-UD-Q4_K_XL.gguf", llm = "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf", vae = "black-forest-labs/flux-3-image-klein:ae.safetensors", steps = 16, cfg_scale = 1.0, sampler = "euler", args = ["--diffusion-fa"] }
+
+[models."qwen-image-2.1-turbo"]
+runtime = "sd-cpp"
+name = "Qwen-Image 2.1 Turbo Q4_K_M"
+roles = ["image-generate"]
+vram_gb = 9.0
+licence = "Qwen Research licence (non-commercial)"
+source = "https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF"
+used_by = []
+options = { diffusion = "unsloth/Qwen-Image-2.1-Turbo-GGUF:qwen-image-2.1-turbo-Q4_K_M.gguf", llm = "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", vae = "unsloth/Qwen-Image-2.1-FP8:vae/qwen_image_2.1_vae_bf16.safetensors", steps = 8, cfg_scale = 1.0, sampler = "euler", args = ["--clip-on-cpu", "--diffusion-fa"] }
+
+[roles.image-embed]
+description = "One vector per picture or prompt (CLIP): scene labels by similarity to prompts, search, near duplicates"
+model = "clip-vit-b-32"
+
+[models.clip-vit-b-32]
+runtime = "open-clip"
+name = "ViT-B-32:laion2b_s34b_b79k"
+roles = ["image-embed"]
+vram_gb = 0.6
+licence = "MIT (weights: LAION, CC-BY-4.0 data)"
+source = "https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+used_by = ["strata-stills"]
+
+[models.clip-vit-bigg]
+runtime = "open-clip"
+name = "ViT-bigG-14:laion2b_s39b_b160k"
+roles = ["image-embed"]
+vram_gb = 6.0
+licence = "MIT (weights: LAION)"
+source = "https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 used_by = ["strata-stills"]
