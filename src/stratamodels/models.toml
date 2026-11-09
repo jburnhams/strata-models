@@ -266,3 +266,17 @@ licence = "Apache-2.0"
 source = "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 used_by = []
 options = { worker = "tts", venv = "qwen3-tts", engine = "qwen3-clone" }
+
+[roles.face-kind]
+description = "Is a detected face a real person, or a statue, picture, toy or animal (before judging skin colour or matching people)"
+model = "face-kind-clip-b32"
+
+[models.face-kind-clip-b32]
+runtime = "face-kind"
+name = "ViT-B-32:laion2b_s34b_b79k"
+roles = ["face-kind"]
+vram_gb = 0.6
+licence = "MIT (CLIP weights: LAION); the head is trained here from the apps' own labels"
+source = "https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+used_by = ["strata-stills", "bright-horizons"]
+options = { head = "head-v1.npz" }
