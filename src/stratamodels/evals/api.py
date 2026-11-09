@@ -53,6 +53,10 @@ def same(x, y, kind=None):
     return SIM.similarity(x, y, kind) >= 0.9999
 
 
+MEDIA_EXT = ('.flac', '.wav', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.mp4', '.mov', '.mkv', '.osv', '.insv')     # by extension: Python's mimetypes does not know .flac on every system
+CONTEXT_S = 2.0                                                                                                        # seconds played either side of a phrase, to hear it in context
+
+
 def mount(app, scheduler):
     runs = {}; engine = lambda: scheduler.store.engine; memo = {}; sims = {}       # sims: (result key, result key) -> similarity, outputs never change under a key
 
@@ -155,8 +159,9 @@ def mount(app, scheduler):
         p = it and it['input'].get('path')
         if not isinstance(p, str) or not os.path.isfile(p): raise HTTPException(404, 'no file for this item')
         clip = it['input'].get('clip')
-        if clip and (mimetypes.guess_type(p)[0] or '').startswith(('audio', 'video')):                 # the phrase only, not the whole recording
+        if clip and os.path.splitext(p)[1].lower() in MEDIA_EXT:                          # the phrase with a little either side, not the whole recording
             import subprocess
-            r = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-ss', str(float(clip[0])), '-to', str(float(clip[1])), '-i', p, '-vn', '-ac', '1', '-f', 'wav', '-'], capture_output=True)
+            a, b = max(float(clip[0]) - CONTEXT_S, 0.0), float(clip[1]) + CONTEXT_S
+            r = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-ss', f'{a:.2f}', '-to', f'{b:.2f}', '-i', p, '-vn', '-ac', '1', '-f', 'wav', '-'], capture_output=True)
             if r.returncode == 0 and r.stdout: return Response(content=r.stdout, media_type='audio/wav')
         return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or 'application/octet-stream')
