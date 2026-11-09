@@ -4,7 +4,7 @@
 import { useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useLoad, type Column } from 'strata-react'
-import { evalsApi, imagesApi, type Analysis, type Pair } from '../api'
+import { evalsApi, imagesApi, type Analysis, type Pair, type Step } from '../api'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
 
@@ -65,10 +65,79 @@ function Output({ o, label }: { o: unknown; label: string }) {
   return <p className="type-body whitespace-pre-wrap">{outputText(o)}</p>
 }
 
+/** The steps of a pipeline candidate's output (a text model's expansion, then the picture), if it has them. */
+export const pipelineOf = (o: unknown): Step[] | null => (o && typeof o === 'object' && Array.isArray((o as { pipeline?: unknown }).pipeline) ? (o as { pipeline: Step[] }).pipeline : null)
+
+function Pipeline({ steps }: { steps: Step[] }) {
+  return (
+    <ol className="grid gap-2" aria-label="Pipeline steps">
+      {steps.map((st, i) => (
+        <li key={i} className="grid gap-1 rounded-control bg-muted p-2">
+          <span className="type-caption text-muted-foreground">{`Step ${i + 1}: ${st.model} (${st.role})`}{typeof st.run_s === 'number' ? ` · ${st.run_s.toFixed(1)} s` : ''}</span>
+          <p className="type-body-sm whitespace-pre-wrap"><span className="type-label">Sent: </span>{st.sent}</p>
+          {st.answer !== undefined && <p className="type-body-sm whitespace-pre-wrap"><span className="type-label">Answered: </span>{st.answer}</p>}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** One candidate's output for one item, with its pipeline's steps when it has them (shown only outside blind judging). */
+function FullOutput({ name, out }: { name: string; out: { output: unknown; error: string | null; run_s?: number | null } | null }) {
+  const steps = pipelineOf(out?.output)
+  return (
+    <section aria-label={name} className="grid content-start gap-2 rounded-surface border border-border p-3">
+      <h3 className="type-label font-mono">{name}</h3>
+      {out === null ? <p className="type-body-sm text-muted-foreground">Not run yet.</p> : out.error ? <p className="type-body-sm text-danger">{`Failed: ${out.error}`}</p> : <Output o={out.output} label={name} />}
+      {typeof out?.run_s === 'number' && <span className="type-caption text-muted-foreground">{`${out.run_s.toFixed(1)} s in all`}</span>}
+      {steps && <details><summary className="type-body-sm cursor-pointer">{`Pipeline: ${steps.length} steps`}</summary><Pipeline steps={steps} /></details>}
+    </section>
+  )
+}
+
+/** Every candidate's output for each item, a pipeline's every step included: the view after (not during) blind judging. */
+function Outputs({ name }: { name: string }) {
+  const load = useLoad({ queryKey: ['outputs', name], queryFn: () => evalsApi.outputs(name) })
+  const [item, setItem] = useState<string | null>(null)
+  return (
+    <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-96 w-full" />} empty={<EmptyState title="No items" />}>
+      {d => {
+        const it = d.items.find(x => x.id === item) ?? d.items[0]
+        return (
+          <div className="grid gap-4">
+            <p className="type-body-sm text-muted-foreground">Every candidate&apos;s output, and for a pipeline what each step was sent and answered. The Judge tab shows only the end results, so look here after judging.</p>
+            <label className="grid gap-1 type-label">Item
+              <select className="rounded-control border border-border bg-background p-2 type-body" value={it.id} onChange={e => setItem(e.target.value)}>
+                {d.items.map(x => <option key={x.id} value={x.id}>{x.id}</option>)}
+              </select>
+            </label>
+            {typeof it.input.prompt === 'string' && <p className="type-body">Prompt: {it.input.prompt}</p>}
+            {typeof it.input.text === 'string' && <p className="type-body">Text: {it.input.text}</p>}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{d.candidates.map(c => <FullOutput key={c.name} name={c.name} out={it.outputs[c.name] ?? null} />)}</div>
+          </div>
+        )
+      }}
+    </DataView>
+  )
+}
+
+/** The pair just judged, unblinded: which candidate each side was, and its every step. */
+function LastPair({ name, last }: { name: string; last: { item_id: string; x: string; y: string; winner: string } }) {
+  const load = useLoad({ queryKey: ['outputs', name, last.item_id], queryFn: () => evalsApi.outputs(name, last.item_id) })
+  return (
+    <details className="rounded-surface border border-border p-3">
+      <summary className="type-body-sm cursor-pointer">{`Last pair (${last.item_id}): X was ${last.x}, Y was ${last.y}; ${last.winner === 'tie' ? 'about the same' : `you chose ${last.winner}`}`}</summary>
+      <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-24 w-full" />} empty={null}>
+        {d => <div className="mt-2 grid gap-4 md:grid-cols-2">{[last.x, last.y].map(c => <FullOutput key={c} name={c} out={d.items[0].outputs[c] ?? null} />)}</div>}
+      </DataView>
+    </details>
+  )
+}
+
 function Judge({ name }: { name: string }) {
-  const qc = useQueryClient(); const [n, setN] = useState(0)
+  const qc = useQueryClient(); const [n, setN] = useState(0); const [last, setLast] = useState<{ item_id: string; x: string; y: string; winner: string } | null>(null)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
-  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { await evalsApi.judge(name, p.token, w); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
+  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
   return (
     <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
       {({ pair }) => (
@@ -90,6 +159,7 @@ function Judge({ name }: { name: string }) {
           </div>
           <div><Button onClick={() => answer.run(pair!, 'tie')} disabled={answer.phase === 'pending'}>About the same</Button></div>
           {answer.error && <p role="alert" className="text-danger type-body-sm">{answer.error}</p>}
+          {last && <LastPair name={name} last={last} />}
         </div>
       )}
     </DataView>
@@ -127,8 +197,8 @@ export default function EvalPage() {
       <PageHeader title={name} scope={load.status === 'ready' ? load.data.experiment.question : undefined} actions={<RunButton name={name} />} finding={load.status === 'ready' ? { text: finding(load.data) } : undefined} />
       <DataView state={load} isEmpty={() => false} skeleton={<TableSkeleton rows={4} columns={5} />} empty={null}>
         {a => (
-          <Tabs param="tab" label="Experiment view" items={[{ value: 'results', label: 'Results' }, { value: 'judge', label: 'Judge' }, { value: 'writeup', label: 'Write-up' }]}>
-            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'writeup' ? <WriteUp name={name} /> : <Results a={a} />}
+          <Tabs param="tab" label="Experiment view" items={[{ value: 'results', label: 'Results' }, { value: 'judge', label: 'Judge' }, { value: 'outputs', label: 'Outputs' }, { value: 'writeup', label: 'Write-up' }]}>
+            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'outputs' ? <Outputs name={name} /> : tab === 'writeup' ? <WriteUp name={name} /> : <Results a={a} />}
           </Tabs>
         )}
       </DataView>

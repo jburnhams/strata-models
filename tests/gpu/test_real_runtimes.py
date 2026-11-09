@@ -134,3 +134,13 @@ def test_face_kind_on_the_gpu():
     try: z = rt.run(h, dict(path=IMAGE, boxes=boxes[:1]))
     finally: rt.unload(h)
     assert z['head'] == 'zero-shot' and set(z['faces'][0]['probs']) == {'real', 'statue', 'picture', 'toy', 'animal'}
+
+
+@pytest.mark.skipif(bool(runtimes.available()['llama-server']), reason='needs the llama-server binary (llama.cpp) and huggingface_hub')
+@pytest.mark.parametrize('model', ['qwen3.5-9b-vl', 'flux3-klein-pup'])
+def test_text_role_expands_an_image_prompt_on_the_gpu(model):
+    """Role `text`, text only (no picture, no projector needed): the image-prompt expansion a pipeline eval runs before the image model."""
+    m = Registry.load().resolve('text', model)
+    out, _ = measure(m, dict(prompt='Exactly five red apples in a row on a white shelf, studio photo', system_preset='image-prompt-bfl', max_tokens=1500, temperature=0.0))
+    print(out['text'][:300])
+    assert len(out['text'].split()) > 40 and 'five' in out['text'].lower() and out['finish'] == 'stop'

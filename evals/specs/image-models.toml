@@ -1,24 +1,118 @@
 name = "image-models"
-question = "Which local model should serve image-generate: FLUX.3 Klein or Qwen-Image 2.1 Turbo, at 1 MP?"
+question = "Which local model, and which prompt expansion before it, should serve image-generate at 1 MP?"
 role = "image-generate"
 dataset = "image-prompts-20"
-metrics = ["latency_s", "peak_vram_gb", "failed"]
-judge = true                 # quality is judged blind, pair by pair, on the Judge tab: there is no reference picture
+metrics = ["judged", "latency_s", "peak_vram_gb", "failed"]
+judge = true                 # quality is judged blind, pair by pair, on the Judge tab: there is no reference picture. Pipelines show only the picture.
 
+# Round 1 (2026-11-09, report in the docs repo): raw prompts, FLUX.3 Klein beat Qwen-Image 2.1 Turbo 14-2-4. Round 2: a text model first turns
+# the short prompt into a detailed caption. FLUX.3 Klein's model card says to always do this ("a short prompt sent as typed gives generic
+# output") and ships its own upsampler, a Qwen3.5-9B fine-tune (flux3-klein-pup). The other candidates ask: does the fine-tune matter (the
+# same system prompt on plain Qwen3.5-9B and Gemma 4 12B), and which way of asking for the expansion works best.
 [decision]
-primary = "latency_s"        # until enough judgments are in; the write-up reads the Bradley-Terry strengths first
+primary = "judged"           # head to head with flux3-klein on raw prompts; ties count half
 baseline = "flux3-klein"
-min_effect = 1.0
-guards = { peak_vram_gb = 1.5 }
+min_effect = 0.1             # win at least 60 % of the pairs with the baseline
+guards = { peak_vram_gb = 1.5, latency_s = 2.0 }
 
 [[candidates]]
 name = "flux3-klein"
 model = "flux3-klein"
 params = { width = 1024, height = 1024 }
-note = "16 steps, Q4 (UD-Q4_K_XL)"
+note = "16 steps, Q4 (UD-Q4_K_XL); the prompt as typed"
 
 [[candidates]]
 name = "qwen-image-2.1-turbo"
 model = "qwen-image-2.1-turbo"
 params = { width = 1024, height = 1024 }
-note = "8 steps, Q4_K_M, text encoder on the CPU"
+note = "8 steps, Q4_K_M, text encoder on the CPU; the prompt as typed"
+
+[[candidates]]
+name = "pup+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "BFL's own pipeline: their upsampler and system prompt, greedy, as the reference code runs it"
+[[candidates.stages]]
+role = "text"
+model = "flux3-klein-pup"
+params = { system_preset = "image-prompt-bfl", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-bfl+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "the same system prompt on the general Qwen3.5-9B (the model the upsampler was tuned from)"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-bfl", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-bfl-think+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "as above, thinking on: plans the scene before writing it"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-bfl", max_tokens = 8000, temperature = 0.0, think = true }
+
+[[candidates]]
+name = "gemma4-bfl+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "the same system prompt on Gemma 4 12B"
+[[candidates.stages]]
+role = "text"
+model = "gemma-4-12b-vl"
+params = { system_preset = "image-prompt-bfl", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-simple+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "technique: a one-line instruction, 'rewrite as a rich, detailed description'"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-simple", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-structured+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "technique: a checklist to settle (medium, subject, setting, composition, light, palette, text), then one paragraph"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-structured", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-photographer+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "technique: a persona (photographer and art director), camera and lens language"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-photographer", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-fewshot+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "technique: three worked examples (none from the dataset)"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-fewshot", max_tokens = 3584, temperature = 0.0 }
+
+[[candidates]]
+name = "qwen3.5-concise+flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "technique: short, 40 to 70 words: does length matter?"
+[[candidates.stages]]
+role = "text"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "image-prompt-concise", max_tokens = 3584, temperature = 0.0 }
