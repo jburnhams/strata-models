@@ -1,8 +1,0 @@
-# Main runtime environment (Python 3.11+). The GPU runtimes' libraries are in requirements-gpu.txt.
-fastapi
-uvicorn
-pydantic
-numpy                      # evals: statistics and metrics
-sqlalchemy>=2
-psycopg[binary]
-omarchy-db @ git+https://github.com/jburnhams/database#subdirectory=python
