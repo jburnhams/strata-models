@@ -30,7 +30,7 @@ jobs:
           uv run --locked strata-check
           uv run --locked pytest tests/integration -n auto
       - if: steps.changed.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: upgrade-strata-python
           title: Upgrade strata-python
