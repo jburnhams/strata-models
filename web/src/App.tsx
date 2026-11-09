@@ -1,19 +1,22 @@
 // strata-models: one question per area. Overview: is the GPU free, and who is using it? Models: which model serves each role, and is it loaded?
-// Jobs: what ran, for whom, how long, and why did it fail? Usage: which apps use the GPU most? Settings: where weights live and how much VRAM to keep free.
+// Jobs: what ran, for whom, how long, and why did it fail? Evals: which model, settings or prompt should serve a role, with what evidence? Usage: which apps use the GPU most? Settings: where weights live and how much VRAM to keep free.
 import { Navigate, Route, Routes } from 'react-router'
 import { AppShell, useLoad } from 'strata-react'
-import { Activity, Boxes, Cpu, History, Settings, Gauge } from 'lucide-react'
+import { Activity, Boxes, Cpu, FlaskConical, History, Settings, Gauge } from 'lucide-react'
 import { api } from './api'
 import OverviewPage from './components/OverviewPage'
 import ModelsPage from './components/ModelsPage'
 import JobsPage from './components/JobsPage'
 import UsagePage from './components/UsagePage'
 import SettingsPage from './components/SettingsPage'
+import EvalsPage from './components/EvalsPage'
+import EvalPage from './components/EvalPage'
 
 const nav = [
   { to: '/', label: 'Overview', icon: Gauge, end: true },
   { to: '/models', label: 'Models', icon: Boxes },
   { to: '/jobs', label: 'Jobs', icon: History },
+  { to: '/evals', label: 'Evals', icon: FlaskConical },
   { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -26,6 +29,8 @@ export default function App() {
         <Route path="/" element={<OverviewPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/jobs" element={<JobsPage />} />
+        <Route path="/evals" element={<EvalsPage />} />
+        <Route path="/evals/:name" element={<EvalPage />} />
         <Route path="/usage" element={<UsagePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
