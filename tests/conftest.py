@@ -74,7 +74,7 @@ def registry():
     from stratamodels.registry import Registry
     return Registry.from_dict(dict(
         roles=dict(echo=dict(model='small', description='echo params'), other=dict(model='other'), later=dict(model='planned')),
-        models=dict(small=dict(runtime='fake', roles=['echo'], vram_gb=2), big=dict(runtime='fake', roles=['echo'], vram_gb=6), other=dict(runtime='fake', roles=['other'], vram_gb=2), planned=dict(runtime='llama-server', roles=['later'], used_by=['strata-360']))))
+        models=dict(small=dict(runtime='fake', roles=['echo'], vram_gb=2), big=dict(runtime='fake', roles=['echo'], vram_gb=6), other=dict(runtime='fake', roles=['other'], vram_gb=2), planned=dict(runtime='ultralytics', roles=['later'], used_by=['strata-360']))))
 
 
 class FakeGpu:
