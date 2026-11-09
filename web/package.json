@@ -31,7 +31,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/coverage-v8": "^5.1.0",
     "jsdom": "^27.4.0",
     "msw": "^3.0.4",
     "tailwindcss": "^4.0.0",
