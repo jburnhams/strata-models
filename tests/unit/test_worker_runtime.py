@@ -194,8 +194,12 @@ def test_a_worker_gets_its_own_cuda_libraries_and_none_of_the_services(tmp_path,
     venv = tmp_path / "venvs" / "w"
     lib = venv / "lib" / "python3.12" / "site-packages" / "nvidia" / "cublas" / "lib"
     lib.mkdir(parents=True)
-    (venv / "bin").mkdir()
-    (venv / "bin" / "python").write_text("")
+    m = Model(
+        key="w", runtime="venv-worker", name="w", roles=("r",), vram_gb=1, options=dict(worker="tts", venv=str(venv))
+    )
+    exe = worker.python_of(m, str(tmp_path))[1]  # bin/python, or Scripts\python.exe on Windows
+    os.makedirs(os.path.dirname(exe), exist_ok=True)
+    open(exe, "w").close()
     service_lib = os.path.join(_sys.prefix, "lib", "nvidia", "cu13", "lib")
     monkeypatch.setenv("LD_LIBRARY_PATH", os.pathsep.join([service_lib, "/opt/other/.venv-like/lib"]))
     seen = {}
