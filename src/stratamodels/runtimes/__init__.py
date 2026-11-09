@@ -7,8 +7,8 @@
 Heavy libraries are imported inside `load`, so the service starts (and its tests run) without them; `available()` says which are installed."""
 import importlib
 
-RUNTIMES = {'fake': 'stratamodels.runtimes.fake', 'insightface': 'stratamodels.runtimes.faces', 'faster-whisper': 'stratamodels.runtimes.whisper', 'sd-cpp': 'stratamodels.runtimes.sdcpp', 'open-clip': 'stratamodels.runtimes.clip', 'llama-server': 'stratamodels.runtimes.llama', 'recorded': 'stratamodels.runtimes.recorded'}
-NEEDS = {'fake': (), 'insightface': ('insightface', 'onnxruntime', 'cv2'), 'faster-whisper': ('faster_whisper', 'ctranslate2'), 'sd-cpp': ('huggingface_hub',), 'open-clip': ('open_clip', 'torch'), 'llama-server': ('huggingface_hub',), 'recorded': ()}
+RUNTIMES = {'fake': 'stratamodels.runtimes.fake', 'insightface': 'stratamodels.runtimes.faces', 'faster-whisper': 'stratamodels.runtimes.whisper', 'sd-cpp': 'stratamodels.runtimes.sdcpp', 'open-clip': 'stratamodels.runtimes.clip', 'face-kind': 'stratamodels.runtimes.facekind', 'llama-server': 'stratamodels.runtimes.llama', 'recorded': 'stratamodels.runtimes.recorded'}
+NEEDS = {'fake': (), 'insightface': ('insightface', 'onnxruntime', 'cv2'), 'faster-whisper': ('faster_whisper', 'ctranslate2'), 'sd-cpp': ('huggingface_hub',), 'open-clip': ('open_clip', 'torch'), 'face-kind': ('open_clip', 'torch'), 'llama-server': ('huggingface_hub',), 'recorded': ()}
 
 
 class RunError(ValueError):

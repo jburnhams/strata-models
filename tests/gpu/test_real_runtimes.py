@@ -100,3 +100,19 @@ def test_clip_embeddings_on_the_gpu(tmp_path):
         o = rt.run(h, dict(array=dict(path=str(arr), key='cam', bgr=True), resize='square', out=str(tmp_path / 'e.npz')))
         e = np.load(o['out'])['images']; assert o['images'] == 3 and e.shape == (3, 512) and float(e[0] @ img) > 0.8          # the same picture squeezed to a square thumbnail against centre-cropped: close, not equal
     finally: rt.unload(h)
+
+
+@pytest.mark.skipif(not IMAGE or bool(runtimes.available()['face-kind']) or bool(runtimes.available()['insightface']), reason='needs STRATAMODELS_TEST_IMAGE (a photo of a real person), insightface, open_clip and torch')
+def test_face_kind_on_the_gpu():
+    import dataclasses
+    faces = Registry.load().resolve('faces'); fr = runtimes.get(faces.runtime); fh = fr.load(faces, MODELS)
+    try: boxes = [f['bbox'] for f in fr.run(fh, dict(path=IMAGE, fields=['bbox']))['faces']]
+    finally: fr.unload(fh)
+    assert boxes
+    m = Registry.load().resolve('face-kind'); out, _ = measure(m, dict(path=IMAGE, boxes=boxes[:1]))
+    f = out['faces'][0]; assert abs(sum(f['probs'].values()) - 1) < 1e-3 and 'real' in f['probs']
+    if out['head'].startswith('trained'): assert f['real'] > 0.5 and f['kind'] == 'real'                    # the test picture is of a real person
+    zs = dataclasses.replace(m, options={**m.options, 'head': 'no-such-head.npz'}); rt = runtimes.get(zs.runtime); h = rt.load(zs, MODELS)
+    try: z = rt.run(h, dict(path=IMAGE, boxes=boxes[:1]))
+    finally: rt.unload(h)
+    assert z['head'] == 'zero-shot' and set(z['faces'][0]['probs']) == {'real', 'statue', 'picture', 'toy', 'animal'}
