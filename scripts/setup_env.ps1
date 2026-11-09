@@ -11,6 +11,6 @@ Say 'requirements'
 & $Py -m pip install -r (Join-Path $Root 'requirements.txt')
 $env:PYTHONPATH = Join-Path $Root 'src'
 Say 'checking'
-& $Py -m app doctor
+& $Py -m stratamodels doctor
 if (Get-Command npm -ErrorAction SilentlyContinue) { Push-Location (Join-Path $Root 'web'); npm install --silent; npm run build; Pop-Location; Write-Host 'web app built' }
 else { Write-Host 'npm not found: winget install OpenJS.NodeJS, then cd web; npm install; npm run build' }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the project environment from scratch (macOS or Linux, Python 3.11+).
-#   scripts/setup_env.sh
+#   scripts/setup_env.sh [--no-gpu]        (--no-gpu: skip the model runtimes, e.g. for a machine that only runs the tests)
 # Environment variables: VENV (default .venv), PYTHON (default python3)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,10 +12,11 @@ say "virtual environment: $VENV"
 "$VENV/bin/pip" install --upgrade pip >/dev/null
 say "requirements"
 "$VENV/bin/pip" install -r "$ROOT/requirements.txt"
+if [ "${1:-}" != "--no-gpu" ]; then say "model runtimes (requirements-gpu.txt)"; "$VENV/bin/pip" install -r "$ROOT/requirements-gpu.txt"; fi
 say "checking"
-APP_PYTHON="$VENV/bin/python" "$ROOT/app" doctor
+STRATAMODELS_PYTHON="$VENV/bin/python" "$ROOT/strata-models" doctor
 
-# ---- web app (React + Tailwind, built into src/app/server/static) -------------------------------------------------------------------
+# ---- web app (React + Tailwind, built into src/stratamodels/server/static) -------------------------------------------------------------------
 if command -v npm >/dev/null 2>&1; then
   ( cd "$ROOT/web" && npm install --silent && npm run build ) && echo "web app built"
 else

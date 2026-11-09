@@ -1,0 +1,7 @@
+#!/bin/bash
+# Launcher: runs the strata-models CLI with the project environment. Override the interpreter with STRATAMODELS_PYTHON.
+# The CUDA 12 libraries the runtimes load by name (cuBLAS, cuDNN, ... from the nvidia-* wheels in requirements-gpu.txt) are put on the library path.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="${STRATAMODELS_PYTHON:-$ROOT/.venv/bin/python}"; [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"; [ -x "$PY" ] || PY="python3"
+NV="$(ls -d "$ROOT"/.venv/lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')"
+exec env PYTHONPATH="$ROOT/src" PYTHONWARNINGS=ignore LD_LIBRARY_PATH="$NV${LD_LIBRARY_PATH:-}" "$PY" -m stratamodels "$@"

@@ -1,11 +1,11 @@
-"""OS helpers (app.oslib): file lock, process liveness, termination, priority, CLI command."""
+"""OS helpers (stratamodels.oslib): file lock, process liveness, termination, priority, CLI command."""
 import os, subprocess, sys, time, types
-from app import oslib
+from stratamodels import oslib
 
 
 def test_file_lock_excludes_other_processes(tmp_path):
     p = tmp_path / 'lock'
-    code = ("import sys, time; from app import oslib\n"
+    code = ("import sys, time; from stratamodels import oslib\n"
             "with open(sys.argv[1], 'a+') as f, oslib.file_lock(f):\n    print('locked', flush=True); time.sleep(0.5)\n")
     child = subprocess.Popen([sys.executable, '-c', code, str(p)], stdout=subprocess.PIPE, text=True, env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)))
     assert child.stdout.readline().strip() == 'locked'
@@ -124,4 +124,4 @@ def test_lower_priority_and_venv_python(monkeypatch):
 
 def test_cli_command_runs_the_cli():
     out = subprocess.run([*oslib.cli_command(), '--help'], capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0 and 'hello' in out.stdout, out.stderr[-300:]
+    assert out.returncode == 0 and 'serve' in out.stdout, out.stderr[-300:]

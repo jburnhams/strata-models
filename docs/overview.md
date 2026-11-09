@@ -1,24 +1,21 @@
 # Design brief
 
-## 1. Goal
+## Goal
+Several apps on omarchy (bright-horizons, strata-360, strata-stills, strata-listory, machine-bench) loaded their own copies of the same models in their own venvs, with nothing deciding who uses the GPU when (two processes at once once corrupted strata-stills' arena build). strata-models is the one owner of the GPU: it picks the best model for each role, keeps the loaded ones warm within a VRAM budget, runs every app's jobs through one queue, and lends the whole GPU to apps that run their own kernels.
 
-Provide a clean, minimal starting point for full-stack local-first Python + React applications with the exact build, test, coverage-gate and multi-OS CI setup proven in `strata-360` and `strata-stills`.
+The inventory and proposal behind this (2026-11-09) are in the project's doc "Local models on omarchy: inventory and proposal"; the stack research recommended llama.cpp behind llama-swap for LLMs and VLMs, which is the plan for the `vision-language` role (a runtime that starts llama-server, through the same queue).
 
-## 2. Architecture
+## Architecture
+- `registry.py` + `models.toml`: roles -> models (runtime, name, VRAM estimate, licence, which apps use it). Models whose runtime is not implemented are listed as "not served yet".
+- `scheduler.py`: one worker thread. Picks the next job (interactive first; loaded model first unless it would pass a lease or the oldest job has waited `max_skip_s`); makes room by freeing least recently used models; measures each model's real VRAM with nvidia-smi on load; grants leases (exclusive, heartbeat or expire).
+- `store.py` / `db/models.py`: one `jobs` table (runs and leases), the queue and the history. omarchy-db migrations, run at start.
+- `runtimes/`: `faces` (insightface), `whisper` (faster-whisper, audio decoded with ffmpeg), `fake` (tests).
+- `gpu.py`: nvidia-smi parsing, processes with their command lines, an hour of samples.
+- `server/app.py`: the API (see its docstring) and the built web app. Inputs are file paths.
+- `client/`: what apps import (stdlib only), with fallbacks so an app still works without the service.
+- `web/`: strata-react app (Overview, Models, Jobs, Usage, Settings).
 
-- **Python CLI and HTTP server (`src/app/`)**:
-  - `cli.py`: command-line interface (`doctor`, `hello`, `messages`, `set`, `serve`), invoked via `./app` (POSIX) or `app.cmd` (Windows) without needing to activate `.venv` manually.
-  - `server/app.py`: FastAPI application serving JSON endpoints under `/api/*` and the built React single-page app at `/` (falling back to `server/landing.html` when `web/` has not been built yet).
-  - `settings.py`: persistent user configuration in `~/.app/settings.json` (`APP_HOME` override) with atomic file writes.
-  - `oslib.py`: cross-platform primitives (file locks, process liveness, process tree termination, priority, CLI command builder) isolating POSIX vs Windows differences in one place.
-  - `greet.py`: minimal "Hello, world!" domain module with pure formatting functions and a file-locked JSON message log in the configured data directory.
-- **React frontend (`web/`)**:
-  - React 19, TypeScript, Vite 7, Tailwind CSS v4 (`@tailwindcss/vite`).
-  - Hash-based routing (`web/src/route.ts`) and a typed `fetch` client (`web/src/api.ts`) with `withBase()` so the same build works at `/` or behind a reverse proxy at `/<subpath>/`.
-  - `npm run build` outputs directly to `src/app/server/static/`.
-
-## 3. Principles
-
-- **Hermetic tests by default**: every test run gets an isolated home and data directory outside `tmp_path`, stripped environment overrides, and a socket guard that blocks outbound network calls.
-- **Two-tier test suites**: fast unit tests (`tests/unit/`, `web/tests/unit/`) and end-to-end integration tests (`tests/integration/`, `web/tests/integration/`), with clear file ownership so parallel agent branches never conflict.
-- **Ratcheting coverage floors**: Python unit coverage (`fail_under` in `pyproject.toml`) and web combined coverage (`web/coverage-floor.json`) only ratchet up.
+## Principles
+- Apps ask for roles; the service chooses models.
+- One process touches the GPU for models; others take a lease.
+- An app must keep working when the service is down: the client raises `Unavailable` (fall back to loading the model in-process) and `gpu_lease` yields None.

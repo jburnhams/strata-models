@@ -1,0 +1,155 @@
+# The model chosen for each role, and every model the service knows about.
+#
+# An app asks for a ROLE (`faces`, `transcribe`), never for a file: changing the best model for a role is one edit here.
+# A job may name another model, but only one listed under the same role.
+#
+# Model fields:
+#   runtime   how it is loaded: insightface, faster-whisper, fake (tests and demos). Any other value marks a model that is
+#             known (used by an app today) but not served here yet; the web app lists it with the apps that still load it themselves.
+#   name      the runtime's own name for it (model pack, Whisper size, Hugging Face id)
+#   vram_gb   estimate used to decide what fits; the service measures the real figure when it loads the model
+#   licence, source, used_by: for people reading the Models page
+#   options   passed to the runtime when it loads the model
+
+[roles.faces]
+description = "Find faces, their landmarks and an ArcFace identity embedding"
+model = "buffalo_l"
+
+[roles.transcribe]
+description = "Speech to text with word timings"
+model = "whisper-large-v3"
+
+[roles.transcribe-fast]
+description = "Speech to text where speed matters more than the last few words (lyrics, previews)"
+model = "whisper-small"
+
+[roles.vision-language]
+description = "Answer questions about pictures: scenes, objects, regions"
+model = "qwen3.5-9b-vl"
+
+[roles.sound-events]
+description = "Label sounds in audio windows (AudioSet classes)"
+model = "ast-audioset"
+
+[roles.speaker-embedding]
+description = "Voice embeddings to tell speakers apart"
+model = "ecapa-voxceleb"
+
+[roles.detect-people]
+description = "People and their pose keypoints"
+model = "yolo11s-pose"
+
+[roles.upscale]
+description = "Enlarge frames that hold too few pixels"
+model = "realplksr-nomos"
+
+[roles.denoise]
+description = "Learned denoise of developed raw pictures"
+model = "scunet-real"
+
+[roles.nsfw]
+description = "Flag pictures that should not be shown"
+model = "nudenet-320n"
+
+[models.buffalo_l]
+runtime = "insightface"
+name = "buffalo_l"
+roles = ["faces"]
+vram_gb = 1.0
+licence = "insightface models: non-commercial research only (fine for private use)"
+source = "https://github.com/deepinsight/insightface/tree/master/model_zoo"
+used_by = ["bright-horizons", "strata-360", "strata-stills"]
+options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"] }
+
+[models.whisper-large-v3]
+runtime = "faster-whisper"
+name = "large-v3"
+roles = ["transcribe"]
+vram_gb = 4.5
+licence = "MIT"
+source = "https://huggingface.co/Systran/faster-whisper-large-v3"
+used_by = ["strata-360"]
+options = { compute_type = "float16" }
+
+[models.whisper-large-v3-turbo]
+runtime = "faster-whisper"
+name = "large-v3-turbo"
+roles = ["transcribe", "transcribe-fast"]
+vram_gb = 2.5
+licence = "MIT"
+source = "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+used_by = ["strata-360", "machine-bench"]
+options = { compute_type = "float16" }
+
+[models.whisper-small]
+runtime = "faster-whisper"
+name = "small"
+roles = ["transcribe-fast"]
+vram_gb = 1.0
+licence = "MIT"
+source = "https://huggingface.co/Systran/faster-whisper-small"
+used_by = ["strata-360"]
+options = { compute_type = "float16" }
+
+[models."qwen3.5-9b-vl"]
+runtime = "llama-server"
+name = "unsloth/Qwen3.5-9B-GGUF:Q4_K_M"
+roles = ["vision-language"]
+vram_gb = 7.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
+used_by = ["strata-360"]
+
+[models.ast-audioset]
+runtime = "transformers"
+name = "MIT/ast-finetuned-audioset-10-10-0.4593"
+roles = ["sound-events"]
+vram_gb = 0.5
+licence = "BSD-3-Clause"
+source = "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593"
+used_by = ["strata-360"]
+
+[models.ecapa-voxceleb]
+runtime = "speechbrain"
+name = "speechbrain/spkrec-ecapa-voxceleb"
+roles = ["speaker-embedding"]
+vram_gb = 0.3
+licence = "Apache-2.0"
+source = "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb"
+used_by = ["strata-360"]
+
+[models.yolo11s-pose]
+runtime = "ultralytics"
+name = "yolo11s-pose.pt"
+roles = ["detect-people"]
+vram_gb = 0.5
+licence = "AGPL-3.0"
+source = "https://docs.ultralytics.com/tasks/pose/"
+used_by = ["strata-360"]
+
+[models.realplksr-nomos]
+runtime = "spandrel"
+name = "4xNomosWebPhoto_RealPLKSR.pth"
+roles = ["upscale"]
+vram_gb = 1.5
+licence = "CC-BY-4.0 (Phhofm)"
+source = "https://github.com/Phhofm/models/releases/tag/4xNomosWebPhoto_RealPLKSR"
+used_by = ["strata-360"]
+
+[models.scunet-real]
+runtime = "spandrel"
+name = "scunet_color_real_psnr.pth"
+roles = ["denoise"]
+vram_gb = 1.5
+licence = "Apache-2.0"
+source = "https://github.com/cszn/KAIR/releases/tag/v1.0"
+used_by = ["strata-stills"]
+
+[models.nudenet-320n]
+runtime = "nudenet"
+name = "320n"
+roles = ["nsfw"]
+vram_gb = 0.3
+licence = "AGPL-3.0"
+source = "https://github.com/notAI-tech/NudeNet"
+used_by = ["strata-stills"]

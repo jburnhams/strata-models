@@ -1,5 +1,5 @@
 {
-  "name": "python-app-template-web",
+  "name": "strata-models-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -15,8 +15,12 @@
     "test:coverage:gate": "vitest run --coverage --config vitest.gate.config.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
+    "lucide-react": "^1.70.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router": "^8.5.1",
+    "strata-react": "^0.1.16"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

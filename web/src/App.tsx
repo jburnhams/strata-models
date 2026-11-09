@@ -1,25 +1,35 @@
-import { useEffect, useState } from 'react'
+// strata-models: one question per area. Overview: is the GPU free, and who is using it? Models: which model serves each role, and is it loaded?
+// Jobs: what ran, for whom, how long, and why did it fail? Usage: which apps use the GPU most? Settings: where weights live and how much VRAM to keep free.
+import { Navigate, Route, Routes } from 'react-router'
+import { AppShell, useLoad } from 'strata-react'
+import { Activity, Boxes, Cpu, History, Settings, Gauge } from 'lucide-react'
 import { api } from './api'
-import { useRoute, href } from './route'
-import GreetingPage from './components/GreetingPage'
+import OverviewPage from './components/OverviewPage'
+import ModelsPage from './components/ModelsPage'
+import JobsPage from './components/JobsPage'
+import UsagePage from './components/UsagePage'
 import SettingsPage from './components/SettingsPage'
 
+const nav = [
+  { to: '/', label: 'Overview', icon: Gauge, end: true },
+  { to: '/models', label: 'Models', icon: Boxes },
+  { to: '/jobs', label: 'Jobs', icon: History },
+  { to: '/usage', label: 'Usage', icon: Activity },
+  { to: '/settings', label: 'Settings', icon: Settings },
+]
+
 export default function App() {
-  const r = useRoute()
-  const [version, setVersion] = useState<string | null>(null)
-  useEffect(() => { api.health().then(h => setVersion(h.version)).catch(() => {}) }, [])
+  const health = useLoad({ queryKey: ['health'], queryFn: api.health, staleTime: Infinity })
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <header className="mb-5 flex items-baseline gap-3">
-        <a href={href.greeting()} className="text-xl font-semibold">python-app-template</a>
-        {version && <span className="text-xs text-stone-500 font-mono">v{version}</span>}
-        <nav className="ml-auto flex gap-4 text-sm">
-          <a href={href.greeting()} className="text-blue-600 dark:text-blue-400 hover:underline">Greetings</a>
-          <a href={href.settings()} className="text-blue-600 dark:text-blue-400 hover:underline">Settings</a>
-        </nav>
-      </header>
-      {r.page === 'greeting' && <GreetingPage />}
-      {r.page === 'settings' && <SettingsPage />}
-    </div>
+    <AppShell product={<span className="inline-flex items-center gap-2"><Cpu aria-hidden className="size-5" />Strata Models</span>} nav={nav} topBar={health.status === 'ready' ? <span className="type-caption text-muted-foreground font-mono">v{health.data.version}</span> : undefined}>
+      <Routes>
+        <Route path="/" element={<OverviewPage />} />
+        <Route path="/models" element={<ModelsPage />} />
+        <Route path="/jobs" element={<JobsPage />} />
+        <Route path="/usage" element={<UsagePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AppShell>
   )
 }

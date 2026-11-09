@@ -3,6 +3,8 @@ fastapi
 uvicorn
 pydantic
 httpx
+sqlalchemy>=2
+omarchy-db @ git+https://github.com/jburnhams/database#subdirectory=python
 pytest>=8
 pytest-cov>=5
 ruff

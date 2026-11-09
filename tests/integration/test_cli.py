@@ -1,30 +1,20 @@
 import json
-from app import settings
 
 
-def test_doctor_reports_the_environment(cli):
+def test_doctor_and_registry(cli):
     r = cli('doctor', check=False)
-    assert 'app 0.1.0' in r.stdout and 'fastapi' in r.stdout and r.code == 0
+    assert 'strata-models 0.1.0' in r.stdout and 'runtime fake' in r.stdout
+    roles = {x['key']: x['model'] for x in json.loads(cli('registry', '--json').stdout)['roles']}
+    assert roles['faces'] == 'buffalo_l' and roles['transcribe'] == 'whisper-large-v3'
 
 
-def test_hello_and_message_log_from_the_command_line(cli):
-    assert cli('hello', 'World').stdout.strip() == 'Hello, World!'
-    rec = json.loads(cli('hello', 'Grace', '--greeting', 'Welcome', '--save', '--json').stdout)
-    assert rec['message'] == 'Welcome, Grace!' and rec['id'] == 1
-    msgs = json.loads(cli('messages', '--json').stdout)
-    assert len(msgs) == 1 and msgs[0]['name'] == 'Grace'
-    assert 'cleared 1 message(s)' in cli('messages', '--clear').stdout
-    assert json.loads(cli('messages', '--json').stdout) == []
+def test_status_and_jobs_read_a_running_service(cli, service):
+    import strata_models_client as sm
+    assert sm.run('echo', dict(n=1), app='cli-test') == dict(model='echo-small', echo=dict(n=1))
+    assert 'echo-small' in cli('status', '--url', service).stdout
+    assert 'cli-test' in cli('jobs', '--url', service).stdout
 
 
-def test_settings_are_viewed_and_updated_from_the_command_line(cli, tmp_path, monkeypatch):
-    monkeypatch.delenv('APP_DATA', raising=False)
-    elsewhere = tmp_path / 'elsewhere'
-    assert str(elsewhere) in cli('set', 'data_dir', elsewhere).stdout and settings.data_dir() == str(elsewhere.resolve())
-    assert 'data_dir' in cli('set', 'data_dir', 'default').stdout
+def test_settings_from_the_command_line(cli):
+    assert '= 3.0' in cli('set', 'vram_reserve_gb', '3').stdout and '= 1.0' in cli('set', 'vram_reserve_gb', 'default').stdout
     assert cli('set', 'nope', 'x', check=False).code != 0
-
-
-def test_the_command_line_runs_as_a_real_process(cli_subprocess):
-    assert 'app 0.1.0' in cli_subprocess('doctor').stdout
-    assert cli_subprocess('hello', 'Subprocess').stdout.strip() == 'Hello, Subprocess!'
