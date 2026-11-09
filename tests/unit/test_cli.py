@@ -69,7 +69,7 @@ def test_status_jobs_and_registry_read_the_service(capsys, monkeypatch):
 
 def test_set_and_serve(capsys, monkeypatch):
     assert cli.main(["set", "vram_reserve_gb"]) == 0 and "vram_reserve_gb = 1.0" in capsys.readouterr().out
-    assert cli.main(["set", "vram_reserve_gb", "2"]) == 0 and "= 2" in capsys.readouterr().out
+    assert cli.main(["set", "vram_reserve_gb", "2"]) == 0 and "= 2.0" in capsys.readouterr().out
     assert cli.main(["set", "vram_reserve_gb", "default"]) == 0 and "= 1.0" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="unknown setting"):
         cli.main(["set", "bad", "x"])

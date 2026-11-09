@@ -29,8 +29,7 @@ def _reserve(v: object) -> float:
 
 
 def _reserve_text(v: str) -> str:
-    _reserve(v)
-    return v.strip()
+    return str(_reserve(v))  # stored as a float ("3" -> "3.0"), as before
 
 
 SETTINGS = Settings(
