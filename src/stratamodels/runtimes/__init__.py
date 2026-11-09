@@ -11,7 +11,6 @@ import importlib
 RUNTIMES = {
     "fake": "stratamodels.runtimes.fake",
     "insightface": "stratamodels.runtimes.faces",
-    "faster-whisper": "stratamodels.runtimes.whisper",
     "sd-cpp": "stratamodels.runtimes.sdcpp",
     "open-clip": "stratamodels.runtimes.clip",
     "face-kind": "stratamodels.runtimes.facekind",
@@ -22,7 +21,6 @@ RUNTIMES = {
 NEEDS = {
     "fake": (),
     "insightface": ("insightface", "onnxruntime", "cv2"),
-    "faster-whisper": ("faster_whisper", "ctranslate2"),
     "sd-cpp": ("huggingface_hub",),
     "open-clip": ("open_clip", "torch"),
     "face-kind": ("open_clip", "torch"),
