@@ -102,3 +102,12 @@ def test_pairs_with_the_same_output_are_not_offered(client, scheduler):
         assert not same(p['x'], p['y']); seen.add(p['item_id'])
         client.post('/api/evals/fake-asr/judgments', json=dict(token=p['token'], winner='tie'))
     assert len(seen) > 20                                                               # unjudged pairs come first, so it moves through the items
+
+
+def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup):
+    import shutil, subprocess
+    if not shutil.which('ffmpeg'): return
+    from stratamodels.evals import core as C
+    wav = tmp_path / 'long.wav'; subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=10', str(wav)], check=True)
+    C.write_dataset('speech', [dict(id='p', input=dict(path=str(wav), clip=[2.0, 3.0], say='x'), reference=dict(text='x'))])
+    r = client.get('/api/evals/fake-asr/media/p'); assert r.headers['content-type'] == 'audio/wav' and len(r.content) < wav.stat().st_size / 5
