@@ -64,3 +64,5 @@ class EvalJudgment(Base):
     rater: Mapped[str] = mapped_column(sa.String(64))
     at: Mapped[float]
     note: Mapped[str | None] = mapped_column(sa.String(500), default=None)
+    a_key: Mapped[str | None] = mapped_column(sa.String(64), default=None)               # the result keys of the two outputs judged: a judgment counts only
+    b_key: Mapped[str | None] = mapped_column(sa.String(64), default=None)               # while they are still the candidates' outputs

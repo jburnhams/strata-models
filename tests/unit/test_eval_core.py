@@ -95,3 +95,18 @@ def test_guards_hold_against_a_zero_baseline_and_duplicates_run_once(setup, sche
         r = ses.query(EvalResult).filter(EvalResult.model == 'big').first(); r.error = 'boom'; r.output = None; ses.commit()
     d = C.analyse(s, engine)['decision']['per_candidate']
     assert d['b']['verdict'] == 'reject' and 'against 0' in d['b']['why']
+
+
+def test_a_concurrent_run_that_stored_the_same_output_first_wins(setup, scheduler, engine, monkeypatch):
+    from stratamodels.db.models import EvalResult
+    s = C.load_spec('fake-asr'); ds = C.load_dataset('speech'); c = s.candidate('base'); it = ds.items[0]; k = C.result_key(s, c, it)
+    mk = lambda out: EvalResult(key=k, dataset='speech', item_id=it['id'], role='echo', model='small', created_at=1.0, output=out)
+    C.save(engine, [mk(dict(first=True))]); C.save(engine, [mk(dict(second=True))])
+    assert C.cached(engine, [k])[k].output == dict(first=True)
+    real = C.select; calls = []
+    def blind(*a, **kw):                                                              # the check finds nothing (the other run commits between check and commit)
+        calls.append(1); q = real(*a, **kw); return q.where(EvalResult.id < 0) if len(calls) == 1 else q
+    monkeypatch.setattr(C, 'select', blind)
+    k2 = C.result_key(s, c, ds.items[1]); other = EvalResult(key=k2, dataset='speech', item_id=ds.items[1]['id'], role='echo', model='small', created_at=1.0, output=dict(ok=1))
+    C.save(engine, [mk(dict(third=True)), other])
+    monkeypatch.undo(); got = C.cached(engine, [k, k2]); assert got[k].output == dict(first=True) and got[k2].output == dict(ok=1)

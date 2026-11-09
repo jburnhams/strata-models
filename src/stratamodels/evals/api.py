@@ -106,7 +106,7 @@ def mount(app, scheduler):
         if not ready: return dict(pair=None)
         i = random.choice(ready); ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]; a, b = random.sample(ok, 2); it = ds.items[i]
         return dict(pair=dict(item_id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
-                              x=outs[a][i][0], y=outs[b][i][0], token=_sign(dict(e=name, i=it['id'], x=a, y=b))))
+                              x=outs[a][i][0], y=outs[b][i][0], token=_sign(dict(e=name, i=it['id'], x=a, y=b, xk=C.result_key(s, s.candidate(a), it), yk=C.result_key(s, s.candidate(b), it)))))
 
     @app.post('/api/evals/{name}/judgments', status_code=201)
     def post_judgment(name: str, b: JudgmentIn):
@@ -115,7 +115,7 @@ def mount(app, scheduler):
         if b.winner not in ('x', 'y', 'tie'): raise HTTPException(400, 'winner is x, y or tie')
         win = d['x'] if b.winner == 'x' else d['y'] if b.winner == 'y' else 'tie'
         with C.session(engine()) as ses:
-            ses.add(EvalJudgment(experiment=name, item_id=d['i'], a=d['x'], b=d['y'], winner=win, rater=b.rater[:64], at=time.time(), note=(b.note or None) and b.note[:500])); ses.commit()
+            ses.add(EvalJudgment(experiment=name, item_id=d['i'], a=d['x'], b=d['y'], winner=win, rater=b.rater[:64], at=time.time(), note=(b.note or None) and b.note[:500], a_key=d.get('xk'), b_key=d.get('yk'))); ses.commit()
         return dict(ok=True, x=d['x'], y=d['y'], winner=win)
 
     @app.get('/api/evals/{name}/media/{item_id}')

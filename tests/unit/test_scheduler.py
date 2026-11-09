@@ -240,3 +240,13 @@ def test_fits_without_a_gpu_or_for_an_unknown_model(scheduler):
     scheduler.lease('a', vram_gb=2); scheduler.step()
     j = scheduler.submit('echo', {}, 'x'); j['model'] = 'gone'; assert scheduler._fits(j)
     scheduler.probe.present = False; assert scheduler._fits(dict(j, model='big'))
+
+
+def test_a_queued_variant_job_survives_a_restart(scheduler):
+    j = scheduler.submit('echo', dict(x=1), 'evals', model='small', options=dict(tweak=2))
+    assert j['params'] == dict(x=1, __options__=dict(tweak=2)) and '~' in j['model']
+    del scheduler.registry.models[j['model']]                                        # what a fresh registry looks like after a restart
+    done = scheduler.step()
+    assert done['status'] == 'done' and done['result']['echo'] == dict(x=1) and j['model'] in scheduler.registry.models
+    k = scheduler.submit('echo', {}, 'evals', model='small', options=dict(tweak=3)); del scheduler.registry.models[k['model']]
+    del scheduler.registry.models['small']; assert 'no longer served' in scheduler.step()['error']

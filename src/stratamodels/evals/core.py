@@ -213,14 +213,25 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     for i in range(0, len(todo), batch):
         chunk = todo[i:i + batch]; ids = [executor.submit(spec.role, job_params(spec, c, it), c.model, c.options) for c, it, _ in chunk]
         done = [(c, it, k, executor.wait(jid)) for (c, it, k), jid in zip(chunk, ids)]       # wait outside the lock: the worker needs the store meanwhile
-        with session(engine) as s:
-            for c, it, k, j in done:
-                failed += j['status'] != 'done'
-                s.add(EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=j.get('result') if j['status'] == 'done' else None,
-                                 error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=j.get('run_s'), load_s=j.get('load_s'), job_id=j.get('id')))
-            s.commit()
+        rows = [EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=j.get('result') if j['status'] == 'done' else None,
+                           error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=j.get('run_s'), load_s=j.get('load_s'), job_id=j.get('id')) for c, it, k, j in done]
+        failed += sum(1 for *_, j in done if j['status'] != 'done'); save(engine, rows)
         log(f'  {min(i + batch, len(todo))} of {len(todo)} run')
     return dict(ran=len(todo), cached=total - len(todo), failed=failed)
+
+
+def save(engine, rows):
+    """Store outputs; one another run stored meanwhile (two experiments sharing a candidate, run at once) is kept and this copy dropped."""
+    from sqlalchemy.exc import IntegrityError
+    with session(engine) as s:
+        have = {r.key for r in s.scalars(select(EvalResult).where(EvalResult.key.in_([r.key for r in rows])))}
+        s.add_all([r for r in rows if r.key not in have])
+        try: s.commit(); return
+        except IntegrityError: s.rollback()
+        for r in rows:                                                                      # the race was lost between the check and the commit: row by row
+            s.add(r)
+            try: s.commit()
+            except IntegrityError: s.rollback()
 
 
 def forget(spec, engine, candidate=None):
@@ -261,8 +272,12 @@ def outputs_for(spec, engine, dataset=None):
     return ds, out, runs
 
 
-def judgments(engine, experiment):
-    with session(engine) as s: return [(j.a, j.b, j.winner) for j in s.scalars(select(EvalJudgment).where(EvalJudgment.experiment == experiment))]
+def judgments(engine, experiment, current=None):
+    """(a, b, winner) of the experiment's judgments; with `current` ({(candidate, item): result key}) only those of outputs that are still the
+    candidates' (a changed model, params or dataset, or a forgotten and regenerated output, makes a new key, and the old judgments stop counting)."""
+    with session(engine) as s: rows = list(s.scalars(select(EvalJudgment).where(EvalJudgment.experiment == experiment)))
+    if current is None: return [(j.a, j.b, j.winner) for j in rows]
+    return [(j.a, j.b, j.winner) for j in rows if j.a_key and j.b_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key]
 
 
 def analyse(spec, engine, dataset=None, seed=None):
@@ -287,7 +302,8 @@ def analyse(spec, engine, dataset=None, seed=None):
         pvals.append((n, res['comparisons'][n][spec.primary]['p']))
     for (n, _), adj in zip(pvals, S.holm([p for _, p in pvals])): res['comparisons'][n][spec.primary]['p_holm'] = adj
     res['decision'] = decide(spec, res, items, oo, base)
-    j = judgments(engine, spec.name)
+    current = {(c.name, it['id']): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
+    j = judgments(engine, spec.name, current)
     if j: res['judgments'] = dict(n=len(j), strength={k: list(v) for k, v in S.bradley_terry_ci(j, names, b=500, seed=seed).items()})
     return res
 

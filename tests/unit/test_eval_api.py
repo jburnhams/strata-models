@@ -76,3 +76,15 @@ def test_no_observations_come_back_as_null_not_nan(client):
     assert finite(dict(a=float('nan'), b=[1.0, float('inf')], c=(2, 'x'))) == dict(a=None, b=[1.0, None], c=[2, 'x'])
     a = client.get('/api/evals/fake-asr').json()                                                             # nothing run yet: every value is null, and it is valid JSON
     assert a['dataset']['compared'] == 0
+
+
+def test_judgments_count_only_while_their_outputs_are_current(client, scheduler):
+    from stratamodels.evals import core as C
+    client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
+    for _ in range(4):
+        p = client.get('/api/evals/fake-asr/pair').json()['pair']; client.post('/api/evals/fake-asr/judgments', json=dict(token=p['token'], winner='x'))
+    assert client.get('/api/evals/fake-asr').json()['judgments']['n'] == 4
+    s = C.load_spec('fake-asr'); C.forget(s, scheduler.store.engine)                  # outputs regenerated: new keys? same keys (same params), so still counted
+    assert len(C.judgments(scheduler.store.engine, 'fake-asr')) == 4
+    keys = {(c.name, it['id']): 'changed' for c in s.candidates for it in C.load_dataset('speech').items}
+    assert C.judgments(scheduler.store.engine, 'fake-asr', keys) == []

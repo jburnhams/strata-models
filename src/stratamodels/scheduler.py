@@ -18,6 +18,7 @@ from stratamodels import gpu, runtimes
 from stratamodels.store import FINISHED
 
 PRIORITY = {'interactive': 0, 'batch': 1}
+OPTIONS = '__options__'          # a job's params key holding the load options of a model variant (never passed to the runtime)
 MB = 1024.0
 
 
@@ -52,8 +53,9 @@ class Scheduler:
         """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
         for an unknown role or a model that does not serve it."""
         m = self.registry.resolve(role, model)
-        if options: m = self.registry.variant(m.key, options)
-        j = self.store.add(kind='run', role=role, model=m.key, app=str(app or 'unknown')[:64], priority=self._priority(priority), params=dict(params or {})); self._notify(); return j
+        params = dict(params or {})
+        if options: m = self.registry.variant(m.key, options); params[OPTIONS] = dict(options)       # kept with the job, so a restart can rebuild the variant
+        j = self.store.add(kind='run', role=role, model=m.key, app=str(app or 'unknown')[:64], priority=self._priority(priority), params=params); self._notify(); return j
 
     def lease(self, app, vram_gb=None, ttl_s=120.0, priority='batch', note=None, pid=None):
         """Queue a request for `vram_gb` of the GPU (None: all of it, exclusively); returns its row (status queued, then running once granted).
@@ -226,11 +228,15 @@ class Scheduler:
         j = self.store.claim(j['id'], status='running', started_at=self.clock())
         if j is None: return None                                                                   # withdrawn after the queue was read
         with self.cv: self.current = j
+        params = dict(j['params'] or {}); options = params.pop(OPTIONS, None)
         model = self.registry.models.get(j['model']); load_s = 0.0
+        if model is None and options and '~' in (j['model'] or ''):                              # a variant from before a restart: rebuild it
+            try: model = self.registry.variant(j['model'].split('~')[0], options)
+            except Exception: model = None
         try:
             if model is None or not model.served: raise runtimes.RunError(f'model {j["model"]!r} is no longer served')
             r, load_s = self._ensure(model); t0 = time.perf_counter()
-            try: result = self.get_runtime(model.runtime).run(r.handle, j['params'] or {})
+            try: result = self.get_runtime(model.runtime).run(r.handle, params)
             except runtimes.RunError: raise
             except Exception: self._unload(model.key, 'it failed while running'); raise           # a model that threw (out of memory, a CUDA error) is reloaded fresh next time
             finally: r.last_used = self.clock(); r.jobs += 1
