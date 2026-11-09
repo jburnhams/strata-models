@@ -43,9 +43,11 @@ class Scheduler:
     def _notify(self):
         with self.cv: self.cv.notify_all()
 
-    def submit(self, role, params, app, priority='batch', model=None):
-        """Queue a model job; returns its row. Raises RegistryError for an unknown role or a model that does not serve it."""
+    def submit(self, role, params, app, priority='batch', model=None, options=None):
+        """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
+        for an unknown role or a model that does not serve it."""
         m = self.registry.resolve(role, model)
+        if options: m = self.registry.variant(m.key, options)
         j = self.store.add(kind='run', role=role, model=m.key, app=str(app or 'unknown')[:64], priority=self._priority(priority), params=dict(params or {})); self._notify(); return j
 
     def lease(self, app, vram_gb=None, ttl_s=120.0, priority='batch', note=None):

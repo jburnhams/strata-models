@@ -44,9 +44,16 @@ def available(timeout=2.0):
     except (Unavailable, JobFailed): return False
 
 
-def submit(role, params, app, priority='batch', model=None):
-    """Queue a job and return its row at once (poll with `wait`)."""
-    return _call('POST', '/api/jobs', dict(role=role, params=params or {}, app=app, priority=priority, model=model))
+def submit(role, params, app, priority='batch', model=None, options=None):
+    """Queue a job and return its row at once (poll with `wait`). `options` changes the model's load options (a variant loaded apart: evals)."""
+    return _call('POST', '/api/jobs', dict(role=role, params=params or {}, app=app, priority=priority, model=model, options=options))
+
+
+def wait_job(job_id):
+    """The job's row once it has finished (done, failed or cancelled), with result, error and timings; never raises for a failed job."""
+    while True:
+        j = _call('GET', f'/api/jobs/{int(job_id)}?wait={POLL_S}')
+        if j['status'] not in ('queued', 'running'): return j
 
 
 def wait(job_id, timeout=None):

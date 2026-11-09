@@ -19,6 +19,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   DELETE /api/leases/{id}                give it back
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
   GET/PUT /api/settings
+  /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
 The page at / serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html`."""
 import os, time
 
@@ -42,6 +43,7 @@ class JobIn(BaseModel):
     app: str = 'unknown'
     priority: str = 'batch'
     model: str | None = None
+    options: dict | None = None
 
 
 class RunIn(BaseModel):
@@ -105,7 +107,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     def post_model(key: str, action: str): s.request(action, key); return dict(ok=True)
 
     @app.post('/api/jobs', status_code=201)
-    def post_job(b: JobIn): return s.submit(b.role, b.params, b.app, b.priority, b.model)
+    def post_job(b: JobIn): return s.submit(b.role, b.params, b.app, b.priority, b.model, b.options)
 
     @app.post('/api/run/{role}')
     def post_run(role: str, b: RunIn):
@@ -164,6 +166,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         if 'vram_reserve_gb' in changes: s.reserve_mb = settings.vram_reserve_gb() * 1024.0
         if 'models_dir' in changes: s.models_dir = settings.models_dir()
         return settings.all_settings()
+
+    from stratamodels.evals import api as evals_api
+    evals_api.mount(app, s)
 
     if os.path.isdir(os.path.join(STATIC, 'assets')): app.mount('/assets', StaticFiles(directory=os.path.join(STATIC, 'assets')), name='assets')
     return app

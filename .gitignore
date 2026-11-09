@@ -14,3 +14,4 @@ src/app/server/static/
 web/coverage/
 data/
 out/
+*.egg-info/

@@ -29,6 +29,7 @@ def locked(fn):
 class Store:
     def __init__(self, engine, clock=time.time):
         self.engine, self.clock, self.lock = engine, clock, threading.RLock()
+        engine.stratamodels_lock = self.lock               # evals open their own sessions on this engine: they take the same lock (see evals.core.session)
 
     @classmethod
     def connect(cls, url_or_app='stratamodels', migrate=True):

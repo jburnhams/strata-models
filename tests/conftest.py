@@ -101,3 +101,42 @@ def scheduler(registry, clock, tmp_path):
     s = Scheduler(memory_store(clock), registry, str(tmp_path / 'models'), probe=FakeGpu(registry), reserve_gb=1.0, clock=clock)
     yield s
     fake.LOADED.clear()
+
+
+TEXT = 'the quick brown fox jumps over the lazy dog again and again'
+
+
+@pytest.fixture
+def setup(scheduler, tmp_path, monkeypatch):
+    """A dataset of 40 items, and a spec with a baseline that drops every 4th word, a better candidate (every 12th), and the same model again."""
+    from stratamodels.evals import core as C
+    monkeypatch.setattr(C, 'REPO_SPECS', str(tmp_path / 'none'))
+    items = [dict(id=f'u{i}', input=dict(say=TEXT + f' item{i}'), reference=dict(text=TEXT + f' item{i}'), tags=dict(speaker=str(i % 4))) for i in range(40)]
+    ds = C.write_dataset('speech', items, description='forty fake utterances\nfor tests')
+    specs = os.path.join(os.environ['STRATAMODELS_DATA'], 'evals', 'specs'); os.makedirs(specs, exist_ok=True)
+    open(os.path.join(specs, 'fake-asr.toml'), 'w').write('''name = "fake-asr"
+question = "Which fake transcriber should serve echo?"
+role = "echo"
+dataset = "speech"
+metrics = ["wer", "cer", "latency_s", "failed"]
+judge = true
+[decision]
+primary = "wer"
+baseline = "base"
+min_effect = 0.02
+guards = { latency_s = 1000.0 }
+[[candidates]]
+name = "base"
+model = "small"
+params = { drop = 4 }
+[[candidates]]
+name = "better"
+model = "big"
+params = { drop = 12 }
+[[candidates]]
+name = "same"
+model = "small"
+params = { drop = 4 }
+options = { tweak = 1 }
+''')
+    return ds
