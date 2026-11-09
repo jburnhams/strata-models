@@ -3,6 +3,6 @@
 # The CUDA 12 libraries the runtimes load by name (cuBLAS, cuDNN, ... from the nvidia-* wheels in the `gpu` group in pyproject.toml) are put on the library path.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${STRATAMODELS_PYTHON:-$ROOT/.venv/bin/python}"; [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"; [ -x "$PY" ] || PY="python3"
-# (not nvidia/cu13: torch's own CUDA 13 libraries, which it finds itself; on the path they would shadow the CUDA 12 cuDNN that onnxruntime and CTranslate2 need)
-NV="$(ls -d "$ROOT"/.venv/lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | grep -v '/cu13/' | tr '\n' ':')"
+# The venv is CUDA 13 throughout (torch, onnxruntime); models that need CUDA 12 (Whisper) run in worker venvs of their own with their own libraries.
+NV="$(ls -d "$ROOT"/.venv/lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')"
 exec env PYTHONPATH="$ROOT/src" PYTHONWARNINGS=ignore LD_LIBRARY_PATH="$NV${LD_LIBRARY_PATH:-}" "$PY" -m stratamodels "$@"

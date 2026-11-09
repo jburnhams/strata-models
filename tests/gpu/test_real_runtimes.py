@@ -56,7 +56,8 @@ def test_faces_on_the_gpu():
 
 
 @pytest.mark.skipif(
-    not AUDIO or runtimes.available()["faster-whisper"], reason="needs STRATAMODELS_TEST_AUDIO and faster-whisper"
+    not AUDIO or not os.path.isdir(os.path.join(MODELS, "venvs", "whisper")),
+    reason="needs STRATAMODELS_TEST_AUDIO and the whisper worker venv (scripts/setup_worker_venv.sh whisper)",
 )
 @pytest.mark.parametrize("role", ["transcribe", "transcribe-fast"])
 def test_whisper_on_the_gpu(role):
@@ -112,7 +113,8 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
 
 
 @pytest.mark.skipif(
-    not AUDIO or runtimes.available()["faster-whisper"], reason="needs STRATAMODELS_TEST_AUDIO and faster-whisper"
+    not AUDIO or not os.path.isdir(os.path.join(MODELS, "venvs", "whisper")),
+    reason="needs STRATAMODELS_TEST_AUDIO and the whisper worker venv (scripts/setup_worker_venv.sh whisper)",
 )
 def test_whisper_detects_the_language_alone():
     m = Registry.load().resolve("transcribe-fast")
@@ -121,6 +123,14 @@ def test_whisper_detects_the_language_alone():
     try:
         r = rt.run(h, dict(path=AUDIO, detect_language_only=True))
         assert r["language"] == "en" and r["all_language_probs"]["en"] > 0.5 and "segments" not in r
+        c = rt.run(
+            h, dict(path=AUDIO, language="en", clip=[3.0, 8.0])
+        )  # only that part is heard; times stay the file's
+        assert (
+            c["segments"]
+            and c["segments"][0]["start"] >= 2.9
+            and "country" in " ".join(x["text"] for x in c["segments"]).lower()
+        )
         with pytest.raises(runtimes.RunError, match="unknown params"):
             rt.run(h, dict(path=AUDIO, colour="red"))
     finally:

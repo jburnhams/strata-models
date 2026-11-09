@@ -4,7 +4,7 @@
 # A job may name another model, but only one listed under the same role.
 #
 # Model fields:
-#   runtime   how it is loaded: insightface, faster-whisper, fake (tests and demos). Any other value marks a model that is
+#   runtime   how it is loaded: insightface, venv-worker (a model in a venv of its own: Whisper, TTS), fake (tests and demos). Any other value marks a model that is
 #             known (used by an app today) but not served here yet; the web app lists it with the apps that still load it themselves.
 #   name      the runtime's own name for it (model pack, Whisper size, Hugging Face id)
 #   vram_gb   estimate used to decide what fits; the service measures the real figure when it loads the model
@@ -66,34 +66,34 @@ used_by = ["bright-horizons", "strata-360", "strata-stills"]
 options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"] }
 
 [models.whisper-large-v3]
-runtime = "faster-whisper"
+runtime = "venv-worker"
 name = "large-v3"
 roles = ["transcribe"]
 vram_gb = 4.5
 licence = "MIT"
 source = "https://huggingface.co/Systran/faster-whisper-large-v3"
 used_by = ["strata-360"]
-options = { compute_type = "float16" }
+options = { worker = "whisper", venv = "whisper", compute_type = "float16" }
 
 [models.whisper-large-v3-turbo]
-runtime = "faster-whisper"
+runtime = "venv-worker"
 name = "large-v3-turbo"
 roles = ["transcribe", "transcribe-fast"]
 vram_gb = 2.5
 licence = "MIT"
 source = "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo"
 used_by = ["strata-360", "machine-bench"]
-options = { compute_type = "float16" }
+options = { worker = "whisper", venv = "whisper", compute_type = "float16" }
 
 [models.whisper-small]
-runtime = "faster-whisper"
+runtime = "venv-worker"
 name = "small"
 roles = ["transcribe-fast", "transcribe"]
 vram_gb = 1.0
 licence = "MIT"
 source = "https://huggingface.co/Systran/faster-whisper-small"
 used_by = ["strata-360"]
-options = { compute_type = "float16" }
+options = { worker = "whisper", venv = "whisper", compute_type = "float16" }
 
 [models."qwen3.5-9b-vl"]
 runtime = "llama-server"

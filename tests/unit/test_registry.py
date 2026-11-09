@@ -9,7 +9,7 @@ from stratamodels.registry import Registry, RegistryError
 def test_the_builtin_registry_names_a_model_for_every_role():
     r = Registry.load()
     assert r.resolve("faces").key == "buffalo_l" and r.resolve("transcribe").key == "whisper-large-v3-turbo"
-    assert r.resolve("transcribe-fast", "whisper-large-v3-turbo").runtime == "faster-whisper"
+    assert r.resolve("transcribe-fast", "whisper-large-v3-turbo").runtime == "venv-worker"
     assert (
         r.models["qwen3.5-9b-vl"].served
         and not r.models["yolo11s-pose"].served
@@ -197,3 +197,19 @@ def test_a_seed_that_would_break_an_edited_role_is_refused_and_writes_nothing(en
         reg.seed(engine, b, none, clock)
     r = Registry.from_db(engine)
     assert r.resolve("echo").key == "big" and r.models["big"].vram_gb == 6 and "echo" in r.models["big"].roles
+
+
+def test_an_edited_row_on_a_removed_runtime_moves_to_its_successor(engine, tmp_path, clock):
+    from stratamodels import registry as reg
+
+    old = '[roles.t]\nmodel = "w"\n[models.w]\nruntime = "faster-whisper"\nname = "small"\nroles = ["t"]\nvram_gb = 1\noptions = { compute_type = "float16" }\n'
+    none = str(tmp_path / "none.toml")
+    reg.seed(engine, _toml(tmp_path, old), none, clock)
+    reg.save_model(engine, "w", vram_gb=0.8)  # edited here: the seed would normally leave it alone
+    new = old.replace('runtime = "faster-whisper"', 'runtime = "venv-worker"').replace(
+        "options = { compute_type", 'options = { worker = "whisper", venv = "whisper", compute_type'
+    )
+    out = reg.seed(engine, _toml(tmp_path, new), none, clock)
+    m = Registry.from_db(engine).models["w"]
+    assert out["updated"] == ["model w (runtime venv-worker)"] and m.runtime == "venv-worker" and m.vram_gb == 0.8
+    assert m.options == dict(worker="whisper", venv="whisper", compute_type="float16") and m.served

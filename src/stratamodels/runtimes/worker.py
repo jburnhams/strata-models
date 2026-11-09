@@ -22,6 +22,7 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 import threading
 
 from stratamodels import settings
@@ -35,6 +36,14 @@ def python_of(model, models_dir):
     root = venv if os.path.isabs(str(venv)) else os.path.join(models_dir, "venvs", str(venv))
     exe = os.path.join(root, "Scripts", "python.exe") if os.name == "nt" else os.path.join(root, "bin", "python")
     return root, exe
+
+
+def cuda_libs(root):
+    """The venv's own NVIDIA library folders (nvidia/*/lib of the pip wheels), first on the worker's library path: libraries that load CUDA by
+    name (CTranslate2, onnxruntime) find the venv's versions, never the service's (which may be another CUDA major version)."""
+    import glob
+
+    return sorted(glob.glob(os.path.join(root, "lib", "python3*", "site-packages", "nvidia", "*", "lib")))
 
 
 class Worker:
@@ -99,6 +108,16 @@ def load(model, models_dir, popen=subprocess.Popen):
             f"the venv for {model.key} is not set up: no {exe} (run scripts/setup_worker_venv.sh {os.path.basename(root)})"
         )
     env = dict(os.environ, PYTHONUNBUFFERED="1", HF_HOME=os.environ.get("HF_HOME") or os.path.join(models_dir, "hf"))
+    own = (
+        os.path.realpath(sys.prefix) + os.sep
+    )  # the service's venv: its CUDA libraries must not reach a worker that brings its own
+    inherited = [
+        p
+        for p in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+        if p and not os.path.realpath(p).startswith(own)
+    ]
+    env["LD_LIBRARY_PATH"] = os.pathsep.join([*cuda_libs(root), *inherited])
+    # Run as a script (not -I or -P): Python puts the script's folder on sys.path, which is how workers import workers/protocol.py.
     w = Worker([exe, "-u", script], root + ".log", env, popen)
     r = w.ask(dict(op="load", model=model.to_json(), models_dir=models_dir))
     if not r.get("ok"):

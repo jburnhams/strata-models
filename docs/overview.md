@@ -9,7 +9,7 @@ The inventory and proposal behind this (2026-11-09) are in the project's doc "Lo
 - `registry.py` + `models.toml`: roles -> models (runtime, name, VRAM estimate, licence, which apps use it). Models whose runtime is not implemented are listed as "not served yet".
 - `scheduler.py`: one worker thread. Picks the next job (interactive first; loaded model first unless it would pass a lease or the oldest job has waited `max_skip_s`); makes room by freeing least recently used models; measures each model's real VRAM with nvidia-smi on load; grants leases (exclusive, heartbeat or expire).
 - `store.py` / `db/models.py`: one `jobs` table (runs and leases), the queue and the history. omarchy-db migrations, run at start.
-- `runtimes/`: `faces` (insightface), `whisper` (faster-whisper, audio decoded with ffmpeg), `fake` (tests).
+- `runtimes/`: `faces` (insightface), `worker` (venv-worker: a model in a venv of its own, run by a script in `workers/` over JSON lines: Whisper on CUDA 12, TTS), `fake` (tests). The service's own venv is CUDA 13 throughout.
 - `gpu.py`: nvidia-smi parsing, processes with their command lines, an hour of samples.
 - `server/app.py`: the API (see its docstring) and the built web app. Inputs are file paths.
 - `client/`: what apps import (stdlib only), with fallbacks so an app still works without the service.

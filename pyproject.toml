@@ -42,16 +42,11 @@ dev = [
 ]
 # The model runtimes (`uv sync --group gpu` on the machine with the GPU). One copy of each, for every app.
 gpu = [
-    "onnxruntime-gpu==1.23.2; sys_platform != 'darwin'",    # insightface (faces). 1.24+ is built for CUDA 13, while CTranslate2 needs CUDA 12: one set of CUDA 12 libraries serves both
+    "onnxruntime-gpu>=1.31; sys_platform != 'darwin'",      # insightface (faces), on CUDA 13 like torch: one CUDA in this venv (Whisper's CUDA 12 lives in its worker venv)
     "insightface",
     "opencv-python-headless",
-    "faster-whisper",                                       # transcribe (CTranslate2). Audio is decoded with ffmpeg, not its PyAV decoder (broken by PyAV 15+)
-    "nvidia-cublas-cu12; sys_platform == 'linux'",
-    "nvidia-cudnn-cu12; sys_platform == 'linux'",
-    "nvidia-cuda-runtime-cu12; sys_platform == 'linux'",    # onnxruntime-gpu's CUDA provider also loads these three
-    "nvidia-curand-cu12; sys_platform == 'linux'",
-    "nvidia-cufft-cu12; sys_platform == 'linux'",
-    "torch",                                                # image-embed (open_clip). It brings its own CUDA 13 libraries under nvidia/cu13, which the launcher keeps off the library path
+    "nvidia-curand>=10.4; sys_platform == 'linux'",          # onnxruntime's CUDA provider also needs cuRAND, which torch's CUDA 13 wheels lack
+    "torch",                                                # image-embed (open_clip); its CUDA 13 wheels (nvidia/cu13) also serve onnxruntime
     "open-clip-torch",
 ]
 

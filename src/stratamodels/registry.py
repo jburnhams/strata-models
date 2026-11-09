@@ -274,6 +274,21 @@ def file_dict(builtin=BUILTIN, override=None):
     )
 
 
+# Runtimes that were replaced: (new runtime, options to add). An edited database row keeps its edits but must not keep a runtime the service no
+# longer has, or its role would stop being served.
+RENAMED_RUNTIMES = {"faster-whisper": ("venv-worker", {"worker": "whisper", "venv": "whisper"})}
+
+
+def _migrate_runtime(row, now):
+    new = RENAMED_RUNTIMES.get(row.runtime)
+    if new is None:
+        return False
+    row.runtime = new[0]
+    row.options = {**new[1], **(row.options or {})}
+    row.updated_at = now
+    return True
+
+
 def seed(engine, builtin=BUILTIN, override=None, clock=time.time, log=None):
     """Bring models.toml into the tables: entries not in the database are added; an entry whose text changed since it was last imported updates
     its row, unless the row was edited here (then the database's choice stands, and the skip is reported). Returns {added, updated, kept}."""
@@ -296,6 +311,11 @@ def seed(engine, builtin=BUILTIN, override=None, clock=time.time, log=None):
                 out["added"].append(f"model {k}")
             elif row.seed_hash != h:
                 if row.edited:
+                    if _migrate_runtime(
+                        row, now
+                    ):  # a runtime that is gone: an edited row still moves to its successor, its edits kept
+                        out["updated"].append(f"model {k} (runtime {row.runtime})")
+                        continue
                     out["kept"].append(f"model {k}")
                     continue
                 for f, v in fields.items():
