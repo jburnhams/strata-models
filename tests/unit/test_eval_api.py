@@ -124,4 +124,4 @@ def test_the_most_different_pairs_come_first(client, scheduler, setup):
         client.post('/api/evals/fake-asr/judgments', json=dict(token=p['pair']['token'], winner='tie'))
     assert sims == sorted(sims) or max(sims) - min(sims) < 0.05                     # least alike first (ties within 0.02 are picked at random)
     import pytest
-    with pytest.raises(C.EvalError, match='unknown similarity'): C.parse_spec(dict(name='x', question='q', role='r', dataset='d', metrics=['wer'], similarity='audio', candidates=[dict(name='a', model='m')]))
+    with pytest.raises(C.EvalError, match='unknown similarity'): C.parse_spec(dict(name='x', question='q', role='r', dataset='d', metrics=['wer'], similarity='video', candidates=[dict(name='a', model='m')]))
