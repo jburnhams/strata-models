@@ -65,7 +65,11 @@ export const api = {
 }
 
 // ---- evals -------------------------------------------------------------------------------------------------------------------------------
-export interface Candidate { name: string; model: string; params: Record<string, unknown>; options: Record<string, unknown>; note: string }
+export interface Stage { role: string; model: string | null; params: Record<string, unknown>; options: Record<string, unknown>; input: string; send: string; into: string; note: string }
+export interface Candidate { name: string; model: string; params: Record<string, unknown>; options: Record<string, unknown>; note: string; stages?: Stage[] }
+/** One step of a pipeline candidate's output: what it was sent and (for a stage) what it answered. The last step is the candidate's own job. */
+export interface Step { role: string; model: string; sent: string; answer?: string; params?: Record<string, unknown>; run_s?: number | null; load_s?: number | null; tokens_out?: number | null }
+export interface ItemOutputs { id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; outputs: Record<string, { output: unknown; error: string | null; run_s?: number | null; load_s?: number | null } | null> }
 export interface Experiment {
   name: string; question?: string; role?: string; dataset?: string; metrics?: string[]; candidates?: Candidate[]; primary?: string; baseline?: string
   min_effect?: number; guards?: Record<string, number>; judge?: boolean; outputs?: number; total?: number; running?: boolean; error?: string
@@ -95,7 +99,8 @@ export const evalsApi = {
   run: (name: string) => send<RunStatus>('POST', `/api/evals/${encodeURIComponent(name)}/run`),
   report: async (name: string) => { const r = await fetch(withBase(`/api/evals/${encodeURIComponent(name)}/report`)); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text() },
   pair: (name: string) => get<{ pair: Pair | null; remaining?: number }>(`/api/evals/${encodeURIComponent(name)}/pair`),
-  judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
+  outputs: (name: string, item?: string) => get<{ candidates: Candidate[]; items: ItemOutputs[] }>(`/api/evals/${encodeURIComponent(name)}/outputs${item ? `?item_id=${encodeURIComponent(item)}` : ''}`),
+  judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; item_id: string; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
   mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
 }
 

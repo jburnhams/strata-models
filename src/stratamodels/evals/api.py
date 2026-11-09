@@ -6,7 +6,9 @@
   POST /api/evals/{name}/run                   run what is missing, in the background, through the queue (batch); progress in GET .../status
   GET  /api/evals/{name}/status
   GET  /api/evals/{name}/report                the standard write-up, as Markdown
-  GET  /api/evals/{name}/pair                  a blind pair to judge: one item, two candidates' outputs as X and Y (a token says which is which)
+  GET  /api/evals/{name}/pair                  a blind pair to judge: one item, two candidates' outputs as X and Y (a token says which is which);
+                                               end results only: a pipeline's intermediate steps are left out
+  GET  /api/evals/{name}/outputs[?item_id=]    every candidate's full output per item, a pipeline's every step (what it was sent, what it answered)
   POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
   GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names"""
 import base64, hashlib, hmac, json, mimetypes, os, random, secrets, threading, time
@@ -110,7 +112,7 @@ def mount(app, scheduler):
     @app.get('/api/evals/{name}/report', response_class=PlainTextResponse)
     def get_report(name: str):
         s = spec_or_404(name); res = analysis(s); ds, outs, _ = C.outputs_for(s, engine())
-        return R.render(res, R.worst(s, outs, ds.items, s.primary if s.primary != 'judged' else next((m for m in s.metrics if M.METRICS[m].score), s.primary)))
+        return R.render(res, R.worst(s, outs, ds.items, s.primary if s.primary != 'judged' else next((m for m in s.metrics if M.METRICS[m].score), s.primary)), pipelines=R.pipelines(s, outs, ds.items))
 
     @app.get('/api/evals/{name}/pair')
     def get_pair(name: str):
@@ -122,7 +124,7 @@ def mount(app, scheduler):
             ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
             for n, a in enumerate(ok):
                 for b in ok[n + 1:]:
-                    oa, ob = outs[a][i][0], outs[b][i][0]
+                    oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
                     key = (s.similarity, hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest())    # the outputs themselves: a rerun after forget, or another kind, is scored again
                     if key not in sims: sims[key] = SIM.similarity(oa, ob, s.similarity or None)
                     if sims[key] < 0.9999: pairs.append((sims[key], i, a, b))                                    # identical outputs teach nothing: not shown
@@ -137,7 +139,7 @@ def mount(app, scheduler):
         it = ds.items[i]
         left = sum(1 for p in pairs if (ds.items[p[1]]['id'], frozenset(p[2:])) not in judged)
         return dict(remaining=left, pair=dict(similarity=round(sim, 3), item_id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
-                              x=outs[a][i][0], y=outs[b][i][0], token=_sign(dict(e=name, i=it['id'], x=a, y=b, xk=C.result_key(s, s.candidate(a), it), yk=C.result_key(s, s.candidate(b), it)))))
+                              x=C.without_pipeline(outs[a][i][0]), y=C.without_pipeline(outs[b][i][0]), token=_sign(dict(e=name, i=it['id'], x=a, y=b, xk=C.result_key(s, s.candidate(a), it), yk=C.result_key(s, s.candidate(b), it)))))
 
     @app.post('/api/evals/{name}/judgments', status_code=201)
     def post_judgment(name: str, b: JudgmentIn):
@@ -147,7 +149,17 @@ def mount(app, scheduler):
         win = d['x'] if b.winner == 'x' else d['y'] if b.winner == 'y' else 'tie'
         with C.session(engine()) as ses:
             ses.add(EvalJudgment(experiment=name, item_id=d['i'], a=d['x'], b=d['y'], winner=win, rater=b.rater[:64], at=time.time(), note=(b.note or None) and b.note[:500], a_key=d.get('xk'), b_key=d.get('yk'))); ses.commit()
-        return dict(ok=True, x=d['x'], y=d['y'], winner=win)
+        return dict(ok=True, item_id=d['i'], x=d['x'], y=d['y'], winner=win)
+
+    @app.get('/api/evals/{name}/outputs')
+    def get_outputs(name: str, item_id: str | None = None):
+        s = spec_or_404(name); ds, outs, runs = C.outputs_for(s, engine()); items = []
+        for i, it in enumerate(ds.items):
+            if item_id is not None and it['id'] != item_id: continue
+            items.append(dict(id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
+                              outputs={c.name: (None if outs[c.name][i] is None else dict(output=outs[c.name][i][0], error=outs[c.name][i][1], **(runs[c.name][i] or {}))) for c in s.candidates}))
+        if item_id is not None and not items: raise HTTPException(404, f'no item {item_id!r}')
+        return finite(dict(candidates=[c.to_json() for c in s.candidates], items=items))
 
     @app.get('/api/evals/{name}/media/{item_id}')
     def get_media(name: str, item_id: str):

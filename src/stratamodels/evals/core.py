@@ -20,6 +20,18 @@ An experiment is a TOML spec (`evals/specs/<name>.toml` in this repository for g
     params = { language = "en" }      # added to every item's input
     options = {}                      # load options over the registry's (a variant of the model, loaded apart)
 
+    [[candidates.stages]]             # optional: steps run before the candidate's own job, in order (a pipeline)
+    role = "text"                     # e.g. a text model that turns the item's short prompt into a detailed one
+    model = "qwen3.5-9b-vl"           # optional: the role's model otherwise
+    params = { system_preset = "image-prompt-bfl" }
+    input = "{prompt}"                # what the stage is given: a template over the item's input fields (default "{prompt}")
+    send = "prompt"                   # the stage job's param that carries it (default "prompt")
+    into = "prompt"                   # the next step's param that the stage's text replaces (default "prompt")
+
+A pipeline candidate's output is its last job's, with every step kept under `pipeline` (role, model, what it was sent, what it answered, run
+time): hidden on the Judge tab (the pair shows only the end result), shown on the Outputs tab and in the write-up. Each stage's output is cached
+on its own, so two candidates that share a first step (one expansion, two image models) run it once.
+
 A dataset is JSON lines in `<data>/evals/datasets/<name>.jsonl`, one item per line: {"id", "input": {job params, paths absolute}, "reference":
 {what the metrics read}, "tags": {...}}. Its version is the hash of the file, written in every report. Datasets stay out of git: they name
 private files.
@@ -167,8 +179,23 @@ class Candidate:
     params: dict = dataclasses.field(default_factory=dict)
     options: dict = dataclasses.field(default_factory=dict)
     note: str = ''
+    stages: list = dataclasses.field(default_factory=list)       # steps run before this candidate's job (see the module docstring)
 
-    def to_json(self): return dataclasses.asdict(self)
+    def to_json(self):
+        d = dataclasses.asdict(self)
+        if not self.stages: d.pop('stages')
+        return d
+
+
+STAGE_KEYS = {'role', 'model', 'params', 'options', 'input', 'send', 'into', 'note'}
+
+
+def parse_stage(d):
+    if not isinstance(d, dict) or not d.get('role'): raise ValueError('a stage needs a role')
+    extra = set(d) - STAGE_KEYS
+    if extra: raise ValueError(f'a stage has unknown fields {sorted(extra)} (known: {", ".join(sorted(STAGE_KEYS))})')
+    return dict(role=str(d['role']), model=str(d['model']) if d.get('model') else None, params=dict(d.get('params') or {}), options=dict(d.get('options') or {}),
+                input=str(d.get('input', '{prompt}')), send=str(d.get('send', 'prompt')), into=str(d.get('into', 'prompt')), note=str(d.get('note', '')))
 
 
 @dataclasses.dataclass
@@ -200,7 +227,7 @@ class Spec:
 
 def parse_spec(d, source=''):
     try:
-        dec = d.get('decision') or {}; cands = [Candidate(name=str(c['name']), model=str(c['model']), params=dict(c.get('params') or {}), options=dict(c.get('options') or {}), note=str(c.get('note', ''))) for c in d['candidates']]
+        dec = d.get('decision') or {}; cands = [Candidate(name=str(c['name']), model=str(c['model']), params=dict(c.get('params') or {}), options=dict(c.get('options') or {}), note=str(c.get('note', '')), stages=[parse_stage(x) for x in c.get('stages') or []]) for c in d['candidates']]
         s = Spec(name=str(d['name']), question=str(d['question']), role=str(d['role']), dataset=str(d['dataset']), metrics=list(d['metrics']), candidates=cands,
                  primary=str(dec.get('primary') or d['metrics'][0]), baseline=str(dec.get('baseline') or cands[0].name), min_effect=float(dec.get('min_effect', 0.0)),
                  guards={k: float(v) for k, v in (dec.get('guards') or {}).items()}, judge=bool(d.get('judge', False)), similarity=str(d.get('similarity', '')), source=source, score=dict(d.get('score') or {}))
@@ -283,8 +310,80 @@ def job_params(spec, cand, item): return {**cand.params, **item['input']}
 
 def result_key(spec, cand, item):
     """Everything that decides the output: role, model, load options, the job's params, the item (reference and tags left out: changing a label
-    re-scores, it does not re-run)."""
-    return _h(_canon(dict(role=spec.role, model=cand.model, options=cand.options, params=job_params(spec, cand, item), item=item['id'])), 32)
+    re-scores, it does not re-run), and a pipeline's stages (their config: what they answer follows from it)."""
+    d = dict(role=spec.role, model=cand.model, options=cand.options, params=job_params(spec, cand, item), item=item['id'])
+    if cand.stages: d['stages'] = cand.stages
+    return _h(_canon(d), 32)
+
+
+class _Missing(dict):
+    def __missing__(self, k): raise EvalError(f'a stage input names {{{k}}}, which the item does not have')
+
+
+def stage_params(stage, inp):
+    """The job params of one stage, given the input so far (the item's, with earlier stages' answers in)."""
+    try: text = stage['input'].format_map(_Missing({k: v for k, v in inp.items()}))
+    except (ValueError, IndexError) as e: raise EvalError(f'stage input {stage["input"]!r}: {e}')
+    return {**stage['params'], stage['send']: text}
+
+
+def stage_key(stage, params, item):
+    return _h(_canon(dict(stage=True, role=stage['role'], model=stage['model'], options=stage['options'], params=params, item=item['id'])), 32)
+
+
+def stage_text(output):
+    """What a stage answered, as text: a text model's `text` (outer quotes and whitespace trimmed), a transcription's words."""
+    if isinstance(output, str): t = output
+    elif isinstance(output, dict) and isinstance(output.get('text'), str): t = output['text']
+    elif isinstance(output, dict) and output.get('segments'): t = ' '.join(str(s.get('text', '')).strip() for s in output['segments'])
+    else: raise EvalError(f'a stage answered no text: {str(output)[:200]}')
+    t = t.strip()
+    if len(t) > 1 and t[0] == t[-1] and t[0] in '"\'': t = t[1:-1].strip()
+    if not t: raise EvalError('a stage answered an empty text')
+    return t
+
+
+def without_pipeline(o):
+    """An output as a judge sees it: the end result only, no intermediate steps (they would tell the candidates apart)."""
+    return {k: v for k, v in o.items() if k != 'pipeline'} if isinstance(o, dict) and 'pipeline' in o else o
+
+
+def _run_stages(spec, engine, executor, todo, ds, log, batch):
+    """Run the stages of the pipeline candidates in `todo` (cached on their own), level by level and grouped by model so a model loads once per
+    level. Returns {result key: (final job params, pipeline trace) or (None, error)}."""
+    state = {k: dict(inp=dict(it['input']), trace=[], err=None) for c, it, k in todo if c.stages}
+    if not state: return {}
+    for level in range(max(len(c.stages) for c, _, _ in todo)):
+        want = {}                                                                                    # stage key -> (stage, params, item, [result keys])
+        for c, it, k in todo:
+            st = state.get(k)
+            if st is None or st['err'] or level >= len(c.stages): continue
+            stage = c.stages[level]
+            try: p = stage_params(stage, st['inp'])
+            except EvalError as e: st['err'] = f'stage {level + 1}: {e}'; continue
+            sk = stage_key(stage, p, it); want.setdefault(sk, (stage, p, it, []))[3].append(k)
+        have = cached(engine, want); run_ = sorted((sk for sk in want if sk not in have), key=lambda sk: (want[sk][0]['model'] or '', want[sk][0]['role']))
+        if run_: log(f'{spec.name}: stage {level + 1}: {len(want) - len(run_)} of {len(want)} cached, {len(run_)} to run')
+        for i in range(0, len(run_), batch):
+            chunk = run_[i:i + batch]; ids = [executor.submit(want[sk][0]['role'], want[sk][1], want[sk][0]['model'], want[sk][0]['options']) for sk in chunk]
+            rows = []
+            for sk, jid in zip(chunk, ids):
+                j = executor.wait(jid); stage, p, it, _ = want[sk]
+                rows.append(EvalResult(key=sk, dataset=ds.name, item_id=it['id'], role=stage['role'], model=stage['model'] or j.get('model') or '', created_at=time.time(), output=j.get('result') if j['status'] == 'done' else None,
+                                       error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=j.get('run_s'), load_s=j.get('load_s'), job_id=j.get('id')))
+            save(engine, rows); have.update(cached(engine, chunk))
+            log(f'  stage {level + 1}: {min(i + batch, len(run_))} of {len(run_)} run')
+        for sk, (stage, p, it, keys) in want.items():
+            r = have.get(sk)
+            for k in keys:
+                st = state[k]
+                if r is None or r.error: st['err'] = f'stage {level + 1} ({stage["model"] or stage["role"]}): {r.error if r is not None else "no output"}'; continue
+                try: text = stage_text(r.output)
+                except EvalError as e: st['err'] = f'stage {level + 1} ({stage["model"] or stage["role"]}): {e}'; continue
+                st['trace'].append(dict(role=stage['role'], model=(r.output or {}).get('model') or r.model, params={k2: v for k2, v in p.items() if k2 != stage['send']}, sent=p[stage['send']], answer=text,
+                                        run_s=r.run_s, load_s=r.load_s, tokens_out=(r.output or {}).get('tokens_out'), key=sk))
+                st['inp'][stage['into']] = text
+    return {k: ((None, st['err']) if st['err'] else (st['inp'], st['trace'])) for k, st in state.items()}
 
 
 def cached(engine, keys):
@@ -302,11 +401,23 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
         queued = {k for _, _, k in todo}
         todo += [(c, it, k) for k, it in keys.items() if k not in have and k not in queued]       # two candidates that are the same job run it once
     total = len(cands) * len(items); log(f'{spec.name}: {total - len(todo)} of {total} outputs cached, {len(todo)} to run'); failed = 0
+    staged = _run_stages(spec, engine, executor, todo, ds, log, batch)
+    broken = [(c, it, k) for c, it, k in todo if k in staged and staged[k][0] is None]
+    if broken:                                                                                       # a failed stage fails the candidate's output, without running its job
+        save(engine, [EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=None, error=staged[k][1]) for c, it, k in broken]); failed += len(broken)
+    todo = [t for t in todo if t not in broken]
     for i in range(0, len(todo), batch):
-        chunk = todo[i:i + batch]; ids = [executor.submit(spec.role, job_params(spec, c, it), c.model, c.options) for c, it, _ in chunk]
+        chunk = todo[i:i + batch]; ids = [executor.submit(spec.role, {**c.params, **staged[k][0]} if k in staged else job_params(spec, c, it), c.model, c.options) for c, it, k in chunk]
         done = [(c, it, k, executor.wait(jid)) for (c, it, k), jid in zip(chunk, ids)]       # wait outside the lock: the worker needs the store meanwhile
-        rows = [EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=j.get('result') if j['status'] == 'done' else None,
-                           error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=j.get('run_s'), load_s=j.get('load_s'), job_id=j.get('id')) for c, it, k, j in done]
+        rows = []
+        for c, it, k, j in done:
+            out, run_s = (j.get('result') if j['status'] == 'done' else None), j.get('run_s')
+            if k in staged:                                                                          # a pipeline: its steps kept with the end result, its time is all of theirs
+                trace = staged[k][1] + [dict(role=spec.role, model=c.model, sent=staged[k][0].get(c.stages[-1]['into']), run_s=run_s, load_s=j.get('load_s'))]
+                if out is not None: out = {**out, 'pipeline': trace}
+                if run_s is not None: run_s = run_s + sum(t.get('run_s') or 0 for t in staged[k][1])
+            rows.append(EvalResult(key=k, dataset=ds.name, item_id=it['id'], role=spec.role, model=c.model, created_at=time.time(), output=out,
+                                   error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=run_s, load_s=j.get('load_s'), job_id=j.get('id')))
         failed += sum(1 for *_, j in done if j['status'] != 'done'); save(engine, rows)
         log(f'  {min(i + batch, len(todo))} of {len(todo)} run')
     out = dict(ran=len(todo), cached=total - len(todo), failed=failed)
@@ -366,10 +477,12 @@ def save(engine, rows):
             except IntegrityError: s.rollback()
 
 
-def forget(spec, engine, candidate=None):
-    """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights)."""
+def forget(spec, engine, candidate=None, stages=False):
+    """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights).
+    `stages`: a pipeline's stage outputs too (they are shared with other candidates that make the same first steps, so kept by default)."""
     ds = load_dataset(spec.dataset, engine=engine); keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
     with session(engine) as s:
+        if stages: keys += [t['key'] for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys))) for t in ((r.output or {}).get('pipeline') or []) if t.get('key')]
         n = 0
         for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys))): s.delete(r); n += 1
         s.commit(); return n

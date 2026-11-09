@@ -80,6 +80,10 @@ def test_requests_presets_and_refusals(setup):
     assert body['messages'][0]['content'][0]['image_url']['url'].startswith('data:image/jpeg;base64,') and body['chat_template_kwargs'] == {'enable_thinking': False}
     body, schema = llama.request(dict(prompt='what is it?', system='be brief', schema=False, think=True))
     assert schema is False and 'response_format' not in body and body['messages'][0]['role'] == 'system' and body['chat_template_kwargs']['enable_thinking']
+    body, _ = llama.request(dict(prompt='a cat on a mat', system_preset='image-prompt-bfl'))
+    assert body['messages'][0]['role'] == 'system' and body['messages'][0]['content'].startswith('You are the prompt upsampler') and body['messages'][1]['content'][-1]['text'] == 'a cat on a mat'
+    for name in ('image-prompt-simple', 'image-prompt-structured', 'image-prompt-photographer', 'image-prompt-fewshot', 'image-prompt-concise'): assert llama.request(dict(prompt='x', system_preset=name))[0]['messages'][0]['content']
+    with pytest.raises(RunError, match='not both'): llama.request(dict(prompt='x', system='y', system_preset='image-prompt-bfl'))
     for p, msg in [(dict(prompt='x', colour=1), 'unknown params'), (dict(), 'give a prompt'), (dict(prompt='x', preset='photo-describe-v1'), 'not both'), (dict(preset='nope'), 'no preset'),
                    (dict(preset='../x'), 'no preset'), (dict(prompt='x', image='/no/such.jpg'), 'no such image'), (dict(prompt='x', images='a.jpg'), 'list of paths')]:
         with pytest.raises(RunError, match=msg): llama.request(p)

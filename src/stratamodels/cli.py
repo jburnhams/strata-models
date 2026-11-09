@@ -122,7 +122,7 @@ def cmd_eval(args):
     if args.action == 'forget': print(f'{C.forget(spec, engine, args.candidate[0] if args.candidate else None)} outputs forgotten'); return 0
     res = C.analyse(spec, engine)
     if args.json: print(json.dumps(res, indent=1, default=str)); return 0
-    ds, outs, _ = C.outputs_for(spec, engine); text = R.render(res, R.worst(spec, outs, ds.items, spec.primary))
+    ds, outs, _ = C.outputs_for(spec, engine); text = R.render(res, R.worst(spec, outs, ds.items, spec.primary), pipelines=R.pipelines(spec, outs, ds.items))
     if args.out:
         with open(args.out, 'w', encoding='utf8') as f: f.write(text)
         print(f'wrote {args.out}')
