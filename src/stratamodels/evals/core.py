@@ -24,15 +24,18 @@ A dataset is JSON lines in `<data>/evals/datasets/<name>.jsonl`, one item per li
 {what the metrics read}, "tags": {...}}. Its version is the hash of the file, written in every report. Datasets stay out of git: they name
 private files.
 
+Both live in the database (eval_experiments + eval_candidates, eval_datasets + eval_items) once the service has seen them: the files are SEEDS,
+imported when they are new or changed (a spec edited through the API, `edited`, is no longer overwritten by its file), and anything with an engine
+reads the tables. Without an engine (scripts, the offline CLI) the files are read as before.
+
 Outputs are cached in eval_results under a key of everything that decides them, so adding a candidate runs only that candidate, and a rerun of
 an unchanged experiment runs nothing."""
 import contextlib, dataclasses, hashlib, json, math, os, time, tomllib
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from stratamodels import settings
-from stratamodels.db.models import EvalJudgment, EvalResult
+from stratamodels.db.models import EvalCandidate, EvalDataset, EvalExperiment, EvalItem, EvalJudgment, EvalResult
 from stratamodels.evals import metrics as M, stats as S
 
 REPO_SPECS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'evals', 'specs')
@@ -42,10 +45,7 @@ class EvalError(ValueError):
     """A spec or dataset that cannot be used as it is."""
 
 
-@contextlib.contextmanager
-def session(engine):
-    """A session on the service's engine, under the store's lock when there is one (the in-memory SQLite store shares one connection)."""
-    with getattr(engine, 'stratamodels_lock', contextlib.nullcontext()), Session(engine) as s: yield s
+from stratamodels.db import session            # noqa: E402 (kept here: evals code and tests use core.session)
 
 
 def _canon(x): return json.dumps(x, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -72,7 +72,52 @@ class Dataset:
         return d
 
 
-def load_dataset(name, folder=None):
+ITEM_KEYS = ('id', 'input', 'reference', 'tags')
+_DS_CACHE = {}
+
+
+def load_dataset(name, folder=None, engine=None):
+    """The dataset: from the database when an engine is given (its .jsonl, if there is one and it changed, imported first), else from the file."""
+    if engine is None: return _file_dataset(name, folder)
+    try: ds = _file_dataset(name, folder)
+    except EvalError as e:
+        if 'no dataset' not in str(e): raise
+        ds = None
+    if ds is not None: import_dataset(engine, ds, os.path.join(folder or datasets_dir(), f'{name}.jsonl'))
+    return _db_dataset(engine, name)
+
+
+def import_dataset(engine, ds, source=None):
+    """Store a dataset in the tables, replacing its items, unless that version is there already. Returns True when it wrote."""
+    with session(engine) as s:
+        row = s.get(EvalDataset, ds.name)
+        if row is not None and row.version == ds.version: return False
+        if row is None: row = EvalDataset(name=ds.name, version=ds.version, n=len(ds.items), updated_at=time.time(), description=ds.description, source=source); s.add(row)
+        else:
+            from sqlalchemy import delete
+            s.execute(delete(EvalItem).where(EvalItem.dataset == ds.name)); row.version, row.n, row.updated_at, row.description, row.source = ds.version, len(ds.items), time.time(), ds.description, source or row.source
+        s.flush()
+        for i, it in enumerate(ds.items):
+            s.add(EvalItem(dataset=ds.name, item_id=it['id'], position=i, input=it['input'], reference=it.get('reference'), tags=it.get('tags'), extra={k: v for k, v in it.items() if k not in ITEM_KEYS} or None))
+        s.commit(); return True
+
+
+def _db_dataset(engine, name):
+    with session(engine) as s:
+        row = s.get(EvalDataset, name)
+        if row is None: raise EvalError(f'no dataset {name!r} (not in the database, and no {name}.jsonl in {datasets_dir()})')
+        hit = _DS_CACHE.get((id(engine), name))
+        if hit and hit.version == row.version: return hit
+        items = []
+        for it in s.scalars(select(EvalItem).where(EvalItem.dataset == name).order_by(EvalItem.position)):
+            d = dict(id=it.item_id, input=it.input)
+            if it.reference is not None: d['reference'] = it.reference
+            if it.tags is not None: d['tags'] = it.tags
+            d.update(it.extra or {}); items.append(d)
+        ds = _DS_CACHE[(id(engine), name)] = Dataset(row.name, row.version, items, row.description or ''); return ds
+
+
+def _file_dataset(name, folder=None):
     path = os.path.join(folder or datasets_dir(), f'{name}.jsonl')
     try: raw = open(path, 'rb').read()
     except FileNotFoundError: raise EvalError(f'no dataset {name!r} ({path})')
@@ -89,21 +134,28 @@ def load_dataset(name, folder=None):
     return Dataset(name, _h(raw, 12), items, desc)
 
 
-def write_dataset(name, items, description='', folder=None):
-    """Write a dataset (items as dicts) and return it loaded; `description` becomes its first, commented line."""
+def write_dataset(name, items, description='', folder=None, engine=None):
+    """Write a dataset (items as dicts) and return it loaded; `description` becomes its first, commented line. The .jsonl is written either way
+    (the dataset builders in scripts/ run without the database); with an engine it goes into the tables too, else the service imports it when it
+    next reads it."""
     path = os.path.join(folder or datasets_dir(), f'{name}.jsonl'); tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf8') as f:
         for line in description.splitlines(): f.write(f'# {line}\n')
         for it in items: f.write(_canon(it) + '\n')
-    os.replace(tmp, path); return load_dataset(name, folder)
+    os.replace(tmp, path); return load_dataset(name, folder, engine)
 
 
-def list_datasets(folder=None):
-    out = []
+def list_datasets(folder=None, engine=None):
+    """Every dataset: the .jsonl files (imported when an engine is given) and those only in the database."""
+    out, seen = [], set()
     for f in sorted(os.listdir(folder or datasets_dir())):
         if f.endswith('.jsonl'):
-            try: out.append(load_dataset(f[:-6], folder).to_json())
+            seen.add(f[:-6])
+            try: out.append(load_dataset(f[:-6], folder, engine).to_json())
             except EvalError as e: out.append(dict(name=f[:-6], error=str(e)))
+    if engine is not None:
+        with session(engine) as s: rest = [n for n in s.scalars(select(EvalDataset.name).order_by(EvalDataset.name)) if n not in seen]
+        out += [_db_dataset(engine, n).to_json() for n in rest]
     return out
 
 
@@ -170,7 +222,8 @@ def parse_spec(d, source=''):
 def spec_folders(): return [REPO_SPECS, os.path.join(settings.data_dir(), 'evals', 'specs')]
 
 
-def list_specs():
+def _file_specs():
+    """{name: (Spec, raw dict, hash of the file) or EvalError} of the spec files."""
     out = {}
     for folder in spec_folders():
         if not os.path.isdir(folder): continue
@@ -178,14 +231,47 @@ def list_specs():
             if f.endswith('.toml'):
                 p = os.path.join(folder, f)
                 try:
-                    with open(p, 'rb') as fh: s = parse_spec(tomllib.load(fh), p)
-                    out[s.name] = s
-                except (EvalError, tomllib.TOMLDecodeError) as e: out[f[:-5]] = EvalError(str(e))
+                    raw = open(p, 'rb').read(); d = tomllib.loads(raw.decode('utf8')); s = parse_spec(d, p)
+                    out[s.name] = (s, d, _h(raw, 32))
+                except (EvalError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e: out[f[:-5]] = EvalError(str(e))
     return out
 
 
-def load_spec(name):
-    s = list_specs().get(name)
+def save_spec(engine, d, source=None, seed_hash=None, edited=True):
+    """Store an experiment (a spec as a dict, validated by parse_spec) with its candidates; returns the Spec. `edited` (the default, an edit
+    through the API) stops its file from overwriting it."""
+    spec = parse_spec(d, source or '')
+    with session(engine) as s:
+        row = s.get(EvalExperiment, spec.name); now = time.time()
+        if row is None: row = EvalExperiment(name=spec.name, question=spec.question, role=spec.role, dataset=spec.dataset, baseline=spec.baseline, spec=d, updated_at=now, source=source, seed_hash=seed_hash, edited=edited); s.add(row)
+        else: row.question, row.role, row.dataset, row.baseline, row.spec, row.updated_at, row.source, row.seed_hash, row.edited = spec.question, spec.role, spec.dataset, spec.baseline, d, now, source or row.source, seed_hash, edited
+        from sqlalchemy import delete
+        s.flush(); s.execute(delete(EvalCandidate).where(EvalCandidate.experiment == spec.name))
+        for i, c in enumerate(spec.candidates): s.add(EvalCandidate(experiment=spec.name, name=c.name, model=c.model, position=i, params=c.params, options=c.options, note=c.note))
+        s.commit()
+    return spec
+
+
+def list_specs(engine=None):
+    """{name: Spec, or EvalError for one that cannot be used}. With an engine: the spec files are imported (new or changed, and not edited
+    here) and the experiments come from the tables."""
+    files = _file_specs()
+    if engine is None: return {n: (v if isinstance(v, EvalError) else v[0]) for n, v in files.items()}
+    with session(engine) as s: have = {r.name: (r.seed_hash, r.edited) for r in s.scalars(select(EvalExperiment))}
+    for n, v in files.items():
+        if isinstance(v, EvalError): continue
+        spec, d, h = v
+        if n not in have or (have[n][0] != h and not have[n][1]): save_spec(engine, json.loads(_canon(d)), spec.source, h, edited=False)
+    out = {n: v for n, v in files.items() if isinstance(v, EvalError)}
+    with session(engine) as s: rows = [(r.name, r.spec, r.source) for r in s.scalars(select(EvalExperiment).order_by(EvalExperiment.name))]
+    for n, d, src in rows:
+        try: out[n] = parse_spec(d, src or '')
+        except EvalError as e: out[n] = e
+    return out
+
+
+def load_spec(name, engine=None):
+    s = list_specs(engine).get(name)
     if s is None: raise EvalError(f'no experiment {name!r}')
     if isinstance(s, EvalError): raise s
     return s
@@ -209,7 +295,7 @@ def cached(engine, keys):
 def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=print, batch=32):
     """Run what is missing: every (candidate, item) without a cached output goes to `executor` (submit(role, params, model, options) -> job id;
     wait(job id) -> job row). Returns dict(ran, cached, failed)."""
-    ds = dataset or load_dataset(spec.dataset); items = ds.items[:limit] if limit else ds.items
+    ds = dataset or load_dataset(spec.dataset, engine=engine); items = ds.items[:limit] if limit else ds.items
     cands = [spec.candidate(c) for c in candidates] if candidates else spec.candidates; todo = []
     for c in cands:
         keys = {result_key(spec, c, it): it for it in items}; have = cached(engine, keys)
@@ -282,7 +368,7 @@ def save(engine, rows):
 
 def forget(spec, engine, candidate=None):
     """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights)."""
-    ds = load_dataset(spec.dataset); keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
+    ds = load_dataset(spec.dataset, engine=engine); keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
     with session(engine) as s:
         n = 0
         for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys))): s.delete(r); n += 1
@@ -310,7 +396,7 @@ class ClientExecutor:
 def outputs_for(spec, engine, dataset=None):
     """{candidate: [(output, error) per item]} and the items (each with its run seconds under _run_s for the baseline's latency; per candidate
     in `runs`). Items not yet run by a candidate are None."""
-    ds = dataset or load_dataset(spec.dataset); out, runs = {}, {}
+    ds = dataset or load_dataset(spec.dataset, engine=engine); out, runs = {}, {}
     for c in spec.candidates:
         keys = [result_key(spec, c, it) for it in ds.items]; have = cached(engine, keys)
         out[c.name] = [(scored_view(spec, have[k].output), have[k].error) if k in have else None for k in keys]
