@@ -1,0 +1,7 @@
+# The model runtimes (install into the same venv on the machine with the GPU). One copy of each, for every app.
+onnxruntime-gpu            # insightface (faces)
+insightface
+opencv-python-headless
+faster-whisper             # transcribe (CTranslate2; pulls its CUDA 12 libraries)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

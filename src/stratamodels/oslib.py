@@ -74,4 +74,4 @@ def venv_python(venv):
 def cli_command():
     """Command prefix that starts the app CLI with the interpreter running this process (works on POSIX and Windows, with or without a .venv)."""
     os.environ['PYTHONPATH'] = os.path.join(ROOT_DIR, 'src') + os.pathsep + os.environ.get('PYTHONPATH', ''); os.environ.setdefault('PYTHONWARNINGS', 'ignore')
-    return [sys.executable, '-m', 'app']
+    return [sys.executable, '-m', 'stratamodels']
