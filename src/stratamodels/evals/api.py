@@ -11,7 +11,7 @@
 import base64, hashlib, hmac, json, mimetypes, os, random, secrets, threading, time
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -142,4 +142,9 @@ def mount(app, scheduler):
         s = spec_or_404(name); it = next((x for x in C.load_dataset(s.dataset).items if x['id'] == item_id), None)
         p = it and it['input'].get('path')
         if not isinstance(p, str) or not os.path.isfile(p): raise HTTPException(404, 'no file for this item')
+        clip = it['input'].get('clip')
+        if clip and (mimetypes.guess_type(p)[0] or '').startswith(('audio', 'video')):                 # the phrase only, not the whole recording
+            import subprocess
+            r = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-ss', str(float(clip[0])), '-to', str(float(clip[1])), '-i', p, '-vn', '-ac', '1', '-f', 'wav', '-'], capture_output=True)
+            if r.returncode == 0 and r.stdout: return Response(content=r.stdout, media_type='audio/wav')
         return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or 'application/octet-stream')
