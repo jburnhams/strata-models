@@ -37,6 +37,14 @@ def python_of(model, models_dir):
     return root, exe
 
 
+def cuda_libs(root):
+    """The venv's own NVIDIA library folders (nvidia/*/lib of the pip wheels), first on the worker's library path: libraries that load CUDA by
+    name (CTranslate2, onnxruntime) find the venv's versions, never the service's (which may be another CUDA major version)."""
+    import glob
+
+    return sorted(glob.glob(os.path.join(root, "lib", "python3*", "site-packages", "nvidia", "*", "lib")))
+
+
 class Worker:
     """One worker process. `ask` sends a request and waits for its answer (one at a time: the scheduler runs one job at a time)."""
 
@@ -99,6 +107,12 @@ def load(model, models_dir, popen=subprocess.Popen):
             f"the venv for {model.key} is not set up: no {exe} (run scripts/setup_worker_venv.sh {os.path.basename(root)})"
         )
     env = dict(os.environ, PYTHONUNBUFFERED="1", HF_HOME=os.environ.get("HF_HOME") or os.path.join(models_dir, "hf"))
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [
+            *cuda_libs(root),
+            *[p for p in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep) if p and ".venv" not in p],
+        ]
+    )
     w = Worker([exe, "-u", script], root + ".log", env, popen)
     r = w.ask(dict(op="load", model=model.to_json(), models_dir=models_dir))
     if not r.get("ok"):

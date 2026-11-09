@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Make the venv a venv-worker model runs in: <models>/venvs/NAME (models dir: STRATAMODELS_MODELS, default ~/models). Needs uv.
-#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts
+#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper
 # Each pins what its model needs; they are kept apart from the service's venv on purpose (Chatterbox wants torch 2.6, for one).
 set -euo pipefail
-name=${1:?give the venv name: kokoro, chatterbox or qwen3-tts}
+name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts or whisper}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 case $name in
   kokoro) pkgs="kokoro-onnx soundfile numpy" ;;          # model files: <models>/tts/kokoro/{kokoro-v1.0.onnx,voices-v1.0.bin}
   chatterbox) pkgs="chatterbox-tts soundfile setuptools<81" ;;   # its watermarker (resemble-perth) imports pkg_resources, gone from setuptools 81
   qwen3-tts) pkgs="qwen-tts soundfile" ;;
+  whisper) pkgs="faster-whisper numpy nvidia-cublas-cu12 nvidia-cudnn-cu12" ;;   # CTranslate2 is built for CUDA 12; its libraries live here, apart from the service's CUDA 13
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
 mkdir -p "$models/venvs"; uv venv -q -p 3.12 "$venv"; VIRTUAL_ENV=$venv uv pip install $pkgs

@@ -18,19 +18,15 @@ Result: {path, duration_s, sample_rate, seconds, engine, voice}.
 A model entry can carry the settings an eval chose as options.defaults ({voice = ..., speed = ...}): the role then speaks with them unless a job
 says otherwise, so apps ask the role for speech and get the chosen voice."""
 
-import json
 import os
 import subprocess
-import sys
 import time
-import traceback
 import uuid
 
 E = {}
 
 
-class ParamError(ValueError):
-    pass
+from protocol import ParamError, serve  # noqa: E402  (the shared JSON-lines loop, workers/protocol.py)
 
 
 def _seed(n):
@@ -212,28 +208,5 @@ def run(p):
     )
 
 
-def main():
-    out = sys.stdout
-    sys.stdout = sys.stderr  # libraries that print must not corrupt the answers
-    for line in sys.stdin:
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        op = msg.get("op")
-        if op == "quit":
-            break
-        try:
-            res = load(msg["model"], msg["models_dir"]) if op == "load" else run(msg.get("params") or {})
-            ans = dict(ok=True, result=res)
-        except ParamError as e:
-            ans = dict(ok=False, params=True, error=str(e))
-        except Exception as e:
-            traceback.print_exc()
-            ans = dict(ok=False, error=f"{type(e).__name__}: {e}")
-        out.write(json.dumps(ans) + "\n")
-        out.flush()
-
-
 if __name__ == "__main__":
-    main()
+    serve(load, run)

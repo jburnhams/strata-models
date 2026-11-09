@@ -9,7 +9,7 @@ from stratamodels.registry import Registry, RegistryError
 def test_the_builtin_registry_names_a_model_for_every_role():
     r = Registry.load()
     assert r.resolve("faces").key == "buffalo_l" and r.resolve("transcribe").key == "whisper-large-v3-turbo"
-    assert r.resolve("transcribe-fast", "whisper-large-v3-turbo").runtime == "faster-whisper"
+    assert r.resolve("transcribe-fast", "whisper-large-v3-turbo").runtime == "venv-worker"
     assert (
         r.models["qwen3.5-9b-vl"].served
         and not r.models["yolo11s-pose"].served

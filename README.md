@@ -39,7 +39,7 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | Role | Model | Measured on the RTX 3060 |
 |---|---|---|
 | `faces` | insightface `buffalo_l` (SCRFD, ArcFace, 3D landmarks) | 0.6 GB, 0.05 s a photo once loaded |
-| `transcribe` | Whisper large-v3 (faster-whisper, float16) | 3.7 GB, 1.2 s for 11 s of speech |
+| `transcribe` | Whisper large-v3-turbo (faster-whisper, float16, in its own CUDA 12 worker venv) | 2.0 GB, 0.4 s for 11 s of speech |
 | `transcribe-fast` | Whisper small | 0.6 GB, 0.3 s for 11 s |
 
 The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.

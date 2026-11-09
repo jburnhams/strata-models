@@ -24,3 +24,6 @@ A view can now pad the picture (`{pad: 2}`: centred on a mid-grey canvas twice i
 - Chatterbox Turbo refuses a reference recording under 5 s. Qwen3-TTS clones closer with the reference's words (`voice_text`).
 - The runner's voice for cloning is cut from Legends' race audio (wearer segments, `audio_clean.flac`): about 21 s, wind and breathing
   included. A clean 20-30 s recording read indoors would be a better reference.
+
+## 2026-11-09: one CUDA per venv: Whisper in a worker venv, the service on CUDA 13
+onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for CUDA 12; both need cuDNN 9, whose CUDA 12 and CUDA 13 builds share the file name libcudnn.so.9, so one process cannot have both. Whisper now runs as a venv-worker (`workers/whisper.py`, venv `whisper` from `scripts/setup_worker_venv.sh whisper`, its own CUDA 12 wheels first on its library path), and the service's venv moved to onnxruntime-gpu 1.31 on torch's CUDA 13 wheels (plus nvidia-curand, which torch lacks and onnxruntime's CUDA provider needs). Measured on the RTX 3060 under a lease: faces 0.72 GB, 0.04 s a photo warm (as before); Whisper turbo in its worker 2.0 GB, 0.41 s for the 11 s sample warm. A clip is now decoded alone (ffmpeg -ss/-to), not the whole file. The worker loop is shared (`workers/protocol.py`), used by the TTS and Whisper workers.

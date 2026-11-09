@@ -17,7 +17,16 @@ import subprocess
 
 from protocol import ParamError, serve
 
-KEYS = ("language", "task", "word_timestamps", "vad_filter", "beam_size", "condition_on_previous_text", "initial_prompt", "temperature")
+KEYS = (
+    "language",
+    "task",
+    "word_timestamps",
+    "vad_filter",
+    "beam_size",
+    "condition_on_previous_text",
+    "initial_prompt",
+    "temperature",
+)
 M = {}
 
 
@@ -42,7 +51,26 @@ def decode(path, clip=None, rate=16000, run=subprocess.run):
     import numpy as np
 
     cut = ["-ss", f"{float(clip[0]):.3f}", "-to", f"{float(clip[1]):.3f}"] if clip else []
-    p = run(["ffmpeg", "-nostdin", "-v", "error", *cut, "-i", path, "-vn", "-f", "s16le", "-ac", "1", "-ar", str(rate), "-"], capture_output=True)
+    p = run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            *cut,
+            "-i",
+            path,
+            "-vn",
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-ar",
+            str(rate),
+            "-",
+        ],
+        capture_output=True,
+    )
     if p.returncode != 0:
         raise ParamError(f"ffmpeg could not decode {path}: {p.stderr.decode(errors='replace').strip()[-300:]}")
     return np.frombuffer(p.stdout, np.int16).astype(np.float32) / 32768.0, float(clip[0]) if clip else 0.0
@@ -66,17 +94,33 @@ def run(params):
     audio, off = decode(path, clip)
     if params.get("detect_language_only"):
         lang, prob, probs = M["model"].detect_language(audio)[:3]
-        return dict(language=lang, language_probability=_r(prob), all_language_probs={k: round(float(v), 4) for k, v in probs})
+        return dict(
+            language=lang, language_probability=_r(prob), all_language_probs={k: round(float(v), 4) for k, v in probs}
+        )
     kw = dict(word_timestamps=True, vad_filter=False, beam_size=5, condition_on_previous_text=False)
     kw.update({k: params[k] for k in KEYS if k in params})
     segs, info = M["model"].transcribe(audio, **kw)
     out = []
     for s in segs:
-        d = dict(start=_r(s.start + off), end=_r(s.end + off), text=s.text, avg_logprob=_r(s.avg_logprob), no_speech_prob=_r(s.no_speech_prob))
+        d = dict(
+            start=_r(s.start + off),
+            end=_r(s.end + off),
+            text=s.text,
+            avg_logprob=_r(s.avg_logprob),
+            no_speech_prob=_r(s.no_speech_prob),
+        )
         if s.words:
-            d["words"] = [dict(start=_r(w.start + off), end=_r(w.end + off), word=w.word, probability=_r(w.probability)) for w in s.words]
+            d["words"] = [
+                dict(start=_r(w.start + off), end=_r(w.end + off), word=w.word, probability=_r(w.probability))
+                for w in s.words
+            ]
         out.append(d)
-    return dict(language=info.language, language_probability=_r(info.language_probability), duration=_r(info.duration), segments=out)
+    return dict(
+        language=info.language,
+        language_probability=_r(info.language_probability),
+        duration=_r(info.duration),
+        segments=out,
+    )
 
 
 if __name__ == "__main__":
