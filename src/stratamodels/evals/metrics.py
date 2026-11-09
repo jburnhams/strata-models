@@ -69,6 +69,24 @@ def _cer(item, output, error):
     r = list(' '.join(normalise(ref))); return (len(r) if error else edits(r, list(' '.join(normalise(transcript(output))))), len(r))
 
 
+# ---- speech (text to speech) -----------------------------------------------------------------------------------------------------------------
+def _tts_wer(item, output, error):
+    """Intelligibility: the words the [score] pass heard in the audio (a transcription) against the text that was to be spoken. A failed job, or a
+    reading that failed, is all errors; an output not read yet does not count."""
+    ref = _ref_text(item) or (item.get('input') or {}).get('text')
+    if ref is None: return None
+    r = normalise(ref)
+    if error: return (len(r), len(r))
+    sc = (output or {}).get('scored')
+    if sc is None: return None
+    return (len(r), len(r)) if sc.get('error') else (edits(r, normalise(transcript(sc.get('result')))), len(r))
+
+
+def _rtf(item, output, error):
+    if error or not isinstance(output, dict) or not output.get('duration_s'): return None
+    return float(output.get('seconds') or item.get('_run_s') or 0) / float(output['duration_s'])
+
+
 # ---- faces --------------------------------------------------------------------------------------------------------------------------------
 def iou(a, b):
     """Intersection over union of two [x1, y1, x2, y2] boxes."""
@@ -259,6 +277,9 @@ METRICS = {m.name: m for m in [
     Metric('parsed', 'binary', 'higher', 'The output is valid JSON', '%', _parsed),
     Metric('failed', 'binary', 'lower', 'The job failed', '%', _failed),
     Metric('peak_vram_gb', 'mean', 'lower', 'Highest VRAM the job\'s own process used (image generation runs as its own process)', 'GB', _peak_vram),
+    Metric('tts_wer', 'ratio', 'lower', 'Intelligibility of speech made from text: the [score] model transcribes the audio back, word error rate against the text', '%', _tts_wer),
+    Metric('rtf', 'mean', 'lower', 'Real-time factor: seconds to make the audio over the audio\'s length (under 1 is faster than speaking it)', '', _rtf),
+    Metric('judged', 'judged', 'higher', 'Blind human judgments: share of head-to-head pairs against the baseline the candidate won (a tie is half a win)', '%'),
     Metric('latency_s', 'mean', 'lower', 'Seconds the model ran per item (model already loaded; load time is reported apart)', 's', _latency),
 ]}
 

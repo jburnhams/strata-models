@@ -1,4 +1,5 @@
 """stratamodels.evals.similarity: text (words and sound), images (perceptual hash, structure, colour), JSON, and picking the kind."""
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -45,7 +46,23 @@ def test_image_similarity_without_pillow_compares_bytes(tmp_path, monkeypatch):
 def test_json_and_kinds():
     assert S.similarity(dict(a=1, seconds=2.0), dict(a=1, seconds=9.0)) == 1.0 and 0 < S.similarity(dict(a=1), dict(a=2)) < 1
     assert S.kind_of(tx('a'), tx('b')) == 'text' and S.kind_of('a', 'b') == 'text' and S.kind_of(dict(a=1), [1]) == 'json'
-    with pytest.raises(ValueError, match='no similarity'): S.similarity('a', 'b', 'audio')
+    with pytest.raises(ValueError, match='no similarity'): S.similarity('a', 'b', 'video')
+
+
+def _wav(path, freqs, seconds=1.0, sr=24000):
+    import wave
+    t = np.arange(int(sr * seconds)) / sr; x = sum(np.sin(2 * np.pi * f * t) for f in freqs) / len(freqs) * 0.5
+    with wave.open(str(path), 'wb') as w: w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes((x * 32767).astype('<i2').tobytes())
+    return str(path)
+
+
+def test_audio_similarity_hears_voice_colour_and_length(tmp_path):
+    low, low2, high, short = _wav(tmp_path / 'a.wav', [150, 300]), _wav(tmp_path / 'b.wav', [150, 300]), _wav(tmp_path / 'c.wav', [2000, 4000]), _wav(tmp_path / 'd.wav', [150, 300], 0.5)
+    assert S.similarity(dict(path=low), dict(path=low2)) == pytest.approx(1.0, abs=1e-6) and S.kind_of(dict(path=low), dict(path=high)) == 'audio'
+    assert S.similarity(dict(path=low), dict(path=high)) < S.similarity(dict(path=low), dict(path=short)) < 1.0
+    tiny = _wav(tmp_path / 'e.wav', [200], 0.01); assert S.audio_similarity(tiny, low) == pytest.approx(0.01, abs=1e-3)
+    (tmp_path / 'bad.wav').write_bytes(b'nope'); assert S.audio_similarity(str(tmp_path / 'bad.wav'), low) == 0.0
+    assert S.similarity(dict(path=low), dict(path='x.png'), 'audio') == 0.0 and 'audio' in S.KINDS
 
 
 def test_text_similarity_reads_answers_and_captions_not_only_transcripts():
