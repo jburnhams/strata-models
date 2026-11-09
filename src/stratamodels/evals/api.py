@@ -38,7 +38,18 @@ def _unsign(tok):
 
 
 def mount(app, scheduler):
-    runs = {}; engine = lambda: scheduler.store.engine
+    runs = {}; engine = lambda: scheduler.store.engine; memo = {}
+
+    def analysis(s):
+        """The analysis, recomputed only when the spec, the outputs or the judgments changed: the bootstraps take seconds to a minute."""
+        from sqlalchemy import func, select
+        from stratamodels.db.models import EvalJudgment as J, EvalResult as Rr
+        with C.session(engine()) as ses:
+            sig = (C._canon(s.to_json()), ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)), ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
+                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset).version)
+        hit = memo.get(s.name)
+        if hit and hit[0] == sig: return hit[1]
+        res = C.analyse(s, engine()); memo[s.name] = (sig, res); return res
 
     def spec_or_404(name):
         try: return C.load_spec(name)
@@ -57,7 +68,7 @@ def mount(app, scheduler):
     @app.get('/api/evals/{name}')
     def get_eval(name: str):
         s = spec_or_404(name)
-        try: return C.analyse(s, engine())
+        try: return analysis(s)
         except C.EvalError as e: raise HTTPException(400, str(e))
 
     @app.post('/api/evals/{name}/run', status_code=202)
@@ -76,7 +87,7 @@ def mount(app, scheduler):
 
     @app.get('/api/evals/{name}/report', response_class=PlainTextResponse)
     def get_report(name: str):
-        s = spec_or_404(name); res = C.analyse(s, engine()); ds, outs, _ = C.outputs_for(s, engine())
+        s = spec_or_404(name); res = analysis(s); ds, outs, _ = C.outputs_for(s, engine())
         return R.render(res, R.worst(s, outs, ds.items, s.primary))
 
     @app.get('/api/evals/{name}/pair')

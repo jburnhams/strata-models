@@ -62,3 +62,12 @@ describe('An experiment', () => {
     expect(await screen.findByText('Nothing to judge yet')).toBeInTheDocument()
   })
 })
+
+describe('Evals list, odd entries', () => {
+  it('shows experiments without outputs and datasets without a version', async () => {
+    server.use(http.get('/api/evals', () => HttpResponse.json({ experiments: [{ name: 'new', question: 'q?', role: 'faces', dataset: 'd', candidates: [], total: 10 }], datasets: [{ name: 'd' }] })))
+    setup(<App />, { route: '/evals' })
+    expect(await screen.findByText('0 of 10 outputs')).toBeInTheDocument()
+    expect(screen.getByText('0 of 1 experiments have every output in; 1 still need a run.')).toBeInTheDocument()
+  })
+})

@@ -19,12 +19,15 @@ API (JSON), for apps (through the client in client/) and for the web app:
   DELETE /api/leases/{id}                give it back
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
   GET/PUT /api/settings
+  GET  /api/images?before=&limit=        generated pictures (image-generate jobs), newest first
+  GET  /api/images/file?path=            one generated or uploaded picture
+  POST /api/images/upload?name=          a reference picture (body = the file) -> {path}
   /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
 The page at / serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html`."""
 import os, time
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -166,6 +169,39 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         if 'vram_reserve_gb' in changes: s.reserve_mb = settings.vram_reserve_gb() * 1024.0
         if 'models_dir' in changes: s.models_dir = settings.models_dir()
         return settings.all_settings()
+
+    @app.get('/api/images')
+    def get_images(before: int | None = None, limit: int = 40):
+        """Generated pictures, newest first (the image-generate jobs that finished), for the gallery."""
+        items = [j for j in s.store.list(status='done', role='image-generate', before=before, limit=limit)]
+        out = []
+        for j in items:
+            full = s.store.get(j['id']); r = full.get('result') or {}
+            if r.get('path'): out.append(dict(id=j['id'], app=j['app'], model=j['model'], prompt=(j['params'] or {}).get('prompt'), finished_at=j['finished_at'], **{k: r.get(k) for k in ('path', 'width', 'height', 'seed', 'steps', 'seconds', 'peak_vram_mb')}))
+        return dict(items=out, next=items[-1]['id'] if len(items) >= max(1, min(limit, 500)) else None)
+
+    def _inside(path, *roots):
+        real = os.path.realpath(path)
+        return any(real.startswith(os.path.realpath(r) + os.sep) for r in roots)
+
+    @app.get('/api/images/file')
+    def get_image_file(path: str):
+        """A generated picture or an uploaded reference, and nothing else on the disk."""
+        roots = [os.path.join(settings.data_dir(), d) for d in ('generated', 'uploads')]
+        if not _inside(path, *roots) or not os.path.isfile(path): raise HTTPException(404, 'no such picture')
+        return FileResponse(path)
+
+    @app.post('/api/images/upload', status_code=201)
+    async def post_upload(request: Request, name: str = 'reference.png'):
+        """A reference picture for an edit (the request body is the file); returns the path to give in ref_images."""
+        data = await request.body()
+        if not data or len(data) > 40 * 1024 * 1024: raise HTTPException(400, 'send a picture of at most 40 MB as the request body')
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in ('.png', '.jpg', '.jpeg', '.webp'): raise HTTPException(400, 'a reference is a .png, .jpg or .webp picture')
+        import hashlib
+        folder = os.path.join(settings.data_dir(), 'uploads'); os.makedirs(folder, exist_ok=True); p = os.path.join(folder, hashlib.sha256(data).hexdigest()[:16] + ext)
+        with open(p, 'wb') as f: f.write(data)
+        return dict(path=p)
 
     from stratamodels.evals import api as evals_api
     evals_api.mount(app, s)

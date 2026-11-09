@@ -36,7 +36,7 @@ describe('Overview', () => {
 describe('Models', () => {
   it('lists roles and models, and loads or frees one', async () => {
     const { user } = setup(<App />, { route: '/models' })
-    expect(await screen.findByText(/2 of 3 roles are served here\. strata-360 still load/)).toBeInTheDocument()
+    expect(await screen.findByText(/3 of 4 roles are served here\. strata-360 still load/)).toBeInTheDocument()
     expect(screen.getAllByText('Not served yet').length).toBeGreaterThan(0)
     await user.click(screen.getByRole('button', { name: 'Free buffalo_l' }))
     await user.click(screen.getByRole('button', { name: 'Load whisper-large-v3' }))

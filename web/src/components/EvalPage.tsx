@@ -105,7 +105,7 @@ function RunButton({ name }: { name: string }) {
 
 export default function EvalPage() {
   const { name = '' } = useParams()
-  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: 15_000 })
+  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: 60_000 })
   return (
     <div className="grid gap-6">
       <PageHeader title={name} scope={load.status === 'ready' ? load.data.experiment.question : undefined} actions={<RunButton name={name} />} finding={load.status === 'ready' ? { text: finding(load.data) } : undefined} />

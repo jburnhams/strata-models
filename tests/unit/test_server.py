@@ -95,3 +95,20 @@ def test_settings_roundtrip_and_main(client, scheduler, tmp_path, monkeypatch):
     monkeypatch.setattr(gpu, 'query', lambda *a, **k: None)
     server_app.main(['--port', '8366', '--memory'])
     assert runs == [('127.0.0.1', 8366)]
+
+
+def test_generated_pictures_gallery_files_and_uploads(client, scheduler, tmp_path):
+    import os
+    from stratamodels import settings
+    gen = os.path.join(settings.data_dir(), 'generated', '2026-11-09'); os.makedirs(gen); pic = os.path.join(gen, 'a.png'); open(pic, 'wb').write(b'png')
+    j = scheduler.store.add(kind='run', role='image-generate', model='flux3-klein', app='web', priority='interactive', params=dict(prompt='a fox'))
+    scheduler.store.update(j['id'], status='done', result=dict(path=pic, width=1024, height=1024, seed=1, steps=16, seconds=9.5, peak_vram_mb=6100), finished_at=1.0)
+    k = scheduler.store.add(kind='run', role='image-generate', model='flux3-klein', app='web', priority='interactive', params=dict(prompt='broken')); scheduler.store.update(k['id'], status='done', result={})
+    g = client.get('/api/images').json(); assert [x['prompt'] for x in g['items']] == ['a fox'] and g['items'][0]['seconds'] == 9.5 and g['next'] is None
+    assert client.get('/api/images', params=dict(limit=1)).json()['next'] == k['id']
+    assert client.get('/api/images/file', params=dict(path=pic)).content == b'png'
+    secret = tmp_path / 'secret.png'; secret.write_bytes(b'no')
+    assert client.get('/api/images/file', params=dict(path=str(secret))).status_code == 404 and client.get('/api/images/file', params=dict(path=os.path.join(gen, '..', '..', '..', 'x'))).status_code == 404
+    up = client.post('/api/images/upload', params=dict(name='ref.jpg'), content=b'jpegdata').json()['path']
+    assert up.endswith('.jpg') and client.get('/api/images/file', params=dict(path=up)).content == b'jpegdata'
+    assert client.post('/api/images/upload', params=dict(name='x.exe'), content=b'x').status_code == 400 and client.post('/api/images/upload', content=b'').status_code == 400

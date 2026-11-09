@@ -7,8 +7,8 @@
 Heavy libraries are imported inside `load`, so the service starts (and its tests run) without them; `available()` says which are installed."""
 import importlib
 
-RUNTIMES = {'fake': 'stratamodels.runtimes.fake', 'insightface': 'stratamodels.runtimes.faces', 'faster-whisper': 'stratamodels.runtimes.whisper'}
-NEEDS = {'fake': (), 'insightface': ('insightface', 'onnxruntime', 'cv2'), 'faster-whisper': ('faster_whisper', 'ctranslate2')}
+RUNTIMES = {'fake': 'stratamodels.runtimes.fake', 'insightface': 'stratamodels.runtimes.faces', 'faster-whisper': 'stratamodels.runtimes.whisper', 'sd-cpp': 'stratamodels.runtimes.sdcpp'}
+NEEDS = {'fake': (), 'insightface': ('insightface', 'onnxruntime', 'cv2'), 'faster-whisper': ('faster_whisper', 'ctranslate2'), 'sd-cpp': ('huggingface_hub',)}
 
 
 class RunError(ValueError):
@@ -29,4 +29,8 @@ def available():
             try: importlib.import_module(m)
             except Exception: missing.append(m)
         out[name] = missing
+    import os
+    from stratamodels import settings
+    from stratamodels.runtimes import sdcpp
+    if not os.path.isfile(sdcpp.binary(settings.models_dir())): out['sd-cpp'] = out['sd-cpp'] + ['the sd-cli binary (stable-diffusion.cpp)']
     return out

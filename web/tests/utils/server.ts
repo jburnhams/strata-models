@@ -16,10 +16,11 @@ export const fixtures = {
     events: [{ at: NOW - 600, text: 'loaded whisper-large-v3 in 2.9 s (3.6 GB)' }],
   }),
   registry: (): Registry => ({
-    roles: [{ key: 'faces', description: 'Find faces', model: 'buffalo_l' }, { key: 'transcribe', description: 'Speech to text', model: 'whisper-large-v3' }, { key: 'vision-language', description: 'Pictures', model: 'qwen' }],
+    roles: [{ key: 'image-generate', description: 'Pictures', model: 'flux3-klein' }, { key: 'faces', description: 'Find faces', model: 'buffalo_l' }, { key: 'transcribe', description: 'Speech to text', model: 'whisper-large-v3' }, { key: 'vision-language', description: 'Pictures', model: 'qwen' }],
     models: [
       { key: 'buffalo_l', runtime: 'insightface', name: 'buffalo_l', roles: ['faces'], vram_gb: 1, licence: 'non-commercial', source: 'https://example.org/i', used_by: ['bright-horizons'], options: {}, served: true, resident: true, missing: [], stats: { jobs: 300, mean_run_s: 0.05, last_at: NOW } },
       { key: 'whisper-large-v3', runtime: 'faster-whisper', name: 'large-v3', roles: ['transcribe'], vram_gb: 4.5, licence: 'MIT', source: '', used_by: ['strata-360'], options: {}, served: true, resident: false, missing: [], stats: null },
+      { key: 'flux3-klein', runtime: 'sd-cpp', name: 'FLUX.3 [klein]', roles: ['image-generate'], vram_gb: 7, licence: 'FLUX Kommunity', source: '', used_by: [], options: { steps: 16 }, served: true, resident: false, missing: [], stats: null },
       { key: 'qwen', runtime: 'llama-server', name: 'q', roles: ['vision-language'], vram_gb: 7, licence: 'Apache-2.0', source: '', used_by: ['strata-360'], options: {}, served: false, resident: false, missing: [], stats: null },
     ] as Model[],
   }),
@@ -52,8 +53,8 @@ export const evalFixtures = {
 
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1 }
 
-export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis() }
-export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis() }
+export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
+export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }
 
 export const handlers = [
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0', gpu: true })),
@@ -68,6 +69,11 @@ export const handlers = [
     const items = rows.slice(0, mock.pageSize)
     return HttpResponse.json({ items, next: rows.length > items.length ? items[items.length - 1].id : null })
   }),
+  http.post('/api/jobs', async ({ request }) => { const b = (await request.json()) as { params: { prompt: string } }; mock.calls.push(`generate ${b.params.prompt}`); if (b.params.prompt === 'fail') return HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'queued' }, { status: 201 }); return HttpResponse.json({ ...fixtures.jobs()[0], id: 99, status: 'queued' }, { status: 201 }) }),
+  http.get('/api/jobs/98', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'failed', error: 'stable-diffusion.cpp is not installed' })),
+  http.get('/api/jobs/99', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 99, role: 'image-generate', model: 'flux3-klein', params: { prompt: 'a hare' }, status: 'done', result: { path: '/d/generated/a.png', width: 1024, height: 1024, seed: 5, steps: 16, seconds: 9.4, peak_vram_mb: 6200 } })),
+  http.get('/api/images', () => HttpResponse.json({ items: mock.images, next: null })),
+  http.post('/api/images/upload', () => { mock.calls.push('upload'); return HttpResponse.json({ path: '/d/uploads/r.png' }, { status: 201 }) }),
   http.get('/api/jobs/:id', ({ params }) => { const j = fixtures.jobs().find(x => x.id === Number(params.id)); return j ? HttpResponse.json({ ...j, result: j.status === 'done' ? { faces: [] } : null }) : HttpResponse.json({ detail: 'no job' }, { status: 404 }) }),
   http.delete('/api/jobs/:id', ({ params }) => { mock.calls.push(`cancel ${params.id}`); return HttpResponse.json(fixtures.jobs()[0]) }),
   http.get('/api/usage', ({ request }) => HttpResponse.json({ ...fixtures.usage(), hours: Number(new URL(request.url).searchParams.get('hours')) })),

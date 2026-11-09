@@ -98,3 +98,28 @@ export const evalsApi = {
   judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
   mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
 }
+
+// ---- image generation ----------------------------------------------------------------------------------------------------------------------
+export interface GeneratedImage { id: number; app: string; model: string; prompt: string; finished_at: number; path: string; width: number; height: number; seed: number; steps: number; seconds: number; peak_vram_mb: number }
+export interface ImagePage { items: GeneratedImage[]; next: number | null }
+export interface GenerateParams { prompt: string; width?: number; height?: number; seed?: number; steps?: number; cfg_scale?: number; ref_images?: string[] }
+
+export const imagesApi = {
+  list: (before?: number) => get<ImagePage>(`/api/images?limit=24${before ? `&before=${before}` : ''}`),
+  fileUrl: (path: string) => withBase(`/api/images/file?path=${encodeURIComponent(path)}`),
+  upload: async (f: File) => {
+    const r = await fetch(withBase(`/api/images/upload?name=${encodeURIComponent(f.name)}`), { method: 'POST', body: f })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((d as { detail?: string }).detail || `${r.status} ${r.statusText}`)
+    return d as { path: string }
+  },
+  /** Queue an interactive job, then wait for it (long polls); throws with the job's error when it fails. */
+  generate: async (model: string | undefined, params: GenerateParams) => {
+    const j = await send<Job>('POST', '/api/jobs', { role: 'image-generate', params, app: 'strata-models web', priority: 'interactive', model: model || null })
+    for (;;) {
+      const r = await get<Job>(`/api/jobs/${j.id}?wait=30`)
+      if (r.status === 'done') return r
+      if (r.status === 'failed' || r.status === 'cancelled') throw new Error(r.error || `the job was ${r.status}`)
+    }
+  },
+}

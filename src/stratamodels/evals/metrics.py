@@ -181,7 +181,7 @@ def summarise(metric, items, outputs, seed=None):
     m = METRICS[metric]
     if m.shape == 'dataset':
         val = m.dataset(items, outputs); rng = np.random.default_rng(S.SEED if seed is None else seed); n = len(items); boots = []
-        for _ in range(300):
+        for _ in range(200):
             idx = rng.integers(0, n, n); v = m.dataset([items[i] for i in idx], [outputs[i] for i in idx])
             if not math.isnan(v): boots.append(v)
         lo, hi = (float(np.quantile(boots, 0.025)), float(np.quantile(boots, 0.975))) if boots else (float('nan'), float('nan'))
@@ -204,7 +204,7 @@ def compare(metric, items, base_outputs, cand_outputs, seed=None):
     m = METRICS[metric]
     if m.shape == 'dataset':
         a = m.dataset(items, base_outputs); b = m.dataset(items, cand_outputs); rng = np.random.default_rng(S.SEED if seed is None else seed); n = len(items); d = []
-        for _ in range(300):
+        for _ in range(200):
             idx = rng.integers(0, n, n); it = [items[i] for i in idx]
             x, y = m.dataset(it, [base_outputs[i] for i in idx]), m.dataset(it, [cand_outputs[i] for i in idx])
             if not (math.isnan(x) or math.isnan(y)): d.append(y - x)
