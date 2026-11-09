@@ -2,7 +2,9 @@
 
 params: path (an audio or video file ffmpeg can read); language (ISO code, else detected); task (transcribe | translate); word_timestamps (default
 true); vad_filter (default false: callers that cut by pauses do it themselves); beam_size (default 5); condition_on_previous_text (default false:
-fewer runaway repeats); initial_prompt (names, jargon); clip (start, end seconds)."""
+fewer runaway repeats); initial_prompt (names, jargon); clip (start, end seconds).
+detect_language_only: true answers {language, language_probability, all_language_probs: {code: p}} without transcribing (strata-360 picks the
+language of each speech chunk among the few it expects, then transcribes the chunk in it)."""
 import os
 
 from stratamodels.runtimes import RunError
@@ -33,8 +35,11 @@ def _r(v): return round(float(v), 3)
 def run(handle, params):
     path = params.get('path')
     if not isinstance(path, str) or not os.path.isfile(path): raise RunError(f'no such audio file: {path!r}')
-    unknown = set(params) - set(KEYS) - {'path', 'clip'}
+    unknown = set(params) - set(KEYS) - {'path', 'clip', 'detect_language_only'}
     if unknown: raise RunError(f'unknown params {sorted(unknown)}')
+    if params.get('detect_language_only'):
+        lang, prob, probs = handle['model'].detect_language(decode(path))[:3]
+        return dict(language=lang, language_probability=_r(prob), all_language_probs={l: round(float(p), 4) for l, p in probs})
     kw = dict(word_timestamps=True, vad_filter=False, beam_size=5, condition_on_previous_text=False)
     kw.update({k: params[k] for k in KEYS if k in params})
     if params.get('clip'): kw['clip_timestamps'] = [float(v) for v in params['clip']]

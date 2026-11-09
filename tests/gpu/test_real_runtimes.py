@@ -63,3 +63,13 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
         with pytest.raises(runtimes.RunError, match='one image'): rt.run(h, dict(paths=[IMAGE], views=[{}]))
         with pytest.raises(runtimes.RunError, match='crop must'): rt.run(h, dict(path=IMAGE, views=[dict(crop='x')]))
     finally: rt.unload(h)
+
+
+@pytest.mark.skipif(not AUDIO or runtimes.available()['faster-whisper'], reason='needs STRATAMODELS_TEST_AUDIO and faster-whisper')
+def test_whisper_detects_the_language_alone():
+    m = Registry.load().resolve('transcribe-fast'); rt = runtimes.get(m.runtime); h = rt.load(m, MODELS)
+    try:
+        r = rt.run(h, dict(path=AUDIO, detect_language_only=True))
+        assert r['language'] == 'en' and r['all_language_probs']['en'] > 0.5 and 'segments' not in r
+        with pytest.raises(runtimes.RunError, match='unknown params'): rt.run(h, dict(path=AUDIO, colour='red'))
+    finally: rt.unload(h)
