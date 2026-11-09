@@ -5,10 +5,31 @@
     unload(handle)                           free its GPU memory
 
 Heavy libraries are imported inside `load`, so the service starts (and its tests run) without them; `available()` says which are installed."""
+
 import importlib
 
-RUNTIMES = {'fake': 'stratamodels.runtimes.fake', 'insightface': 'stratamodels.runtimes.faces', 'faster-whisper': 'stratamodels.runtimes.whisper', 'sd-cpp': 'stratamodels.runtimes.sdcpp', 'open-clip': 'stratamodels.runtimes.clip', 'face-kind': 'stratamodels.runtimes.facekind', 'venv-worker': 'stratamodels.runtimes.worker', 'llama-server': 'stratamodels.runtimes.llama', 'recorded': 'stratamodels.runtimes.recorded'}
-NEEDS = {'fake': (), 'insightface': ('insightface', 'onnxruntime', 'cv2'), 'faster-whisper': ('faster_whisper', 'ctranslate2'), 'sd-cpp': ('huggingface_hub',), 'open-clip': ('open_clip', 'torch'), 'face-kind': ('open_clip', 'torch'), 'venv-worker': (), 'llama-server': ('huggingface_hub',), 'recorded': ()}            # venv-worker: its libraries are in the model's own venv (checked when it loads)
+RUNTIMES = {
+    "fake": "stratamodels.runtimes.fake",
+    "insightface": "stratamodels.runtimes.faces",
+    "faster-whisper": "stratamodels.runtimes.whisper",
+    "sd-cpp": "stratamodels.runtimes.sdcpp",
+    "open-clip": "stratamodels.runtimes.clip",
+    "face-kind": "stratamodels.runtimes.facekind",
+    "venv-worker": "stratamodels.runtimes.worker",
+    "llama-server": "stratamodels.runtimes.llama",
+    "recorded": "stratamodels.runtimes.recorded",
+}
+NEEDS = {
+    "fake": (),
+    "insightface": ("insightface", "onnxruntime", "cv2"),
+    "faster-whisper": ("faster_whisper", "ctranslate2"),
+    "sd-cpp": ("huggingface_hub",),
+    "open-clip": ("open_clip", "torch"),
+    "face-kind": ("open_clip", "torch"),
+    "venv-worker": (),
+    "llama-server": ("huggingface_hub",),
+    "recorded": (),
+}  # venv-worker: its libraries are in the model's own venv (checked when it loads)
 
 
 class RunError(ValueError):
@@ -16,7 +37,8 @@ class RunError(ValueError):
 
 
 def get(name):
-    if name not in RUNTIMES: raise KeyError(f'no runtime {name!r}')
+    if name not in RUNTIMES:
+        raise KeyError(f"no runtime {name!r}")
     return importlib.import_module(RUNTIMES[name])
 
 
@@ -26,13 +48,20 @@ def available():
     for name, mods in NEEDS.items():
         missing = []
         for m in mods:
-            try: importlib.import_module(m)
-            except Exception: missing.append(m)
+            try:
+                importlib.import_module(m)
+            except Exception:
+                missing.append(m)
         out[name] = missing
     import os
+
     from stratamodels import settings
     from stratamodels.runtimes import sdcpp
-    if not os.path.isfile(sdcpp.binary(settings.models_dir())): out['sd-cpp'] = out['sd-cpp'] + ['the sd-cli binary (stable-diffusion.cpp)']
+
+    if not os.path.isfile(sdcpp.binary(settings.models_dir())):
+        out["sd-cpp"] = out["sd-cpp"] + ["the sd-cli binary (stable-diffusion.cpp)"]
     from stratamodels.runtimes import llama
-    if not os.path.isfile(llama.binary(settings.models_dir())): out['llama-server'] = out['llama-server'] + ['the llama-server binary (llama.cpp)']
+
+    if not os.path.isfile(llama.binary(settings.models_dir())):
+        out["llama-server"] = out["llama-server"] + ["the llama-server binary (llama.cpp)"]
     return out

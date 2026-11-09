@@ -1,6 +1,6 @@
 #!/bin/bash
 # Launcher: runs the strata-models CLI with the project environment. Override the interpreter with STRATAMODELS_PYTHON.
-# The CUDA 12 libraries the runtimes load by name (cuBLAS, cuDNN, ... from the nvidia-* wheels in requirements-gpu.txt) are put on the library path.
+# The CUDA 12 libraries the runtimes load by name (cuBLAS, cuDNN, ... from the nvidia-* wheels in the `gpu` group in pyproject.toml) are put on the library path.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${STRATAMODELS_PYTHON:-$ROOT/.venv/bin/python}"; [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"; [ -x "$PY" ] || PY="python3"
 # (not nvidia/cu13: torch's own CUDA 13 libraries, which it finds itself; on the path they would shadow the CUDA 12 cuDNN that onnxruntime and CTranslate2 need)

@@ -17,7 +17,14 @@ Result: {path, duration_s, sample_rate, seconds, engine, voice}.
 
 A model entry can carry the settings an eval chose as options.defaults ({voice = ..., speed = ...}): the role then speaks with them unless a job
 says otherwise, so apps ask the role for speech and get the chosen voice."""
-import json, os, subprocess, sys, time, traceback, uuid
+
+import json
+import os
+import subprocess
+import sys
+import time
+import traceback
+import uuid
 
 E = {}
 
@@ -28,122 +35,205 @@ class ParamError(ValueError):
 
 def _seed(n):
     import random
+
     import numpy as np
-    random.seed(n); np.random.seed(n)
+
+    random.seed(n)
+    np.random.seed(n)
     try:
         import torch
+
         torch.manual_seed(n)
-        if torch.cuda.is_available(): torch.cuda.manual_seed_all(n)
-    except ImportError: pass
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(n)
+    except ImportError:
+        pass
 
 
 def _ref(p, need=True):
-    v = p.get('voice')
+    v = p.get("voice")
     if not v:
-        if need: raise ParamError('this engine clones a voice: give voice = the path of a reference recording')
+        if need:
+            raise ParamError("this engine clones a voice: give voice = the path of a reference recording")
         return None
-    if not os.path.isfile(v): raise ParamError(f'no such reference recording: {v!r}')
+    if not os.path.isfile(v):
+        raise ParamError(f"no such reference recording: {v!r}")
     return v
 
 
 # ---- loading --------------------------------------------------------------------------------------------------------------------------------
 def load(model, models_dir):
-    o = model.get('options') or {}; eng = o.get('engine'); E.clear(); E.update(engine=eng, name=model.get('name'), options=o)
-    if eng == 'kokoro':
+    o = model.get("options") or {}
+    eng = o.get("engine")
+    E.clear()
+    E.update(engine=eng, name=model.get("name"), options=o)
+    if eng == "kokoro":
+        import logging
+
         from kokoro_onnx import Kokoro
-        import logging; logging.getLogger('phonemizer').setLevel(logging.ERROR)
-        d = o.get('dir') or os.path.join(models_dir, 'tts', 'kokoro')
-        files = [os.path.join(d, f) for f in ('kokoro-v1.0.onnx', 'voices-v1.0.bin')]
+
+        logging.getLogger("phonemizer").setLevel(logging.ERROR)
+        d = o.get("dir") or os.path.join(models_dir, "tts", "kokoro")
+        files = [os.path.join(d, f) for f in ("kokoro-v1.0.onnx", "voices-v1.0.bin")]
         missing = [f for f in files if not os.path.isfile(f)]
-        if missing: raise RuntimeError(f'missing {missing}: download them from https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0')
-        E['m'] = Kokoro(*files); return dict(voices=sorted(E['m'].get_voices()))
+        if missing:
+            raise RuntimeError(
+                f"missing {missing}: download them from https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0"
+            )
+        E["m"] = Kokoro(*files)
+        return dict(voices=sorted(E["m"].get_voices()))
     import torch
-    dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if eng == 'chatterbox':
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    if eng == "chatterbox":
         from chatterbox.tts import ChatterboxTTS
-        E['m'] = ChatterboxTTS.from_pretrained(device=dev); return dict(device=dev)
-    if eng == 'chatterbox-turbo':
+
+        E["m"] = ChatterboxTTS.from_pretrained(device=dev)
+        return dict(device=dev)
+    if eng == "chatterbox-turbo":
         from chatterbox.tts_turbo import ChatterboxTurboTTS
-        E['m'] = ChatterboxTurboTTS.from_pretrained(device=dev); return dict(device=dev)
-    if eng in ('qwen3-custom', 'qwen3-design', 'qwen3-clone'):
+
+        E["m"] = ChatterboxTurboTTS.from_pretrained(device=dev)
+        return dict(device=dev)
+    if eng in ("qwen3-custom", "qwen3-design", "qwen3-clone"):
         from qwen_tts import Qwen3TTSModel
-        E['m'] = Qwen3TTSModel.from_pretrained(model['name'], device_map=f'{dev}:0' if dev == 'cuda' else dev, dtype=torch.bfloat16 if dev == 'cuda' else torch.float32, attn_implementation=o.get('attn', 'sdpa'))
-        spk = getattr(E['m'].model, 'get_supported_speakers', None)
+
+        E["m"] = Qwen3TTSModel.from_pretrained(
+            model["name"],
+            device_map=f"{dev}:0" if dev == "cuda" else dev,
+            dtype=torch.bfloat16 if dev == "cuda" else torch.float32,
+            attn_implementation=o.get("attn", "sdpa"),
+        )
+        spk = getattr(E["m"].model, "get_supported_speakers", None)
         return dict(device=dev, speakers=sorted(spk() or []) if spk else None)
-    raise RuntimeError(f'unknown engine {eng!r}')
+    raise RuntimeError(f"unknown engine {eng!r}")
 
 
 # ---- speaking -------------------------------------------------------------------------------------------------------------------------------
 def speak(p):
     """(float32 mono samples, sample rate, voice used, whether `speed` was applied natively)."""
     import numpy as np
-    eng, m, text = E['engine'], E['m'], p['text']
-    if eng == 'kokoro':
-        v = p.get('voice') or 'bm_lewis'
-        if v not in m.get_voices(): raise ParamError(f'no Kokoro voice {v!r}')
-        lang = p.get('language') or ('en-gb' if v[0] == 'b' else 'en-us')
-        x, sr = m.create(text, voice=v, speed=float(p.get('speed') or 1.0), lang=lang); return np.asarray(x, np.float32), sr, v, True
-    if eng == 'chatterbox':
+
+    eng, m, text = E["engine"], E["m"], p["text"]
+    if eng == "kokoro":
+        v = p.get("voice") or "bm_lewis"
+        if v not in m.get_voices():
+            raise ParamError(f"no Kokoro voice {v!r}")
+        lang = p.get("language") or ("en-gb" if v[0] == "b" else "en-us")
+        x, sr = m.create(text, voice=v, speed=float(p.get("speed") or 1.0), lang=lang)
+        return np.asarray(x, np.float32), sr, v, True
+    if eng == "chatterbox":
         ref = _ref(p, need=False)
-        wav = m.generate(text, audio_prompt_path=ref, exaggeration=float(p.get('exaggeration', 0.5)), cfg_weight=float(p.get('cfg_weight', 0.5)), temperature=float(p.get('temperature', 0.8)))
-        return wav.squeeze(0).cpu().numpy().astype(np.float32), m.sr, ref or 'built-in', False
-    if eng == 'chatterbox-turbo':
+        wav = m.generate(
+            text,
+            audio_prompt_path=ref,
+            exaggeration=float(p.get("exaggeration", 0.5)),
+            cfg_weight=float(p.get("cfg_weight", 0.5)),
+            temperature=float(p.get("temperature", 0.8)),
+        )
+        return wav.squeeze(0).cpu().numpy().astype(np.float32), m.sr, ref or "built-in", False
+    if eng == "chatterbox-turbo":
         ref = _ref(p)
-        wav = m.generate(text, audio_prompt_path=ref, temperature=float(p.get('temperature', 0.8)), top_p=float(p.get('top_p', 0.95)))
+        wav = m.generate(
+            text, audio_prompt_path=ref, temperature=float(p.get("temperature", 0.8)), top_p=float(p.get("top_p", 0.95))
+        )
         return wav.squeeze(0).cpu().numpy().astype(np.float32), m.sr, ref, False
-    lang = p.get('language') or 'English'; kw = {k: p[k] for k in ('temperature', 'top_p') if k in p}
-    if eng == 'qwen3-custom':
-        spk = p.get('voice') or E['options'].get('voice') or 'Ryan'
-        wavs, sr = m.generate_custom_voice(text=text, speaker=spk, language=lang, instruct=p.get('instruct') or None, **kw); return np.asarray(wavs[0], np.float32), sr, spk, False
-    if eng == 'qwen3-design':
-        ins = p.get('instruct')
-        if not ins: raise ParamError('qwen3-design needs instruct: a description of the voice')
-        wavs, sr = m.generate_voice_design(text=text, instruct=ins, language=lang, **kw); return np.asarray(wavs[0], np.float32), sr, 'designed', False
-    if eng == 'qwen3-clone':
-        ref = _ref(p); rt = p.get('voice_text')
-        if not rt and p.get('voice_text_file'): rt = open(p['voice_text_file']).read().strip()
-        wavs, sr = m.generate_voice_clone(text=text, language=lang, ref_audio=ref, ref_text=rt, x_vector_only_mode=not rt, **kw); return np.asarray(wavs[0], np.float32), sr, ref, False
-    raise ParamError(f'unknown engine {eng!r}')
+    lang = p.get("language") or "English"
+    kw = {k: p[k] for k in ("temperature", "top_p") if k in p}
+    if eng == "qwen3-custom":
+        spk = p.get("voice") or E["options"].get("voice") or "Ryan"
+        wavs, sr = m.generate_custom_voice(
+            text=text, speaker=spk, language=lang, instruct=p.get("instruct") or None, **kw
+        )
+        return np.asarray(wavs[0], np.float32), sr, spk, False
+    if eng == "qwen3-design":
+        ins = p.get("instruct")
+        if not ins:
+            raise ParamError("qwen3-design needs instruct: a description of the voice")
+        wavs, sr = m.generate_voice_design(text=text, instruct=ins, language=lang, **kw)
+        return np.asarray(wavs[0], np.float32), sr, "designed", False
+    if eng == "qwen3-clone":
+        ref = _ref(p)
+        rt = p.get("voice_text")
+        if not rt and p.get("voice_text_file"):
+            rt = open(p["voice_text_file"]).read().strip()
+        wavs, sr = m.generate_voice_clone(
+            text=text, language=lang, ref_audio=ref, ref_text=rt, x_vector_only_mode=not rt, **kw
+        )
+        return np.asarray(wavs[0], np.float32), sr, ref, False
+    raise ParamError(f"unknown engine {eng!r}")
 
 
 def stretch(path, speed):
     """Speed a finished file up or down, keeping its pitch (ffmpeg atempo)."""
-    tmp = path + '.tmp.wav'
-    r = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', path, '-filter:a', f'atempo={speed:.4f}', tmp], capture_output=True, text=True)
-    if r.returncode: raise RuntimeError(f'ffmpeg atempo failed: {r.stderr[-300:]}')
+    tmp = path + ".tmp.wav"
+    r = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", path, "-filter:a", f"atempo={speed:.4f}", tmp],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode:
+        raise RuntimeError(f"ffmpeg atempo failed: {r.stderr[-300:]}")
     os.replace(tmp, path)
 
 
 def run(p):
-    import numpy as np, soundfile as sf
-    p = {**(E['options'].get('defaults') or {}), **p}          # a model entry's own voice and settings (models.toml options.defaults); the job's win
-    text = p.get('text')
-    if not isinstance(text, str) or not text.strip(): raise ParamError('give text')
-    speed = float(p.get('speed') or 1.0)
-    if not 0.5 <= speed <= 2.0: raise ParamError('speed is between 0.5 and 2.0')
-    _seed(int(p.get('seed') or 0)); t0 = time.perf_counter()
+    import numpy as np
+    import soundfile as sf
+
+    p = {
+        **(E["options"].get("defaults") or {}),
+        **p,
+    }  # a model entry's own voice and settings (models.toml options.defaults); the job's win
+    text = p.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ParamError("give text")
+    speed = float(p.get("speed") or 1.0)
+    if not 0.5 <= speed <= 2.0:
+        raise ParamError("speed is between 0.5 and 2.0")
+    _seed(int(p.get("seed") or 0))
+    t0 = time.perf_counter()
     x, sr, voice, native = speak(dict(p, text=text.strip()))
-    x = np.clip(x, -1, 1); out_dir = p.get('out_dir') or '.'; os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f'tts-{uuid.uuid4().hex[:12]}.wav'); sf.write(path, x, sr, subtype='PCM_16')
-    if not native and abs(speed - 1.0) > 1e-3: stretch(path, speed)
+    x = np.clip(x, -1, 1)
+    out_dir = p.get("out_dir") or "."
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"tts-{uuid.uuid4().hex[:12]}.wav")
+    sf.write(path, x, sr, subtype="PCM_16")
+    if not native and abs(speed - 1.0) > 1e-3:
+        stretch(path, speed)
     dur = sf.info(path).duration
-    return dict(path=path, duration_s=round(dur, 3), sample_rate=sr, seconds=round(time.perf_counter() - t0, 3), engine=E['engine'], voice=voice)
+    return dict(
+        path=path,
+        duration_s=round(dur, 3),
+        sample_rate=sr,
+        seconds=round(time.perf_counter() - t0, 3),
+        engine=E["engine"],
+        voice=voice,
+    )
 
 
 def main():
-    out = sys.stdout; sys.stdout = sys.stderr                 # libraries that print must not corrupt the answers
+    out = sys.stdout
+    sys.stdout = sys.stderr  # libraries that print must not corrupt the answers
     for line in sys.stdin:
-        try: msg = json.loads(line)
-        except ValueError: continue
-        op = msg.get('op')
-        if op == 'quit': break
         try:
-            res = load(msg['model'], msg['models_dir']) if op == 'load' else run(msg.get('params') or {})
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        op = msg.get("op")
+        if op == "quit":
+            break
+        try:
+            res = load(msg["model"], msg["models_dir"]) if op == "load" else run(msg.get("params") or {})
             ans = dict(ok=True, result=res)
-        except ParamError as e: ans = dict(ok=False, params=True, error=str(e))
-        except Exception as e: traceback.print_exc(); ans = dict(ok=False, error=f'{type(e).__name__}: {e}')
-        out.write(json.dumps(ans) + '\n'); out.flush()
+        except ParamError as e:
+            ans = dict(ok=False, params=True, error=str(e))
+        except Exception as e:
+            traceback.print_exc()
+            ans = dict(ok=False, error=f"{type(e).__name__}: {e}")
+        out.write(json.dumps(ans) + "\n")
+        out.flush()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

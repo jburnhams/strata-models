@@ -12,5 +12,5 @@ jobs:
   database:
     uses: jburnhams/database/.github/workflows/app-db.yml@main
     with:
-      install: pip install -r requirements-test.txt
+      install: uv pip install -e . --group dev
       tests: tests/unit/test_database.py tests/unit/test_store.py

@@ -15,17 +15,18 @@ pip install "strata-models-client @ git+https://github.com/jburnhams/strata-mode
 ```
 ```python
 import strata_models_client as sm
-sm.faces('/photos/a.jpg', app='bright-horizons')                 # boxes, keypoints, 512-d ArcFace embeddings
-sm.transcribe('/clips/a.wav', app='strata-360', language='en')    # segments with word timings
-with sm.gpu_lease('strata-stills', vram_gb=4, note='arena build'):
-    ...                                                           # the GPU is yours until the block ends
+
+sm.faces("/photos/a.jpg", app="bright-horizons")  # boxes, keypoints, 512-d ArcFace embeddings
+sm.transcribe("/clips/a.wav", app="strata-360", language="en")  # segments with word timings
+with sm.gpu_lease("strata-stills", vram_gb=4, note="arena build"):
+    ...  # the GPU is yours until the block ends
 ```
 Standard library only; see [client/README.md](client/README.md). Inputs are file paths: the service runs on the same machine.
 
 ## Run it
 
 ```bash
-scripts/setup_env.sh                 # venv with the service and the model runtimes (requirements-gpu.txt)
+uv sync --group gpu                  # .venv with the service, the test tools and the model runtimes (CPU-only machines: uv sync)
 ./strata-models doctor               # libraries, runtimes, GPU
 dbtool new-app stratamodels          # once: the schema in the shared database (migrations run at start)
 ./strata-models serve                # http://127.0.0.1:8366/ (--memory: keep jobs in memory, no database)

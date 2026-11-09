@@ -1,7 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "strata-models"
 version = "0.1.0"
+description = "One owner for the GPU on this machine: runs models (faces, transcription, image embedding, image generation) for the other apps"
+readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "pydantic>=2.9",
+    "numpy",           # evals: statistics and metrics
+    "pillow",          # evals: image similarity
+    "sqlalchemy>=2",
+    "psycopg[binary]",
+    "omarchy-db",
+    "strata-python",     # shared server code: oslib, settings, web serving, CLI commands, test plugin, strata-check
+    "tzdata; sys_platform == 'win32'",
+]
+
+[project.scripts]
+strata-models = "stratamodels.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "strata-models-client",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis",
+    "pytest-randomly",
+    "pytest-timeout",
+    "pytest-xdist",
+    "diff-cover",
+    "ruff",
+    "pyright",
+    "ty",
+    "opencv-python-headless>=5.0.0.93",
+]
+# The model runtimes (`uv sync --group gpu` on the machine with the GPU). One copy of each, for every app.
+gpu = [
+    "onnxruntime-gpu==1.23.2; sys_platform != 'darwin'",    # insightface (faces). 1.24+ is built for CUDA 13, while CTranslate2 needs CUDA 12: one set of CUDA 12 libraries serves both
+    "insightface",
+    "opencv-python-headless",
+    "faster-whisper",                                       # transcribe (CTranslate2). Audio is decoded with ffmpeg, not its PyAV decoder (broken by PyAV 15+)
+    "nvidia-cublas-cu12; sys_platform == 'linux'",
+    "nvidia-cudnn-cu12; sys_platform == 'linux'",
+    "nvidia-cuda-runtime-cu12; sys_platform == 'linux'",    # onnxruntime-gpu's CUDA provider also loads these three
+    "nvidia-curand-cu12; sys_platform == 'linux'",
+    "nvidia-cufft-cu12; sys_platform == 'linux'",
+    "torch",                                                # image-embed (open_clip). It brings its own CUDA 13 libraries under nvidia/cu13, which the launcher keeps off the library path
+    "open-clip-torch",
+]
+
+[tool.uv.sources]
+# strata-python tracks main (no tag): uv.lock pins the commit, `uv lock --upgrade-package strata-python` moves it.
+strata-models-client = { path = "client", editable = true }   # the in-repo client, so its imports resolve for the type checkers and the CLI
+strata-python = { git = "https://github.com/jburnhams/strata-python" }
+omarchy-db = { git = "https://github.com/jburnhams/database", subdirectory = "python" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stratamodels"]
 
 [tool.omarchy-db]
 app = "stratamodels"
@@ -9,9 +70,11 @@ models = "stratamodels.db.models:Base"
 migrations = "migrations"
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests/utils"]
+pythonpath = ["tests/utils"]
+strata_env_prefix = "STRATAMODELS"        # strata-python plugin: STRATAMODELS_HOME and _DATA point into a tmp dir for every test
+strata_tuning_vars = ["STRATAMODELS_MODELS", "STRATAMODELS_VRAM_RESERVE_GB", "STRATAMODELS_DATABASE_URL", "OMARCHY_DB_URL", "STRATA_MODELS_URL"]    # removed from the environment for every test
 testpaths = ["tests/unit"]
-addopts = "-ra --timeout=300"
+addopts = "-ra --timeout=300 --strict-markers --strict-config"
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]       # TestClient noise from the installed starlette; remove when the dependency moves on
 markers = [
     "integration: runs the CLI and HTTP server end-to-end (tests/integration)",
@@ -30,8 +93,60 @@ show_missing = false
 fail_under = 95
 
 [tool.ruff]
-line-length = 400            # long, dense lines on purpose, as in strata-360 and strata-stills
+line-length = 120
 target-version = "py311"
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT", "S", "TID"]
+ignore = [
+    "E501",    # the formatter wraps code; long comments and docstrings stay (the house style comments the why)
+    "C408",    # dict(a=1) and list() calls are the house style for records
+    "PT018",   # `assert a and b` is kept: one line says what holds
+    "E731",    # short named lambdas
+    "E741",    # one-letter names in short comprehensions
+    "SIM115",  # files opened for the life of an object are closed by it
+    "RUF005", "RUF046", "RUF001", "RUF043", "RUF012", "UP031", "B008",   # style-only findings, in code that is fine as written
+    "B904", "B905",   # main's code (merged 2026-11-09) raises inside except and zips without strict in 49 places; fixing them is its own change
+    "S110", "S310", "S603", "S607", "SIM105",   # best-effort cleanup, URLs we build ourselves, and the service's own subprocesses (ffmpeg, nvidia-smi, llama-server)
+    "S311",    # random is used for jitter and sampling, never for secrets
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pytest.importorskip".msg = "Do not skip when a dependency is missing: install it (locally and in CI) and let the test fail if it is not there. A deliberate skip is a marker with a reason, see AGENTS.md (Testing)."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S104", "S105", "S106", "S108", "S603", "S607"]
+
+[tool.pyright]
+include = ["src"]
+extraPaths = ["client"]   # the standard-library client package is installed editable; pyright does not follow its path entry
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+# Ratchet: files listed here are checked strictly; the rest in basic mode. Add a file when it is fully annotated; never remove one.
+strict = ["src/stratamodels/__init__.py"]   # settings.py left the list when main's database-backed rewrite replaced the typed library version (2026-11-09): type it, then add it back
+# Findings in the code that is not yet in the strict list above are warnings, so they are visible without blocking: they come from dict(...) literals whose value types
+# pyright narrows too far, and from SQLAlchemy's Result.rowcount. They become errors file by file as each file moves into the list.
+reportArgumentType = "warning"
+reportCallIssue = "warning"
+reportIndexIssue = "warning"
+reportOptionalOperand = "warning"
+reportOperatorIssue = "warning"
+reportAttributeAccessIssue = "warning"
+reportOptionalSubscript = "warning"
+reportOptionalMemberAccess = "warning"
+reportMissingImports = "warning"      # GPU libraries (torch, cv2, insightface...) are only installed on the GPU machine
+reportMissingTypeStubs = "warning"
+
+[tool.ty.rules]
+# ty exits 1 on warnings too, so the rules below are off, not warnings. pyright (above) reports the same code as visible warnings and is the ratchet; turn a rule back on
+# here once pyright's matching warning is gone. They come from dict(...) literals and SQLAlchemy's Result.rowcount that the checkers narrow too far, and import-not-found from
+# the GPU libraries (torch, open_clip, insightface, cv2, faster-whisper) that are only installed on the machine with the GPU.
+call-non-callable = "ignore"
+invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
+import-not-found = "ignore"
+invalid-assignment = "ignore"
+not-subscriptable = "ignore"
+unresolved-attribute = "ignore"
+unsupported-operator = "ignore"

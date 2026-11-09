@@ -1,0 +1,4 @@
+#!/bin/bash
+# The one gate, from strata-python (see its README): scripts/check [--fast|--fix]. Called by git hooks and by hand.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR/.." && exec uv run --locked strata-check "$@"
