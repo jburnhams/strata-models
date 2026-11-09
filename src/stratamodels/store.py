@@ -2,7 +2,9 @@
 and the web requests never share one; calls are also serialised by a lock, which costs nothing at this volume and makes the in-memory SQLite
 store (one shared connection) safe across threads."""
 
-import functools, threading, time
+import functools
+import threading
+import time
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -41,8 +43,9 @@ class Store:
     @classmethod
     def connect(cls, url_or_app="stratamodels", migrate=True):
         """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server), migrated to head."""
-        from omarchy_db import Project, connect
         import os
+
+        from omarchy_db import Project, connect
 
         e = connect(url_or_app)
         if e.dialect.name == "postgresql":

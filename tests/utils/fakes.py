@@ -1,6 +1,8 @@
 """Test doubles for the outside world: HTTP (urllib) and subprocesses. Use through the fixtures in tests/conftest.py (`fake_urlopen`, `fake_popen`, `fake_run`)."""
 
-import io, json, urllib.error
+import io
+import json
+import urllib.error
 
 
 class FakeResponse:

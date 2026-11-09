@@ -1,6 +1,13 @@
 """Integration-suite fixtures: the CLI in-process, and the real service as a separate process that the client package talks to over HTTP."""
 
-import contextlib, io, os, socket, subprocess, sys, time, urllib.request
+import contextlib
+import io
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 from dataclasses import dataclass
 
 import pytest
@@ -78,12 +85,12 @@ def service(isolated_env, monkeypatch):
     deadline = time.time() + 60
     while True:
         try:
-            urllib.request.urlopen(base + "/api/health", timeout=1)
+            urllib.request.urlopen(base + "/api/health", timeout=1)  # noqa: S310  (loopback test server)
             break
-        except OSError:
+        except OSError as exc:
             if p.poll() is not None or time.time() > deadline:
                 p.kill()
-                raise AssertionError("the service did not start:\n" + (p.stdout.read() if p.stdout else ""))
+                raise AssertionError("the service did not start:\n" + (p.stdout.read() if p.stdout else "")) from exc
             time.sleep(0.1)
     monkeypatch.setenv("STRATA_MODELS_URL", base)
     yield base

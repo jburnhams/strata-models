@@ -7,7 +7,8 @@
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB. The database is chosen by omarchy-db:
 STRATAMODELS_DATABASE_URL, else OMARCHY_DB_URL, else schema `stratamodels` of the shared `omarchy` database over the local socket."""
 
-import json, os
+import json
+import os
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULTS = dict(data_dir=os.path.join(REPO, "data"), models_dir=os.path.join("~", "models"), vram_reserve_gb="1.0")
@@ -77,8 +78,8 @@ def models_dir():
 def _reserve(v):
     try:
         f = float(v)
-    except (TypeError, ValueError):
-        raise ValueError(f"vram_reserve_gb must be a number of GB, not {v!r}")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"vram_reserve_gb must be a number of GB, not {v!r}") from exc
     if not 0 <= f <= 64:
         raise ValueError("vram_reserve_gb must be between 0 and 64")
     return f

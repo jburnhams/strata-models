@@ -14,17 +14,21 @@ params (one or more of):
               for a job row); the answer then says the shapes
 Answer: {images: [[...]], texts: [[...]], dim} or, with out, {out, images: n, texts: n, dim}."""
 
+import logging
 import os
 
 import numpy as np
 
 from stratamodels.runtimes import RunError
 
+log = logging.getLogger(__name__)
+
 BATCH = 128
 
 
 def load(model, models_dir):
-    import open_clip, torch
+    import open_clip
+    import torch
 
     arch, _, tag = model.name.partition(":")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -148,9 +152,7 @@ def run(handle, params):
         ):
             raise RunError("out is an .npz path in an existing folder")
         np.savez(out, images=imgs.astype(np.float32), texts=texts.astype(np.float32))
-        return dict(
-            out=out, images=int(len(imgs)) if imgs.size else 0, texts=int(len(texts)) if texts.size else 0, dim=dim
-        )
+        return dict(out=out, images=len(imgs) if imgs.size else 0, texts=len(texts) if texts.size else 0, dim=dim)
     return dict(
         images=[[round(float(v), 6) for v in r] for r in imgs] if imgs.size else [],
         texts=[[round(float(v), 6) for v in r] for r in texts] if texts.size else [],
@@ -164,5 +166,5 @@ def unload(handle):
         import torch
 
         torch.cuda.empty_cache()
-    except Exception:
-        pass
+    except Exception:  # freeing is best effort, but not silent
+        log.warning("could not empty the CUDA cache", exc_info=True)

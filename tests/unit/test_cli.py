@@ -1,4 +1,5 @@
-import importlib, json
+import importlib
+import json
 
 import pytest
 
@@ -92,7 +93,8 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
         cli.main(["eval", "report"])
     with pytest.raises(SystemExit, match="no experiment"):
         cli.main(["eval", "report", "nope"])
-    import sys, types
+    import sys
+    import types
 
     monkeypatch.setitem(
         sys.modules, "strata_models_client", types.SimpleNamespace(available=lambda: False, url=lambda: "http://x")

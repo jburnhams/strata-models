@@ -9,14 +9,24 @@ GET  /api/evals/{name}/pair                  a blind pair to judge: one item, tw
 POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
 GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names"""
 
-import base64, hashlib, hmac, json, mimetypes, os, random, secrets, threading, time
+import base64
+import hashlib
+import hmac
+import json
+import mimetypes
+import os
+import random
+import secrets
+import threading
+import time
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from stratamodels.db.models import EvalJudgment
-from stratamodels.evals import core as C, report as R
+from stratamodels.evals import core as C
+from stratamodels.evals import report as R
 
 SECRET = secrets.token_bytes(
     16
@@ -61,7 +71,9 @@ def mount(app, scheduler):
     def analysis(s):
         """The analysis, recomputed only when the spec, the outputs or the judgments changed: the bootstraps take seconds to a minute."""
         from sqlalchemy import func, select
-        from stratamodels.db.models import EvalJudgment as J, EvalResult as Rr
+
+        from stratamodels.db.models import EvalJudgment as J
+        from stratamodels.db.models import EvalResult as Rr
 
         with C.session(engine()) as ses:
             sig = (
@@ -82,7 +94,7 @@ def mount(app, scheduler):
         try:
             return C.load_spec(name)
         except C.EvalError as e:
-            raise HTTPException(404 if "no experiment" in str(e) else 400, str(e))
+            raise HTTPException(404 if "no experiment" in str(e) else 400, str(e)) from e
 
     @app.get("/api/evals")
     def get_evals():
@@ -110,7 +122,7 @@ def mount(app, scheduler):
         try:
             return finite(analysis(s))
         except C.EvalError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/api/evals/{name}/run", status_code=202)
     def post_run(name: str, candidate: str | None = None, limit: int | None = None):

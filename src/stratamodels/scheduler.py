@@ -13,10 +13,15 @@ corrupting each other's work; sharing the card's time just makes both a little s
 
 Loading, running and unloading happen only on the worker thread; the API threads queue requests and wait on a condition variable."""
 
-import collections, threading, time
+import collections
+import logging
+import threading
+import time
 
 from stratamodels import gpu, runtimes
 from stratamodels.store import FINISHED
+
+log = logging.getLogger(__name__)
 
 PRIORITY = {"interactive": 0, "batch": 1}
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
@@ -234,8 +239,8 @@ class Scheduler:
             return
         try:
             self.get_runtime(r.model.runtime).unload(r.handle)
-        except Exception:
-            pass  # freeing must not fail the job that needed the room
+        except Exception:  # freeing must not fail the job that needed the room, but it is not silent
+            log.warning("could not unload %s", key, exc_info=True)
         self._event(f"unloaded {key} ({why})")
 
     def _make_room(self, need_mb, keep=None):

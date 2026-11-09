@@ -15,7 +15,13 @@ params: prompt (required), negative_prompt, width, height (multiples of 16; defa
 random, always returned), ref_images (paths: edits and references, FLUX.3 Klein takes up to 10). Result: {path, width, height, seed, steps,
 seconds, peak_vram_mb, model}. Images go to <data>/generated/<YYYY-MM-DD>/."""
 
-import datetime, os, random, subprocess, threading, time, uuid
+import datetime
+import os
+import random
+import subprocess
+import threading
+import time
+import uuid
 
 from stratamodels import gpu, settings
 from stratamodels.runtimes import RunError
@@ -44,7 +50,7 @@ def fetch(ref, models_dir):
     except Exception as e:
         raise RunError(
             f"could not fetch {ref}: {type(e).__name__}: {str(e)[:300]} (a gated repo needs its licence accepted on Hugging Face and a token: HF_TOKEN or `hf auth login`)"
-        )
+        ) from e
 
 
 def load(model, models_dir):
@@ -67,8 +73,8 @@ def load(model, models_dir):
 def _size(v, name):
     try:
         v = int(v)
-    except (TypeError, ValueError):
-        raise RunError(f"{name} must be a whole number of pixels")
+    except (TypeError, ValueError) as exc:
+        raise RunError(f"{name} must be a whole number of pixels") from exc
     if not 256 <= v <= 2048 or v % 16:
         raise RunError(f"{name} must be a multiple of 16 between 256 and 2048, not {v}")
     return v
@@ -153,10 +159,10 @@ def run(handle, params, popen=subprocess.Popen, probe=gpu.query, out_dir=None):
     threading.Thread(target=watch, daemon=True).start()
     try:
         log, _ = p.communicate(timeout=1800)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         p.kill()
         log, _ = p.communicate()
-        raise RunError("sd-cli took more than 30 minutes; stopped")
+        raise RunError("sd-cli took more than 30 minutes; stopped") from exc
     finally:
         stop.set()
     if p.returncode != 0 or not os.path.isfile(out):

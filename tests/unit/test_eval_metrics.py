@@ -14,7 +14,7 @@ def tx(text):
 def test_text_normalisation_and_edit_distance():
     assert M.normalise("Ask NOT, what your country's “flag”...") == ["ask", "not", "what", "your", "country's", "flag"]
     assert (
-        M.edits("a b c d".split(), "a x c".split()) == 2
+        M.edits(["a", "b", "c", "d"], ["a", "x", "c"]) == 2
         and M.edits([], ["a"]) == 1
         and M.transcript(tx(" Ask not| what")) == " Ask not  what"
         and M.transcript(None) == ""

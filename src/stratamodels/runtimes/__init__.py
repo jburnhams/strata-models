@@ -46,6 +46,7 @@ def available():
                 missing.append(m)
         out[name] = missing
     import os
+
     from stratamodels import settings
     from stratamodels.runtimes import sdcpp
 

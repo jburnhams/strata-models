@@ -1,6 +1,8 @@
 """Shared pytest configuration: every test is hermetic (its own home and data folder, no network, no stray override variables). Tests under tests/integration get the `integration` marker automatically."""
 
-import os, socket, sys
+import os
+import socket
+import sys
 
 import pytest
 
@@ -51,6 +53,7 @@ def no_network(monkeypatch):
 def fake_urlopen(monkeypatch):
     """Script `urllib.request.urlopen`: `fake_urlopen.reply({...}, http_error(429))`, then assert on `fake_urlopen.calls` (url, method, headers, parsed JSON body). Unexpected calls fail."""
     import urllib.request
+
     from fakes import FakeUrlopen
 
     f = FakeUrlopen()
@@ -62,6 +65,7 @@ def fake_urlopen(monkeypatch):
 def fake_popen(monkeypatch):
     """Replace `subprocess.Popen` everywhere: nothing starts; `fake_popen.instances` lists the commands (`.cmd`) and kwargs (`.kw`) it was asked to run."""
     import subprocess
+
     from fakes import FakePopen
 
     FakePopen.instances = []
@@ -73,6 +77,7 @@ def fake_popen(monkeypatch):
 def fake_run(monkeypatch):
     """Replace `subprocess.run` / `check_output`: record the command lines in `.calls`; set `.returns['cmd'] = b'...'` (substring of the command line) for output, `.code = 1` to fail."""
     import subprocess
+
     from fakes import FakeRun
 
     f = FakeRun()

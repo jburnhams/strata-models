@@ -4,7 +4,9 @@ The override file is merged table by table, so a machine can change one role's m
 A model whose runtime is not one this service implements is still listed ("known, not served here yet"): the Models page shows which apps
 still load it themselves, which is the to-do list for moving them over."""
 
-import dataclasses, os, tomllib
+import dataclasses
+import os
+import tomllib
 
 from stratamodels import runtimes, settings
 
@@ -70,7 +72,7 @@ def _read(path):
     except FileNotFoundError:
         return {}
     except tomllib.TOMLDecodeError as e:
-        raise RegistryError(f"{path}: {e}")
+        raise RegistryError(f"{path}: {e}") from e
 
 
 class Registry:
@@ -101,7 +103,7 @@ class Registry:
                     options=dict(m.get("options") or {}),
                 )
             except (KeyError, TypeError, ValueError) as e:
-                raise RegistryError(f"model {k!r}: {e!r}")
+                raise RegistryError(f"model {k!r}: {e!r}") from e
         roles = {}
         for k, r in (d.get("roles") or {}).items():
             if "model" not in r:
@@ -140,7 +142,8 @@ class Registry:
     def variant(self, key, options):
         """`key` with some load options changed (an eval candidate: det_size 1024, int8): a model of its own, `key~<hash>`, loaded and freed apart
         from the original. Registered on first use; listed on the Models page while it exists."""
-        import hashlib, json
+        import hashlib
+        import json
 
         base = self.models.get(key)
         if base is None:

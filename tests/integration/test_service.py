@@ -1,13 +1,17 @@
 """The real service process, driven through the client package as an app would: jobs, failures, leases, cancellation, history."""
 
-import threading, time, urllib.request, json, warnings
+import json
+import threading
+import time
+import urllib.request
+import warnings
 
 import pytest
 import strata_models_client as sm
 
 
 def get(base, path):
-    with urllib.request.urlopen(base + path, timeout=10) as r:
+    with urllib.request.urlopen(base + path, timeout=10) as r:  # noqa: S310  (loopback test server)
         return json.load(r)
 
 
@@ -73,6 +77,5 @@ def test_without_the_service_the_client_says_so(monkeypatch):
         with sm.gpu_lease("x") as lease:
             assert lease is None
     assert "not running" in str(w[0].message)
-    with pytest.raises(sm.Unavailable):
-        with sm.gpu_lease("x", required=True):
-            pass
+    with pytest.raises(sm.Unavailable), sm.gpu_lease("x", required=True):
+        pass

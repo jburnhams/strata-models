@@ -25,7 +25,8 @@ API (JSON), for apps (through the client in client/) and for the web app:
   /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
 The page at / serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html`."""
 
-import os, time
+import os
+import time
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -206,7 +207,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         try:
             settings.save(changes)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
         if "vram_reserve_gb" in changes:
             s.reserve_mb = settings.vram_reserve_gb() * 1024.0
         if "models_dir" in changes:
@@ -216,7 +217,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     @app.get("/api/images")
     def get_images(before: int | None = None, limit: int = 40):
         """Generated pictures, newest first (the image-generate jobs that finished), for the gallery."""
-        items = [j for j in s.store.list(status="done", role="image-generate", before=before, limit=limit)]
+        items = list(s.store.list(status="done", role="image-generate", before=before, limit=limit))
         out = []
         for j in items:
             full = s.store.get(j["id"])
@@ -291,7 +292,9 @@ def build(memory=False, sample_every_s=5.0):
 
 
 def main(argv=None):
-    import argparse, uvicorn
+    import argparse
+
+    import uvicorn
 
     a = argparse.ArgumentParser()
     a.add_argument("--host", default="127.0.0.1")

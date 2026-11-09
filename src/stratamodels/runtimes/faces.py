@@ -7,7 +7,8 @@ views (one image only): a list of ways to look at it again, each {crop: [x, y, w
 crop)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
 look harder for children lying down or small in the background, without sending the image itself."""
 
-import collections, os
+import collections
+import os
 
 from stratamodels.runtimes import RunError
 
@@ -99,8 +100,8 @@ def _view(img, v):
     if v.get("crop"):
         try:
             x, y, w, h = (int(round(float(a))) for a in v["crop"])
-        except (TypeError, ValueError):
-            raise RunError(f"crop must be [x, y, w, h], not {v['crop']!r}")
+        except (TypeError, ValueError) as exc:
+            raise RunError(f"crop must be [x, y, w, h], not {v['crop']!r}") from exc
         x, y = max(x, 0), max(y, 0)
         w, h = min(w, W - x), min(h, H - y)
         if w <= 0 or h <= 0:

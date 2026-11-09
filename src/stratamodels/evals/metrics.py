@@ -9,7 +9,11 @@ Three shapes:
 `score(item, output)` returns what the shape needs, or None when the metric does not apply to that item (no reference, the job failed: a failed
 job counts as wrong for binary metrics and as all errors for ratios, never silently skipped)."""
 
-import dataclasses, json, math, re, unicodedata
+import dataclasses
+import json
+import math
+import re
+import unicodedata
 
 import numpy as np
 
@@ -144,7 +148,7 @@ def verification(items, outputs, far=0.01):
     dict(auc, tar, threshold, pairs): ROC AUC, and the share of same-person pairs accepted at the threshold that lets `far` of different-person
     pairs through. Items whose face was not found count as rejected (distance 2)."""
     emb, who = [], []
-    for it, out in zip(items, outputs):
+    for it, out in zip(items, outputs, strict=False):
         p = (it.get("reference") or {}).get("person")
         if p is None:
             continue
@@ -292,7 +296,7 @@ def summarise(metric, items, outputs, seed=None):
             else (float("nan"), float("nan"))
         )
         return dict(value=val, low=lo, high=hi, n=n)
-    vals = [m.score(it, o, e) for it, (o, e) in zip(items, outputs)]
+    vals = [m.score(it, o, e) for it, (o, e) in zip(items, outputs, strict=False)]
     vals = [v for v in vals if v is not None]
     if m.shape == "ratio":
         v, lo, hi = S.bootstrap_ratio([a for a, _ in vals], [b for _, b in vals], seed=seed)
@@ -330,7 +334,9 @@ def compare(metric, items, base_outputs, cand_outputs, seed=None):
         )
         r = dict(n=n, mean_a=a, mean_b=b, diff=b - a, low=lo, high=hi, p=min(p, 1.0))
     else:
-        pairs = [(m.score(it, *ab), m.score(it, *cb)) for it, ab, cb in zip(items, base_outputs, cand_outputs)]
+        pairs = [
+            (m.score(it, *ab), m.score(it, *cb)) for it, ab, cb in zip(items, base_outputs, cand_outputs, strict=False)
+        ]
         pairs = [(x, y) for x, y in pairs if x is not None and y is not None]
         if m.shape == "ratio":
             r = S.paired_ratio_diff(

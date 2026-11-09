@@ -1,6 +1,7 @@
 """The queue and the GPU budget (stratamodels.scheduler): order, residency, eviction, leases, failures, waiting."""
 
-import threading, time
+import threading
+import time
 
 import pytest
 

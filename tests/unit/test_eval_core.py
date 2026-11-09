@@ -1,11 +1,11 @@
 """Experiments end to end on the fake runtime (stratamodels.evals.core and report): datasets, specs, cached runs, analysis, the decision, the write-up."""
 
-import json, os
+import os
 
 import pytest
 
-from stratamodels.evals import core as C, report as R
-from stratamodels.runtimes import fake
+from stratamodels.evals import core as C
+from stratamodels.evals import report as R
 
 
 @pytest.fixture
@@ -248,6 +248,7 @@ def test_guards_hold_against_a_zero_baseline_and_duplicates_run_once(setup, sche
     finally:
         stop.set()
     from sqlalchemy.orm import Session
+
     from stratamodels.db.models import EvalResult
 
     with Session(engine) as ses:  # b fails on one item: 1 failure against the baseline's 0

@@ -3,7 +3,14 @@
 No NVIDIA GPU (or no nvidia-smi) gives None, and the service then runs everything on the CPU with no VRAM budget. A small ring buffer keeps
 the last hour of samples for the Overview chart."""
 
-import collections, os, subprocess, threading, time
+import collections
+import logging
+import os
+import subprocess
+import threading
+import time
+
+log = logging.getLogger(__name__)
 
 GPU_FIELDS = ("name", "memory.total", "memory.used", "utilization.gpu", "temperature.gpu", "power.draw", "power.limit")
 
@@ -97,11 +104,14 @@ class History:
 
     def start(self):
         def loop():
+            warned = False
             while not self._stop.is_set():
                 try:
                     self.sample()
-                except Exception:
-                    pass  # a failed sample must not kill the sampler
+                except Exception:  # a failed sample must not kill the sampler
+                    if not warned:  # say so once, not every few seconds
+                        log.warning("GPU sampling failed; the sampler keeps trying", exc_info=True)
+                        warned = True
                 self._stop.wait(self.every_s)
 
         threading.Thread(target=loop, name="gpu-history", daemon=True).start()

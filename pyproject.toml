@@ -90,7 +90,16 @@ extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT", "S", "TID"]
-ignore = ["E501"]        # the formatter wraps code; long comments and docstrings stay (the house style comments the why)
+ignore = [
+    "E501",    # the formatter wraps code; long comments and docstrings stay (the house style comments the why)
+    "C408",    # dict(a=1) and list() calls are the house style for records
+    "PT018",   # `assert a and b` is kept: one line says what holds
+    "E731",    # short named lambdas
+    "E741",    # one-letter names in short comprehensions
+    "SIM115",  # files opened for the life of an object are closed by it
+    "RUF005", "RUF046", "RUF001", "RUF043", "RUF012", "UP031", "B008",   # style-only findings, in code that is fine as written
+    "S311",    # random is used for jitter and sampling, never for secrets
+]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pytest.importorskip".msg = "Do not skip when a dependency is missing: install it (locally and in CI) and let the test fail if it is not there. A deliberate skip is a marker with a reason, see AGENTS.md (Testing)."

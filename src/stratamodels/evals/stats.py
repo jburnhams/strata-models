@@ -52,7 +52,9 @@ def bootstrap_mean(values, b=B, seed=None, level=0.95):
 def paired_diff(a, b_, b=B, seed=None, level=0.95):
     """Compare two candidates on the same items: dict(n, mean_a, mean_b, diff (B minus A), low, high, p). Items missing in either are dropped."""
     pairs = [
-        (x, y) for x, y in zip(a, b_) if x is not None and y is not None and not math.isnan(x) and not math.isnan(y)
+        (x, y)
+        for x, y in zip(a, b_, strict=False)
+        if x is not None and y is not None and not math.isnan(x) and not math.isnan(y)
     ]
     if not pairs:
         return dict(
@@ -100,8 +102,8 @@ def paired_diff(a, b_, b=B, seed=None, level=0.95):
 
 def mcnemar(a_right, b_right):
     """Exact McNemar test for paired right/wrong outcomes: dict(only_a, only_b, p) (two-sided binomial on the discordant pairs)."""
-    only_a = sum(1 for x, y in zip(a_right, b_right) if x and not y)
-    only_b = sum(1 for x, y in zip(a_right, b_right) if y and not x)
+    only_a = sum(1 for x, y in zip(a_right, b_right, strict=False) if x and not y)
+    only_b = sum(1 for x, y in zip(a_right, b_right, strict=False) if y and not x)
     n = only_a + only_b
     if n == 0:
         return dict(only_a=0, only_b=0, p=1.0)
@@ -151,7 +153,7 @@ def bradley_terry(judgments, names, iters=200):
             s = new
             break
         s = new
-    return dict(zip(names, (float(x) for x in s)))
+    return dict(zip(names, (float(x) for x in s), strict=False))
 
 
 def bradley_terry_ci(judgments, names, b=1000, seed=None, level=0.95):

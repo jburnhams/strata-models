@@ -25,7 +25,7 @@ def test_fake_loads_runs_fails_and_unloads():
     fake.LOADED.clear()
     m = Model(key="m", runtime="fake", name="m", roles=("r",), vram_gb=1, options=dict(a=1))
     h = fake.load(m, "/models")
-    assert fake.LOADED == [h] and h["options"] == dict(a=1)
+    assert [h] == fake.LOADED and h["options"] == dict(a=1)
     assert fake.run(h, dict(seconds=0.001, x=1)) == dict(model="m", echo=dict(seconds=0.001, x=1))
     with pytest.raises(runtimes.RunError, match="bad"):
         fake.run(h, dict(fail="bad"))

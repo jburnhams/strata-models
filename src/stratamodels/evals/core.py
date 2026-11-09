@@ -27,14 +27,21 @@ private files.
 Outputs are cached in eval_results under a key of everything that decides them, so adding a candidate runs only that candidate, and a rerun of
 an unchanged experiment runs nothing."""
 
-import contextlib, dataclasses, hashlib, json, os, time, tomllib
+import contextlib
+import dataclasses
+import hashlib
+import json
+import os
+import time
+import tomllib
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stratamodels import settings
 from stratamodels.db.models import EvalJudgment, EvalResult
-from stratamodels.evals import metrics as M, stats as S
+from stratamodels.evals import metrics as M
+from stratamodels.evals import stats as S
 
 REPO_SPECS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "evals", "specs"
@@ -91,8 +98,8 @@ def load_dataset(name, folder=None):
     path = os.path.join(folder or datasets_dir(), f"{name}.jsonl")
     try:
         raw = open(path, "rb").read()
-    except FileNotFoundError:
-        raise EvalError(f"no dataset {name!r} ({path})")
+    except FileNotFoundError as exc:
+        raise EvalError(f"no dataset {name!r} ({path})") from exc
     items, seen, desc = [], set(), ""
     for n, line in enumerate(raw.decode("utf8").splitlines(), 1):
         if not line.strip():
@@ -103,7 +110,7 @@ def load_dataset(name, folder=None):
         try:
             it = json.loads(line)
         except ValueError as e:
-            raise EvalError(f"{name}.jsonl line {n}: {e}")
+            raise EvalError(f"{name}.jsonl line {n}: {e}") from e
         if not isinstance(it, dict) or "id" not in it or not isinstance(it.get("input"), dict):
             raise EvalError(f'{name}.jsonl line {n}: an item needs "id" and an "input" object')
         if str(it["id"]) in seen:
@@ -219,7 +226,7 @@ def parse_spec(d, source=""):
             source=source,
         )
     except (KeyError, TypeError, ValueError, IndexError) as e:
-        raise EvalError(f"{source or 'spec'}: {e!r}")
+        raise EvalError(f"{source or 'spec'}: {e!r}") from e
     unknown = [m for m in s.metrics + [s.primary] + list(s.guards) if m not in M.METRICS]
     if unknown:
         raise EvalError(f"{s.name}: unknown metrics {unknown} (known: {', '.join(M.METRICS)})")
@@ -313,7 +320,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
         chunk = todo[i : i + batch]
         ids = [executor.submit(spec.role, job_params(spec, c, it), c.model, c.options) for c, it, _ in chunk]
         done = [
-            (c, it, k, executor.wait(jid)) for (c, it, k), jid in zip(chunk, ids)
+            (c, it, k, executor.wait(jid)) for (c, it, k), jid in zip(chunk, ids, strict=False)
         ]  # wait outside the lock: the worker needs the store meanwhile
         rows = [
             EvalResult(
@@ -437,7 +444,7 @@ def analyse(spec, engine, dataset=None, seed=None):
     items = [ds.items[i] for i in complete]
 
     def its(n):
-        return [dict(it, _run_s=(runs[n][i] or {}).get("run_s")) for it, i in zip(items, complete)]
+        return [dict(it, _run_s=(runs[n][i] or {}).get("run_s")) for it, i in zip(items, complete, strict=False)]
 
     def oo(n):
         return [outs[n][i] for i in complete]
@@ -467,8 +474,8 @@ def analyse(spec, engine, dataset=None, seed=None):
             m: M.compare(m, items, oo(base), oo(n), seed) for m in spec.metrics if m != "latency_s"
         }  # latency: each side's own run time, below
         if "latency_s" in spec.metrics:
-            a = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(base), oo(base))]
-            b = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(n), oo(n))]
+            a = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(base), oo(base), strict=False)]
+            b = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(n), oo(n), strict=False)]
             r = S.paired_diff(
                 [x if x is not None else float("nan") for x in a],
                 [y if y is not None else float("nan") for y in b],
@@ -477,7 +484,7 @@ def analyse(spec, engine, dataset=None, seed=None):
             r["improves"] = None if r["n"] == 0 else (True if r["high"] < 0 else False if r["low"] > 0 else None)
             res["comparisons"][n]["latency_s"] = r
         pvals.append((n, res["comparisons"][n][spec.primary]["p"]))
-    for (n, _), adj in zip(pvals, S.holm([p for _, p in pvals])):
+    for (n, _), adj in zip(pvals, S.holm([p for _, p in pvals]), strict=False):
         res["comparisons"][n][spec.primary]["p_holm"] = adj
     res["decision"] = decide(spec, res, items, oo, base)
     current = {(c.name, it["id"]): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
@@ -537,7 +544,7 @@ def decide(spec, res, items, oo, base):
                             else float(y) - float(x)
                         )
                     )(m.score(it, *a), m.score(it, *b))
-                    for it, a, b in zip(items, oo(base), oo(n))
+                    for it, a, b in zip(items, oo(base), oo(n), strict=False)
                 ]
                 need = S.items_needed(d, spec.min_effect)
             verdict, why = (

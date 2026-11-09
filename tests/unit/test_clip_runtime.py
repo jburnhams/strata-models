@@ -28,7 +28,8 @@ def test_arrays_are_read_and_checked(tmp_path):
 
 
 def test_params_are_checked_before_any_work(monkeypatch):
-    import sys, types
+    import sys
+    import types
 
     monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
     for p, msg in (

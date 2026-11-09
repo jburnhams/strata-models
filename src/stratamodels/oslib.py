@@ -3,7 +3,11 @@
 POSIX (macOS, Linux) uses fcntl, os.kill and os.nice; Windows uses msvcrt, the Win32 API through ctypes and taskkill. Other modules should call these
 instead of importing fcntl or calling os.kill(pid, 0) (on Windows that would terminate the process)."""
 
-import contextlib, os, subprocess, sys, time
+import contextlib
+import os
+import subprocess
+import sys
+import time
 
 WIN = sys.platform == "win32"
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -74,10 +78,10 @@ def kill_tree(pid, sig=15):
     """Terminate a worker and every process it started; errors are ignored."""
     if WIN:
         with contextlib.suppress(OSError):
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(int(pid))], capture_output=True)
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(int(pid))], capture_output=True)  # noqa: S603, S607  (fixed command, pid is an int)
         return
     try:
-        kids = subprocess.run(["pgrep", "-P", str(pid)], stdout=subprocess.PIPE, text=True).stdout.split()
+        kids = subprocess.run(["pgrep", "-P", str(pid)], stdout=subprocess.PIPE, text=True).stdout.split()  # noqa: S603, S607  (fixed command, pid is an int)
     except OSError:
         kids = []
     for k in kids:

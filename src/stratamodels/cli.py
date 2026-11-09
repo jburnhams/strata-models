@@ -1,6 +1,10 @@
 """Command line: `doctor` checks the environment and the GPU, `serve` starts the service, `status`, `registry` and `jobs` read a running one."""
 
-import argparse, importlib, json, sys, urllib.request
+import argparse
+import importlib
+import json
+import sys
+import urllib.request
 
 from stratamodels import __version__, gpu, runtimes, settings
 
@@ -40,7 +44,7 @@ def doctor(args):
 
 
 def _get(args, path):
-    with urllib.request.urlopen(args.url.rstrip("/") + path, timeout=10) as r:
+    with urllib.request.urlopen(args.url.rstrip("/") + path, timeout=10) as r:  # noqa: S310  (--url is the operator's own service address, http or https)
         return json.load(r)
 
 
@@ -93,7 +97,8 @@ def cmd_jobs(args):
 
 def cmd_eval(args):
     """Experiments: list, run (through the running service's queue), report (the standard write-up), forget (cached outputs)."""
-    from stratamodels.evals import core as C, report as R
+    from stratamodels.evals import core as C
+    from stratamodels.evals import report as R
 
     if args.action == "list":
         for name, s in C.list_specs().items():

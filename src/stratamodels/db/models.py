@@ -2,9 +2,8 @@
 what the web app formats anyway."""
 
 import sqlalchemy as sa
-from sqlalchemy.orm import Mapped, mapped_column
-
 from omarchy_db import make_base
+from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_base()
 

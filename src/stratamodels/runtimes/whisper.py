@@ -39,9 +39,10 @@ def load(model, models_dir):
 def decode(path, rate=16000):
     """The file as mono float32 at 16 kHz, decoded by ffmpeg (faster-whisper's own decoder uses PyAV, whose API changed under it in PyAV 15+)."""
     import subprocess
+
     import numpy as np
 
-    p = subprocess.run(
+    p = subprocess.run(  # noqa: S603, S607  (fixed ffmpeg command line; the path is one argument)
         ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-vn", "-f", "s16le", "-ac", "1", "-ar", str(rate), "-"],
         capture_output=True,
     )

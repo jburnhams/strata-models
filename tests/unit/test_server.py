@@ -1,6 +1,7 @@
 """The HTTP API (stratamodels.server.app) over the fake scheduler: jobs, waiting, leases, the registry, status, usage, settings."""
 
-import threading, time
+import threading
+import time
 
 import pytest
 import uvicorn
@@ -146,6 +147,7 @@ def test_settings_roundtrip_and_main(client, scheduler, tmp_path, monkeypatch):
 
 def test_generated_pictures_gallery_files_and_uploads(client, scheduler, tmp_path):
     import os
+
     from stratamodels import settings
 
     gen = os.path.join(settings.data_dir(), "generated", "2026-11-09")

@@ -1,6 +1,8 @@
 """nvidia-smi parsing and the sample history (stratamodels.gpu)."""
 
-import os, subprocess, sys
+import os
+import subprocess
+import sys
 
 import pytest
 

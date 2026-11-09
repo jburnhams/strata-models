@@ -3,10 +3,10 @@
     STRATAMODELS_TEST_IMAGE=/path/photo-with-faces.jpg STRATAMODELS_TEST_AUDIO=/path/speech.flac pytest tests/gpu -s
 Weights come from the real models folder (STRATAMODELS_MODELS or ~/models), so the isolated home of the other suites does not apply here."""
 
-import os, time
+import os
+import time
 
 import numpy as np
-
 import pytest
 
 from stratamodels import gpu, runtimes
@@ -88,7 +88,7 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
         )
         for v in r["views"]:
             got = min(v["faces"], key=lambda f: abs(f["bbox"][0] - want[0]) + abs(f["bbox"][1] - want[1]))["bbox"]
-            assert all(abs(a - c) < 0.05 * W for a, c in zip(got, want)), (v["view"], got, want)
+            assert all(abs(a - c) < 0.05 * W for a, c in zip(got, want, strict=False)), (v["view"], got, want)
         c = rt.run(
             h,
             dict(
@@ -98,7 +98,7 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
             ),
         )
         got = c["views"][0]["faces"][0]["bbox"]
-        assert all(abs(a - x) < 0.05 * W for a, x in zip(got, b)), (got, b)
+        assert all(abs(a - x) < 0.05 * W for a, x in zip(got, b, strict=False)), (got, b)
         with pytest.raises(runtimes.RunError, match="rotate"):
             rt.run(h, dict(path=IMAGE, views=[dict(rotate=45)]))
         with pytest.raises(runtimes.RunError, match="outside"):

@@ -85,6 +85,7 @@ def test_media_only_for_files_a_dataset_names(client, tmp_path, setup):
 
 def test_broken_specs_and_datasets_are_reported(client, setup):
     import os
+
     from stratamodels.evals import core as C
 
     folder = os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs")

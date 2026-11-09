@@ -6,7 +6,9 @@ computed, the decision rule), Results (every metric with its 95 % interval), Com
 before and after Holm), Human judgments (if any), Cost (run time, load time), Failures (examples, by item id), Method notes (the standard
 text on intervals and tests), Decision and follow-ups (for the person), Reproduce (the commands)."""
 
-import datetime, json, math
+import datetime
+import json
+import math
 
 from stratamodels.evals import metrics as M
 
@@ -193,7 +195,7 @@ def worst(spec, res_outputs, items, metric, k=5):
     out = {}
     for n, outs in res_outputs.items():
         rows = []
-        for it, o in zip(items, outs):
+        for it, o in zip(items, outs, strict=False):
             if o is None:
                 continue
             if o[1]:

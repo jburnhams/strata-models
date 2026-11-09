@@ -1,6 +1,8 @@
 """The stable-diffusion.cpp runtime (stratamodels.runtimes.sdcpp) without the binary: files, the command line, a run with a fake sd-cli, refusals."""
 
-import os, sys, types
+import os
+import sys
+import types
 
 import pytest
 
