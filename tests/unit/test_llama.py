@@ -35,7 +35,7 @@ def test_load_starts_the_server_with_its_files_and_libraries(setup):
     tmp, _ = setup; procs = []
     h = llama.load(model(args=['--fit', 'on']), str(tmp), popen=lambda cmd, **kw: procs.append(FakeProc(cmd, **kw)) or procs[-1])
     cmd = procs[0].cmd
-    assert cmd[0].endswith('llama-b1/llama-server') and cmd[cmd.index('-m') + 1].endswith('llama/org--m-GGUF/m.gguf') and '--mmproj' in cmd and cmd[-2:] == ['--fit', 'on'] and cmd[cmd.index('-c') + 1] == '8192'
+    assert cmd[0].endswith(os.path.join('llama-b1', 'llama-server')) and cmd[cmd.index('-m') + 1].endswith(os.path.join('llama', 'org--m-GGUF', 'm.gguf')) and '--mmproj' in cmd and cmd[-2:] == ['--fit', 'on'] and cmd[cmd.index('-c') + 1] == '8192'
     assert 'cudart-x' in procs[0].env['LD_LIBRARY_PATH'] and h['vision'] and h['url'].startswith('http://127.0.0.1:')
     llama.unload(h); assert h == {}
 
