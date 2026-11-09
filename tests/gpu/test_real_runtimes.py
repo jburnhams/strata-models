@@ -100,3 +100,21 @@ def test_clip_embeddings_on_the_gpu(tmp_path):
         o = rt.run(h, dict(array=dict(path=str(arr), key='cam', bgr=True), resize='square', out=str(tmp_path / 'e.npz')))
         e = np.load(o['out'])['images']; assert o['images'] == 3 and e.shape == (3, 512) and float(e[0] @ img) > 0.8          # the same picture squeezed to a square thumbnail against centre-cropped: close, not equal
     finally: rt.unload(h)
+
+
+SPEAKERS = ['kokoro-v1', 'chatterbox', 'chatterbox-turbo', 'qwen3-tts-custom', 'qwen3-tts-design', 'qwen3-tts-clone']
+VOICE = os.environ.get('STRATAMODELS_TEST_VOICE')          # a reference recording of more than 5 s, for the cloning models
+
+
+@pytest.mark.parametrize('key', SPEAKERS)
+def test_speak_on_the_gpu(key):
+    from stratamodels.runtimes import worker
+    m = Registry.load().models[key]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]): pytest.skip(f'no venv for {key}: scripts/setup_worker_venv.sh {m.options.get("venv")}')
+    params = dict(text='Two hundred kilometres behind me, and the second night is coming.')
+    if key in ('chatterbox-turbo', 'qwen3-tts-clone'):
+        if not VOICE: pytest.skip('needs STRATAMODELS_TEST_VOICE')
+        params['voice'] = VOICE
+    if key == 'qwen3-tts-design': params['instruct'] = 'A calm British man in his forties, narrating a documentary'
+    out, out2 = measure(m, params)
+    assert os.path.isfile(out['path']) and 2.0 < out['duration_s'] < 12.0 and out['sample_rate'] >= 16000

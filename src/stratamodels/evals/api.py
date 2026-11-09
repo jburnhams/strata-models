@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from stratamodels.db.models import EvalJudgment
-from stratamodels.evals import core as C, report as R
+from stratamodels.evals import core as C, metrics as M, report as R
 
 SECRET = secrets.token_bytes(16)          # signs judging tokens for this process's life: a token says which output was X without the page knowing
 
@@ -103,7 +103,7 @@ def mount(app, scheduler):
     @app.get('/api/evals/{name}/report', response_class=PlainTextResponse)
     def get_report(name: str):
         s = spec_or_404(name); res = analysis(s); ds, outs, _ = C.outputs_for(s, engine())
-        return R.render(res, R.worst(s, outs, ds.items, s.primary))
+        return R.render(res, R.worst(s, outs, ds.items, s.primary if s.primary != 'judged' else next((m for m in s.metrics if M.METRICS[m].score), s.primary)))
 
     @app.get('/api/evals/{name}/pair')
     def get_pair(name: str):
@@ -118,6 +118,7 @@ def mount(app, scheduler):
                     key = (C.result_key(s, s.candidate(a), it), C.result_key(s, s.candidate(b), it))
                     if key not in sims: sims[key] = SIM.similarity(outs[a][i][0], outs[b][i][0], s.similarity or None)
                     if sims[key] < 0.9999: pairs.append((sims[key], i, a, b))                                    # identical outputs teach nothing: not shown
+        if s.primary == 'judged': pairs = [p for p in pairs if s.baseline in p[2:]]                                          # decided head to head with the baseline: only those pairs
         if not pairs: return dict(pair=None)
         with C.session(engine()) as ses: judged = {(j.item_id, frozenset((j.a, j.b))) for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))}
         fresh = [p for p in pairs if (ds.items[p[1]]['id'], frozenset(p[2:])) not in judged] or pairs                  # pairs not judged yet first,

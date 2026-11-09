@@ -187,9 +187,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     @app.get('/api/images/file')
     def get_image_file(path: str):
-        """A generated picture or an uploaded reference, and nothing else on the disk."""
-        roots = [os.path.join(settings.data_dir(), d) for d in ('generated', 'uploads')]
-        if not _inside(path, *roots) or not os.path.isfile(path): raise HTTPException(404, 'no such picture')
+        """A generated picture or sound (speak jobs), an uploaded reference, or an eval's reference voice; nothing else on the disk."""
+        roots = [os.path.join(settings.data_dir(), d) for d in ('generated', 'uploads', os.path.join('evals', 'voices'))]
+        if not _inside(path, *roots) or not os.path.isfile(path): raise HTTPException(404, 'no such file')
         return FileResponse(path)
 
     @app.post('/api/images/upload', status_code=201)

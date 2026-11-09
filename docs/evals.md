@@ -32,6 +32,15 @@ can be compared and revisited when a new model appears.
    follow-ups (a person writes it), Method, Reproduce. Final reports go in the docs repo under `tech/code/strata-models/evals/`
    (private: they may name private items); the decision goes into `models.toml` with the report linked.
 
+## Judged experiments and a second reader
+- **`primary = "judged"`** decides by blind human judgment where nothing can be scored automatically (a voice, a picture): the Judge tab then
+  offers only pairs with the baseline, and a candidate is adopted when it wins enough of them (ties count half): the Wilson interval of its
+  win share must be clear of 50 % and the share at least 50 % + `min_effect`. Until then the decision says roughly how many judged pairs would
+  settle it. Judgments count only while both outputs are current (a changed model, params or dataset makes new outputs).
+- **`[score]`** names a second model that reads every output with a file (`role`, optional `model`, `params`): after a run, each output gets
+  a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
+  the words are scored against the text that was to be spoken, an intelligibility guard for text to speech.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

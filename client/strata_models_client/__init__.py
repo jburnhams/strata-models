@@ -86,6 +86,20 @@ def transcribe(path, app, role='transcribe', priority='batch', model=None, **par
     return run(role, params, app, priority=priority, model=model)
 
 
+def role_model(role):
+    """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
+    by an earlier model is made again when an eval changes the role's model."""
+    return next((r['model'] for r in _call('GET', '/api/registry').get('roles', []) if r['key'] == role), None)
+
+
+def speak(text, app, priority='batch', model=None, **params):
+    """Speech from text (role `speak`): params voice (a preset name, or a reference recording's path for the cloning models), speed (1.0 = the
+    model's own pace), instruct, language, seed. Without model and voice, the voice and settings the role's eval chose. Returns {path (a WAV on
+    this machine, the service's copy: copy it if it must last), duration_s, sample_rate, seconds, engine, voice}."""
+    if params.get('voice') and os.path.exists(str(params['voice'])): params['voice'] = os.path.abspath(params['voice'])
+    return run('speak', dict(params, text=text), app, priority=priority, model=model)
+
+
 class Lease:
     """A held lease: `.id`, `.job` (the row when granted). Heartbeats run on a daemon thread until `release()`."""
     def __init__(self, job, ttl_s):
