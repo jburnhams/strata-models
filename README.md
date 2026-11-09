@@ -2,7 +2,7 @@
 
 One service on the machine with the GPU (omarchy, RTX 3060 12 GB) that every app uses for local models, instead of each app loading its own copy.
 
-- **Roles, not files.** An app asks for `faces` or `transcribe`; [`models.toml`](src/stratamodels/models.toml) says which model serves each role, so the best model for a role is one edit. A `models.toml` in the data folder overrides it per machine.
+- **Roles, not files.** An app asks for `faces` or `transcribe`; [`models.toml`](src/stratamodels/models.toml) says which model serves each role, so the best model for a role is one edit. The service reads it from its database (`strata-models role ROLE MODEL`, or the API), with `models.toml` (and one in the data folder) as the seed: see [docs/database.md](docs/database.md).
 - **One queue for the GPU.** Every job goes through one worker: interactive before batch, jobs for an already loaded model first (but never ahead of a lease or past one that has waited two minutes). Jobs and their history are in the shared Postgres (schema `stratamodels`).
 - **A VRAM budget.** Models stay loaded until the room is needed, then the least recently used one is freed. A reserve (1 GB by default) is never filled, so the desktop keeps working.
 - **GPU leases.** An app that runs its own CUDA code (strata-stills' develop) asks for a lease: the worker frees the memory, runs nothing else until the lease is given back, and expires it if the app stops sending heartbeats.
