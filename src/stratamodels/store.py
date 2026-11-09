@@ -54,6 +54,13 @@ class Store:
             s.commit(); return row(j)
 
     @locked
+    def claim(self, job_id, **kw):
+        """Start a queued job: the update happens only while it is still queued (a lease withdrawn meanwhile stays withdrawn). Returns the row, or None."""
+        with Session(self.engine, expire_on_commit=False) as s:
+            n = s.execute(sa.update(Job).where(Job.id == job_id, Job.status == 'queued').values(**kw)).rowcount; s.commit()
+            return row(s.get(Job, job_id)) if n else None
+
+    @locked
     def get(self, job_id, result=True):
         with Session(self.engine) as s:
             j = s.get(Job, job_id); return row(j, result) if j else None

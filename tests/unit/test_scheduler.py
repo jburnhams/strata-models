@@ -175,3 +175,35 @@ def test_the_worker_survives_an_error_in_a_step(scheduler, monkeypatch):
     stop = scheduler.start(); deadline = time.time() + 5
     while not any('worker error' in e['text'] for e in scheduler.events) and time.time() < deadline: time.sleep(0.01)
     stop.set(); assert calls and any('db away' in e['text'] for e in scheduler.events)
+
+
+def test_load_requests_wait_while_a_lease_is_held(scheduler):
+    lease = scheduler.lease('stills'); scheduler.step()
+    scheduler.request('load', 'small'); scheduler.step()
+    assert scheduler.resident == {} and len(scheduler.control) == 1
+    scheduler.release(lease['id']); scheduler.step()
+    assert list(scheduler.resident) == ['small']
+
+
+def test_a_lease_withdrawn_while_room_is_made_stays_withdrawn(scheduler, monkeypatch):
+    scheduler.submit('echo', {}, 'a'); scheduler.step()
+    lease = scheduler.lease('stills')
+    real = scheduler._make_room
+    def withdraw_meanwhile(need, keep=None): real(need, keep); scheduler.release(lease['id'])
+    monkeypatch.setattr(scheduler, '_make_room', withdraw_meanwhile)
+    assert scheduler.step() is None and scheduler.store.get(lease['id'])['status'] == 'cancelled'
+    j = scheduler.submit('echo', {}, 'a'); real_claim = scheduler.store.claim
+    monkeypatch.setattr(scheduler.store, 'claim', lambda i, **kw: (scheduler.cancel(i), real_claim(i, **kw))[1])
+    assert scheduler.step() is None and scheduler.store.get(j['id'])['status'] == 'cancelled'
+
+
+def test_a_sized_lease_waits_for_room_and_one_that_never_fits_fails(scheduler):
+    scheduler.probe.other_mb = 9000                                                  # 12 GB card, 9 GB elsewhere, 1 GB reserve: 2.3 GB free
+    lease = scheduler.lease('stills', vram_gb=4); job = scheduler.submit('echo', {}, 'a')
+    assert scheduler.step() is None and scheduler.step() is None and scheduler.store.get(lease['id'])['status'] == 'queued'
+    assert sum('waits for 4.0 GB' in e['text'] for e in scheduler.events) == 1 and scheduler.store.get(job['id'])['status'] == 'queued'
+    scheduler.probe.other_mb = 500
+    assert scheduler.step()['status'] == 'running'
+    scheduler.release(lease['id'])
+    huge = scheduler.lease('stills', vram_gb=20); scheduler.step()                    # the echo job goes first (submitted before)
+    r = scheduler.step(); assert r['id'] == huge['id'] and r['status'] == 'failed' and 'never fit' in r['error']

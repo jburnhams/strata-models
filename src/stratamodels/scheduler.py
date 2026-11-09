@@ -33,7 +33,7 @@ class Scheduler:
         self.store, self.registry, self.models_dir, self.probe = store, registry, models_dir, probe
         self.reserve_mb, self.clock, self.get_runtime, self.max_skip_s = reserve_gb * MB, clock, get_runtime, max_skip_s
         self.resident = collections.OrderedDict()            # model key -> Resident, least recently used first
-        self.cv = threading.Condition(); self.control = collections.deque(); self.current = None; self.events = collections.deque(maxlen=200)
+        self.cv = threading.Condition(); self.control = collections.deque(); self.current = None; self.events = collections.deque(maxlen=200); self._waiting = None
 
     # ---- requests (any thread) -------------------------------------------------------------------------------------------------------
     def _priority(self, p):
@@ -176,12 +176,24 @@ class Scheduler:
         return None
 
     def _grant(self, j):
-        self._make_room(None if j['vram_gb'] is None else j['vram_gb'] * MB)
-        j = self.store.update(j['id'], status='running', started_at=self.clock(), heartbeat_at=self.clock())
-        self._event(f'lease {j["id"]} granted to {j["app"]}' + (f' ({j["note"]})' if j['note'] else '')); self._notify(); return j
+        """Free what the lease asked for and grant it. A sized lease waits (stays queued, and nothing passes it) while other programs hold so much
+        that the room is not there even with every model freed; one that could never fit on this card fails at once."""
+        need = None if j['vram_gb'] is None else j['vram_gb'] * MB
+        self._make_room(need)
+        state = self.probe() if need is not None else None
+        if state and need > state['total_mb'] - self.reserve_mb:
+            j = self.store.update(j['id'], status='failed', finished_at=self.clock(), error=f'{j["vram_gb"]:g} GB will never fit: the card has {state["total_mb"] / MB:.1f} GB and {self.reserve_mb / MB:.1f} GB is kept free')
+            self._notify(); return j
+        if state and self.free_mb(state) < need:
+            if self._waiting != j['id']: self._waiting = j['id']; self._event(f'lease {j["id"]} ({j["app"]}) waits for {need / MB:.1f} GB: other programs hold the card')
+            return None
+        claimed = self.store.claim(j['id'], status='running', started_at=self.clock(), heartbeat_at=self.clock())
+        if claimed is None: return None                                                             # withdrawn while the room was being made
+        self._event(f'lease {j["id"]} granted to {j["app"]}' + (f' ({j["note"]})' if j['note'] else '')); self._notify(); return claimed
 
     def _run(self, j):
-        j = self.store.update(j['id'], status='running', started_at=self.clock())
+        j = self.store.claim(j['id'], status='running', started_at=self.clock())
+        if j is None: return None                                                                   # withdrawn after the queue was read
         with self.cv: self.current = j
         model = self.registry.models.get(j['model']); load_s = 0.0
         try:
@@ -198,9 +210,9 @@ class Scheduler:
         self._notify(); return j
 
     def step(self):
-        """Do one thing: pending load/unload requests, then the next job, unless a lease holds the GPU. Returns the job it handled, or None."""
+        """Do one thing, unless a lease holds the GPU: pending load/unload requests, then the next job. Returns the job it handled, or None."""
+        if self._held_lease(): return None                          # load requests wait too: the lease holder has the card to itself
         self._do_control()
-        if self._held_lease(): return None
         j = self._next(self.store.queued())
         if j is None: return None
         return self._grant(j) if j['kind'] == 'lease' else self._run(j)
