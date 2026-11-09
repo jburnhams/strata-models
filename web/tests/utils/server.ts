@@ -48,7 +48,7 @@ export const evalFixtures = {
     decision: { per_candidate: { turbo: { verdict: 'unclear', why: 'difference -0.20 points, interval includes no change', gain: -0.002 } }, recommendation: 'large-v3', change: false },
     judgments: { n: 12, strength: { 'large-v3': [1.2, 0.8, 1.6], turbo: [0.8, 0.5, 1.1] } },
   }),
-  pair: (): Pair => ({ item_id: 'u1', input: { language: 'en' }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
+  pair: (): Pair => ({ similarity: 0.62, item_id: 'u1', input: { language: 'en' }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
 }
 
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1 }
@@ -81,7 +81,7 @@ export const handlers = [
   http.get('/api/evals/:name/status', () => HttpResponse.json(mock.run)),
   http.post('/api/evals/:name/run', ({ params }) => { mock.calls.push(`run ${params.name}`); mock.run = { state: 'running', log: ['transcribe-en: 0 of 400 outputs cached, 400 to run'] }; return HttpResponse.json(mock.run, { status: 202 }) }),
   http.get('/api/evals/:name/report', () => HttpResponse.text('# transcribe-en: Which Whisper model for English?\n\n## Answer\n')),
-  http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair() })),
+  http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair(), remaining: 12 })),
   http.post('/api/evals/:name/judgments', async ({ request }) => { const b = (await request.json()) as { winner: string }; mock.calls.push(`judge ${b.winner}`); return HttpResponse.json({ ok: true, x: 'turbo', y: 'large-v3', winner: b.winner }, { status: 201 }) }),
   http.get('/api/evals/:name', ({ params }) => params.name === 'nope' ? HttpResponse.json({ detail: 'no experiment' }, { status: 404 }) : HttpResponse.json(mock.analysis)),
   http.get('/api/settings', () => HttpResponse.json(mock.settings)),

@@ -195,7 +195,7 @@ def worst(spec, res_outputs, items, metric, k=5):
     out = {}
     for n, outs in res_outputs.items():
         rows = []
-        for it, o in zip(items, outs, strict=False):
+        for it, o in zip(items, outs):
             if o is None:
                 continue
             if o[1]:

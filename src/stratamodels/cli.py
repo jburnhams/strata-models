@@ -1,12 +1,11 @@
-"""Command line: `doctor` checks the environment and the GPU, `serve` starts the service, `status`, `registry` and `jobs` read a running one."""
+"""Command line: `doctor` checks the environment and the GPU, `serve` starts the service, `status` and `jobs` read a running one; `registry`,
+`role`, `prefer`, `seed`, `set` and `eval` read and change the service's tables (schema stratamodels of the shared database)."""
 
 import argparse
 import importlib
 import json
 import sys
 import urllib.request
-
-from strata_python import cli as shared
 
 from stratamodels import __version__, gpu, runtimes, settings
 
@@ -46,7 +45,7 @@ def doctor(args):
 
 
 def _get(args, path):
-    with urllib.request.urlopen(args.url.rstrip("/") + path, timeout=10) as r:  # noqa: S310  (--url is the operator's own service address, http or https)
+    with urllib.request.urlopen(args.url.rstrip("/") + path, timeout=10) as r:
         return json.load(r)
 
 
@@ -70,10 +69,94 @@ def cmd_status(args):
     return 0
 
 
-def cmd_registry(args):
-    from stratamodels.registry import Registry
+def _engine(need=False):
+    """The service's database, with the settings bound to it; None when it cannot be reached or is at another schema revision (unless `need`).
+    Only an empty database is migrated here: the running service migrates the live one when it is deployed."""
+    try:
+        from stratamodels.store import Store
 
-    r = Registry.load()
+        e = Store.connect(migrate="new").engine
+    except Exception as ex:
+        if need:
+            sys.exit(f"the database cannot be reached: {ex}")
+        print(f"(no database: {ex}; reading the files)", file=sys.stderr)
+        return None
+    settings.bind(e)
+    return e
+
+
+def _registry(engine):
+    from stratamodels import registry as reg
+
+    if engine is None:
+        return reg.Registry.load()
+    reg.seed(engine)
+    return reg.Registry.from_db(engine)
+
+
+def _poke(args):
+    """Tell a running service to read the registry again (best effort: it also does at its next start)."""
+    try:
+        req = urllib.request.Request(args.url.rstrip("/") + "/api/registry/seed", method="POST")
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+    except Exception:
+        print("(the service is not running, or did not answer: it takes the change at its next start)", file=sys.stderr)
+
+
+def cmd_role(args):
+    from stratamodels import registry as reg
+
+    try:
+        r = reg.set_role(_engine(need=True), args.role, args.model, args.description)
+    except reg.RegistryError as e:
+        sys.exit(str(e))
+    print(f"{args.role} -> {r.roles[args.role].model}")
+    _poke(args)
+    return 0
+
+
+def cmd_prefer(args):
+    from stratamodels import registry as reg
+
+    try:
+        params = json.loads(args.params) if args.params else None
+    except ValueError as e:
+        sys.exit(f"--params is JSON: {e}")
+    try:
+        r = reg.set_preference(
+            _engine(need=True),
+            args.app,
+            args.role,
+            None if args.clear else args.model,
+            None if args.clear else params,
+            args.note,
+        )
+    except reg.RegistryError as e:
+        sys.exit(str(e))
+    p = r.preference(args.app, args.role)
+    print(f"{args.app} {args.role}: " + (json.dumps(p.to_json()) if p else "no preference (the role's model)"))
+    _poke(args)
+    return 0
+
+
+def cmd_seed(args):
+    from stratamodels import registry as reg
+
+    e = _engine(need=True)
+    for f in args.follow or []:
+        kind, _, key = f.partition(":")
+        try:
+            reg.follow_seed(e, kind, key)
+        except reg.RegistryError as ex:
+            sys.exit(str(ex))
+    print(json.dumps(reg.seed(e), indent=1))
+    _poke(args)
+    return 0
+
+
+def cmd_registry(args):
+    r = _registry(_engine())
     if args.json:
         print(json.dumps(r.to_json(), indent=1))
         return 0
@@ -102,21 +185,19 @@ def cmd_eval(args):
     from stratamodels.evals import core as C
     from stratamodels.evals import report as R
 
+    engine = _engine(need=args.action != "list")
     if args.action == "list":
-        for name, s in C.list_specs().items():
+        for name, s in C.list_specs(engine).items():
             print(f"  {name:28} {'ERROR ' + str(s) if isinstance(s, C.EvalError) else s.question}")
-        for d in C.list_datasets():
+        for d in C.list_datasets(engine=engine):
             print(f"  dataset {d['name']:20} {d.get('n', '?')} items  {d.get('version') or d.get('error')}")
         return 0
     if not args.name:
         sys.exit("name the experiment")
     try:
-        spec = C.load_spec(args.name)
+        spec = C.load_spec(args.name, engine)
     except C.EvalError as e:
         sys.exit(str(e))
-    from stratamodels.store import Store
-
-    engine = Store.connect(migrate=args.action == "run").engine
     if args.action == "run":
         import os
 
@@ -145,6 +226,19 @@ def cmd_eval(args):
         print(f"wrote {args.out}")
     else:
         print(text)
+    return 0
+
+
+def cmd_set(args):
+    _engine()
+    if args.value is None:
+        print(f"{args.key} = {settings.all_settings().get(args.key)}")
+        return 0
+    try:
+        settings.save({args.key: None if args.value == "default" else args.value})
+    except (KeyError, ValueError) as e:
+        sys.exit(str(e))
+    print(f"{args.key} = {settings.all_settings()[args.key]}")
     return 0
 
 
@@ -180,7 +274,41 @@ def main(argv=None):
     e.add_argument("--out", help="write the report here")
     e.add_argument("--json", action="store_true")
     e.set_defaults(fn=cmd_eval)
-    shared.add_set(sub, settings.SETTINGS)
+    s = sub.add_parser(
+        "set", help='show or change a setting (data_dir, models_dir, vram_reserve_gb); value "default" resets it'
+    )
+    s.add_argument("key")
+    s.add_argument("value", nargs="?")
+    s.set_defaults(fn=cmd_set)
+    for name, fn, h in (
+        ("role", cmd_role, "choose the model for a role: role ROLE MODEL"),
+        (
+            "prefer",
+            cmd_prefer,
+            "an app's own model or default params for a role: prefer APP ROLE [MODEL] [--params JSON] | --clear",
+        ),
+        ("seed", cmd_seed, "import models.toml into the database again"),
+    ):
+        c = sub.add_parser(name, help=h)
+        c.add_argument("--url", default="http://127.0.0.1:8366")
+        c.set_defaults(fn=fn)
+        if name == "role":
+            c.add_argument("role")
+            c.add_argument("model", nargs="?")
+            c.add_argument("--description")
+        if name == "prefer":
+            c.add_argument("app")
+            c.add_argument("role")
+            c.add_argument("model", nargs="?")
+            c.add_argument("--params")
+            c.add_argument("--note")
+            c.add_argument("--clear", action="store_true")
+        if name == "seed":
+            c.add_argument(
+                "--follow",
+                action="append",
+                help="model:KEY or role:KEY: drop its edits here and follow models.toml again",
+            )
     v = sub.add_parser("serve", help="start the service")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8366)

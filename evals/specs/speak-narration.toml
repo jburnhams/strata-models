@@ -1,0 +1,70 @@
+name = "speak-narration"
+question = "Which model, voice and settings should speak strata-360's voice-over narration?"
+role = "speak"
+dataset = "narration-40"         # scripts/evals/strata360_narration.py on strata-360's projects: 40 narration lines its script writer wrote (Legends)
+metrics = ["judged", "tts_wer", "rtf", "failed"]
+judge = true                     # no reference audio: people decide, blind, every pair against the baseline
+
+[decision]
+primary = "judged"               # share of blind head-to-head pairs won against strata-360's voice today (a tie is half)
+baseline = "kokoro-lewis"
+min_effect = 0.1                 # win at least 60 % of pairs (the interval clear of 50 %) to be worth a change
+guards = { tts_wer = 2.0, failed = 1.0 }   # no worse than twice as hard to understand; no more failures than the baseline (none)
+
+# The text is read back by Whisper for tts_wer (intelligibility), on its own model so results do not move when the transcribe role changes.
+[score]
+role = "transcribe"
+model = "whisper-large-v3-turbo"
+params = { language = "en", word_timestamps = false, beam_size = 5 }
+
+# The runner's own voice (cloning candidates): data/evals/voices/runner.wav, ~21 s of race speech cut by the dataset builder (wind and
+# breathing: the best reference the footage has, not a studio recording). Paths are absolute so jobs read them from anywhere.
+
+[[candidates]]
+name = "kokoro-lewis"
+model = "kokoro-v1"
+params = { voice = "bm_lewis" }
+note = "strata-360's voice-over today (Kokoro v1.0 ONNX, bm_lewis, speed 1.0)"
+
+[[candidates]]
+name = "kokoro-george"
+model = "kokoro-v1"
+params = { voice = "bm_george" }
+
+[[candidates]]
+name = "kokoro-lewis-0.9"
+model = "kokoro-v1"
+params = { voice = "bm_lewis", speed = 0.9 }
+note = "a little slower: narration over pictures"
+
+[[candidates]]
+name = "chatterbox-runner"
+model = "chatterbox"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
+note = "the runner's own voice, cloned"
+
+[[candidates]]
+name = "chatterbox-runner-calm"
+model = "chatterbox"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.35, cfg_weight = 0.3 }
+note = "Resemble's advice for slower, steadier delivery: lower cfg_weight and exaggeration"
+
+[[candidates]]
+name = "chatterbox-turbo-runner"
+model = "chatterbox-turbo"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav" }
+
+[[candidates]]
+name = "qwen3-clone-runner"
+model = "qwen3-tts-clone"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", voice_text_file = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.txt" }
+
+[[candidates]]
+name = "qwen3-design-narrator"
+model = "qwen3-tts-design"
+params = { instruct = "A British man in his forties, warm and calm, telling his own story as a documentary narrator, unhurried" }
+
+[[candidates]]
+name = "qwen3-ryan"
+model = "qwen3-tts-custom"
+params = { voice = "Ryan", instruct = "Calm, warm documentary narration" }

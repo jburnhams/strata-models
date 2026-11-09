@@ -1,5 +1,3 @@
-# pyright: reportMissingImports=false
-# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """Image generation with stable-diffusion.cpp (`sd-cli`, GGUF models): FLUX.3 Klein, Qwen-Image 2.1 Turbo, and whatever else it runs.
 
 A model's files are named in models.toml as Hugging Face references, "repo:path/in/repo" (or absolute paths), under options:
@@ -52,7 +50,7 @@ def fetch(ref, models_dir):
     except Exception as e:
         raise RunError(
             f"could not fetch {ref}: {type(e).__name__}: {str(e)[:300]} (a gated repo needs its licence accepted on Hugging Face and a token: HF_TOKEN or `hf auth login`)"
-        ) from e
+        )
 
 
 def load(model, models_dir):
@@ -75,8 +73,8 @@ def load(model, models_dir):
 def _size(v, name):
     try:
         v = int(v)
-    except (TypeError, ValueError) as exc:
-        raise RunError(f"{name} must be a whole number of pixels") from exc
+    except (TypeError, ValueError):
+        raise RunError(f"{name} must be a whole number of pixels")
     if not 256 <= v <= 2048 or v % 16:
         raise RunError(f"{name} must be a multiple of 16 between 256 and 2048, not {v}")
     return v
@@ -161,10 +159,10 @@ def run(handle, params, popen=subprocess.Popen, probe=gpu.query, out_dir=None):
     threading.Thread(target=watch, daemon=True).start()
     try:
         log, _ = p.communicate(timeout=1800)
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
         p.kill()
         log, _ = p.communicate()
-        raise RunError("sd-cli took more than 30 minutes; stopped") from exc
+        raise RunError("sd-cli took more than 30 minutes; stopped")
     finally:
         stop.set()
     if p.returncode != 0 or not os.path.isfile(out):

@@ -1,4 +1,5 @@
-"""Job rows in the database: a thin, thread-safe layer the scheduler and the API share. Every call opens its own session, so the worker thread
+"""Job rows in the database (`jobs`, with each run's output in `results` and the paths it read or wrote in `files`): a thin, thread-safe layer the
+scheduler and the API share. A row comes back as one dict, `result` included, as it did when the output was a column of the job. Every call opens its own session, so the worker thread
 and the web requests never share one; calls are also serialised by a lock, which costs nothing at this volume and makes the in-memory SQLite
 store (one shared connection) safe across threads."""
 
@@ -9,19 +10,54 @@ import time
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from stratamodels.db.models import Base, Job
+from stratamodels.db.models import Job, JobFile, JobResult
 
 FIELDS = [c.name for c in Job.__table__.columns]
 FINISHED = ("done", "failed", "cancelled", "expired")
+PATH_KEYS = ("path", "paths", "ref_images", "images", "audio", "files")
 
 
-def row(j, result=True):
+def row(j, result=True, output=None):
     d = {k: getattr(j, k) for k in FIELDS}
-    if not result:
-        d.pop("result")
+    if result:
+        d["result"] = output
     if d["started_at"] is not None:
         d["wait_s"] = round(d["started_at"] - d["submitted_at"], 3)
     return d
+
+
+def paths(x, key=None):
+    """The absolute file paths in a job's params or result: values under keys named path/paths/ref_images/..., or ending in _path(s)."""
+    out = []
+    if isinstance(x, dict):
+        for k, v in x.items():
+            if k.startswith("__"):
+                continue
+            out += paths(v, k)
+    elif isinstance(x, (list, tuple)):
+        for v in x:
+            out += paths(v, key)
+    elif (
+        isinstance(x, str)
+        and key
+        and (key in PATH_KEYS or key.endswith(("_path", "_paths")))
+        and (x.startswith("/") or (len(x) > 2 and x[1] == ":" and x[2] in "\\/"))
+    ):
+        out.append(x)
+    return out
+
+
+def _files(s, job_id, direction, data, at):
+    seen = set()
+    for p in paths(data):
+        if p not in seen and len(p) <= 1024:
+            seen.add(p)
+            s.add(JobFile(job_id=job_id, direction=direction, path=p, created_at=at))
+
+
+def _output(s, job_id):
+    r = s.get(JobResult, job_id)
+    return r.output if r else None
 
 
 def locked(fn):
@@ -42,20 +78,24 @@ class Store:
 
     @classmethod
     def connect(cls, url_or_app="stratamodels", migrate=True):
-        """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server), migrated to head."""
-        import os
-
-        from omarchy_db import Project, connect
+        """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server). `migrate`: True brings it to
+        head (the service, at start); 'new' only creates the tables of a database that has none and refuses one at another revision (the CLI:
+        a command run from a branch must never migrate the live database under the running service); False leaves it as it is."""
+        from omarchy_db import connect
 
         e = connect(url_or_app)
         if e.dialect.name == "postgresql":
             fast_commits(e)
-        if migrate:
-            Project.load(
-                os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyproject.toml"
+        if migrate == "new":
+            have, head = revisions(e)
+            if have is None:
+                project().upgrade(e)
+            elif have != head:
+                raise StaleDatabase(
+                    f"the database is at revision {have}, this code expects {head}: deploy the matching service (it migrates at start) or run `dbtool migrate`"
                 )
-            ).upgrade(e)
+        elif migrate:
+            project().upgrade(e)
         return cls(e)
 
     @locked
@@ -65,19 +105,32 @@ class Store:
         with Session(self.engine, expire_on_commit=False) as s:
             j = Job(**kw)
             s.add(j)
+            s.flush()
+            if j.kind == "run":
+                _files(s, j.id, "input", j.params, j.submitted_at)
             s.commit()
             return row(j)
 
     @locked
     def update(self, job_id, **kw):
+        """Change a job; `result=` stores its output (in results, with the paths it wrote in files)."""
+        has, result = "result" in kw, kw.pop("result", None)
         with Session(self.engine, expire_on_commit=False) as s:
             j = s.get(Job, job_id)
             if j is None:
                 return None
             for k, v in kw.items():
                 setattr(j, k, v)
+            if has:
+                at = j.finished_at or self.clock()
+                r = s.get(JobResult, job_id)
+                if r is None:
+                    s.add(JobResult(job_id=job_id, output=result, created_at=at))
+                else:
+                    r.output = result
+                _files(s, job_id, "output", result, at)
             s.commit()
-            return row(j)
+            return row(j, output=_output(s, job_id))
 
     @locked
     def claim(self, job_id, **kw):
@@ -85,13 +138,26 @@ class Store:
         with Session(self.engine, expire_on_commit=False) as s:
             n = s.execute(sa.update(Job).where(Job.id == job_id, Job.status == "queued").values(**kw)).rowcount
             s.commit()
-            return row(s.get(Job, job_id)) if n else None
+            return row(s.get(Job, job_id), output=_output(s, job_id)) if n else None
 
     @locked
     def get(self, job_id, result=True):
         with Session(self.engine) as s:
             j = s.get(Job, job_id)
-            return row(j, result) if j else None
+            return row(j, result, _output(s, job_id) if result else None) if j else None
+
+    @locked
+    def files(self, job_id=None, path=None):
+        """Paths a job read or wrote, or the jobs that read or wrote `path`."""
+        q = sa.select(JobFile).order_by(JobFile.id)
+        if job_id is not None:
+            q = q.where(JobFile.job_id == job_id)
+        if path is not None:
+            q = q.where(JobFile.path == path)
+        with Session(self.engine) as s:
+            return [
+                dict(job_id=f.job_id, direction=f.direction, path=f.path, created_at=f.created_at) for f in s.scalars(q)
+            ]
 
     @locked
     def queued(self):
@@ -166,15 +232,35 @@ class Store:
 
     @locked
     def prune(self, keep_s=7 * 86400):
-        """Drop results older than `keep_s` (embeddings and transcripts are the apps' to keep); the rows stay for the history."""
+        """Drop results older than `keep_s` (embeddings and transcripts are the apps' to keep); the job rows and their file paths stay for the history."""
         with Session(self.engine) as s:
-            n = s.execute(
-                sa.update(Job)
-                .where(Job.finished_at < self.clock() - keep_s, Job.result.is_not(None))
-                .values(result=None)
-            ).rowcount
+            n = s.execute(sa.delete(JobResult).where(JobResult.created_at < self.clock() - keep_s)).rowcount
             s.commit()
             return n
+
+
+class StaleDatabase(RuntimeError):
+    """The database is at another schema revision than this code."""
+
+
+def project():
+    import os
+
+    from omarchy_db import Project
+
+    return Project.load(
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyproject.toml")
+    )
+
+
+def revisions(engine):
+    """(the database's revision or None, this code's head)."""
+    from alembic.script import ScriptDirectory
+    from omarchy_db.migrations import current, make_config
+
+    p = project()
+    head = ScriptDirectory.from_config(make_config(p.migrations_dir, p.metadata, None)).get_current_head()
+    return current(engine, p.schema if engine.dialect.name == "postgresql" else None), head
 
 
 def fast_commits(engine):
@@ -195,9 +281,10 @@ def fast_commits(engine):
 
 
 def memory_store(clock=time.time):
-    """An in-memory SQLite store with the tables created from the models (tests, and `serve --memory` for a demo without a database)."""
+    """An in-memory SQLite store built by the migrations, not create_all, so the tests exercise them (tests, and `serve --memory` for a demo
+    without a database)."""
     from sqlalchemy.pool import StaticPool
 
     e = sa.create_engine("sqlite://", connect_args=dict(check_same_thread=False), poolclass=StaticPool)
-    Base.metadata.create_all(e)
+    project().upgrade(e)
     return Store(e, clock)

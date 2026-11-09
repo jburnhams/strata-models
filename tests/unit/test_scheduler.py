@@ -385,3 +385,25 @@ def test_a_queued_variant_job_survives_a_restart(scheduler):
     del scheduler.registry.models[k["model"]]
     del scheduler.registry.models["small"]
     assert "no longer served" in scheduler.step()["error"]
+
+
+def test_a_resident_model_whose_runtime_or_options_were_edited_is_reloaded(scheduler):
+    import dataclasses
+
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    old = scheduler.resident["small"].handle
+    reg = scheduler.registry
+    m = reg.models["small"]
+    reg.models["small"] = dataclasses.replace(
+        m, vram_gb=m.vram_gb + 0.5
+    )  # a figure the handle does not depend on: kept
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    assert scheduler.resident["small"].handle is old
+    reg.models["small"] = dataclasses.replace(
+        m, options=dict(ctx=4096)
+    )  # the handle was loaded with other settings: reloaded
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    assert scheduler.resident["small"].handle is not old and any("were edited" in e["text"] for e in scheduler.events)

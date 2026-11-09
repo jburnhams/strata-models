@@ -1,6 +1,7 @@
 """The Evals part of the API (mounted by server/app.py):
 
 GET  /api/evals                              experiments (spec, how many outputs are in) and datasets
+PUT  /api/evals/{name}/spec                  {spec as JSON, the TOML's fields} add or change an experiment in the database (its file no longer overwrites it)
 GET  /api/evals/{name}                       the analysis: every metric with its interval, comparisons with the baseline, the decision
 POST /api/evals/{name}/run                   run what is missing, in the background, through the queue (batch); progress in GET .../status
 GET  /api/evals/{name}/status
@@ -21,11 +22,13 @@ import threading
 import time
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from stratamodels.db.models import EvalJudgment
 from stratamodels.evals import core as C
+from stratamodels.evals import metrics as M
 from stratamodels.evals import report as R
 
 SECRET = secrets.token_bytes(
@@ -63,10 +66,18 @@ def finite(x):
     return x
 
 
+def same(x, y, kind=None):
+    """Whether two outputs say the same thing (similarity 1)."""
+    from stratamodels.evals import similarity as SIM
+
+    return SIM.similarity(x, y, kind) >= 0.9999
+
+
 def mount(app, scheduler):
     runs = {}
     engine = lambda: scheduler.store.engine
     memo = {}
+    sims = {}  # sims: (result key, result key) -> similarity, outputs never change under a key
 
     def analysis(s):
         """The analysis, recomputed only when the spec, the outputs or the judgments changed: the bootstraps take seconds to a minute."""
@@ -81,7 +92,8 @@ def mount(app, scheduler):
                 ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)),
                 ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
                 ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)),
-                C.load_dataset(s.dataset).version,
+                C.load_dataset(s.dataset, engine=engine()).version,
+                C.SCORED[0],
             )
         hit = memo.get(s.name)
         if hit and hit[0] == sig:
@@ -92,19 +104,19 @@ def mount(app, scheduler):
 
     def spec_or_404(name):
         try:
-            return C.load_spec(name)
+            return C.load_spec(name, engine())
         except C.EvalError as e:
-            raise HTTPException(404 if "no experiment" in str(e) else 400, str(e)) from e
+            raise HTTPException(404 if "no experiment" in str(e) else 400, str(e))
 
     @app.get("/api/evals")
     def get_evals():
         out = []
-        for name, s in C.list_specs().items():
+        for name, s in C.list_specs(engine()).items():
             if isinstance(s, C.EvalError):
                 out.append(dict(name=name, error=str(s)))
                 continue
             try:
-                ds = C.load_dataset(s.dataset)
+                ds = C.load_dataset(s.dataset, engine=engine())
                 keys = [C.result_key(s, c, it) for c in s.candidates for it in ds.items]
                 have = len(C.cached(engine(), keys))
                 total = len(keys)
@@ -114,7 +126,15 @@ def mount(app, scheduler):
             out.append(
                 dict(s.to_json(), outputs=have, total=total, running=runs.get(name, {}).get("state") == "running")
             )
-        return dict(experiments=out, datasets=C.list_datasets())
+        return dict(experiments=out, datasets=C.list_datasets(engine=engine()))
+
+    @app.put("/api/evals/{name}/spec")
+    def put_spec(name: str, d: dict):
+        d = {**d, "name": name}
+        try:
+            return C.save_spec(engine(), d).to_json()
+        except C.EvalError as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/api/evals/{name}")
     def get_eval(name: str):
@@ -122,7 +142,7 @@ def mount(app, scheduler):
         try:
             return finite(analysis(s))
         except C.EvalError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, str(e))
 
     @app.post("/api/evals/{name}/run", status_code=202)
     def post_run(name: str, candidate: str | None = None, limit: int | None = None):
@@ -159,7 +179,15 @@ def mount(app, scheduler):
         s = spec_or_404(name)
         res = analysis(s)
         ds, outs, _ = C.outputs_for(s, engine())
-        return R.render(res, R.worst(s, outs, ds.items, s.primary))
+        return R.render(
+            res,
+            R.worst(
+                s,
+                outs,
+                ds.items,
+                s.primary if s.primary != "judged" else next((m for m in s.metrics if M.METRICS[m].score), s.primary),
+            ),
+        )
 
     @app.get("/api/evals/{name}/pair")
     def get_pair(name: str):
@@ -167,19 +195,48 @@ def mount(app, scheduler):
         if len(s.candidates) < 2:
             raise HTTPException(400, "an experiment needs two candidates to judge")
         ds, outs, _ = C.outputs_for(s, engine())
-        ready = [
-            i
-            for i in range(len(ds.items))
-            if sum(1 for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]) >= 2
-        ]
-        if not ready:
+        pairs = []
+        from stratamodels.evals import similarity as SIM
+
+        for i in range(len(ds.items)):
+            ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
+            for n, a in enumerate(ok):
+                for b in ok[n + 1 :]:
+                    oa, ob = outs[a][i][0], outs[b][i][0]
+                    key = (
+                        s.similarity,
+                        hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest(),
+                    )  # the outputs themselves: a rerun after forget, or another kind, is scored again
+                    if key not in sims:
+                        sims[key] = SIM.similarity(oa, ob, s.similarity or None)
+                    if sims[key] < 0.9999:
+                        pairs.append((sims[key], i, a, b))  # identical outputs teach nothing: not shown
+        if s.primary == "judged":
+            pairs = [
+                p for p in pairs if s.baseline in p[2:]
+            ]  # decided head to head with the baseline: only those pairs
+        if not pairs:
             return dict(pair=None)
-        i = random.choice(ready)
-        ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
-        a, b = random.sample(ok, 2)
+        current = {(c.name, it["id"]): C.result_key(s, c, it) for c in s.candidates for it in ds.items}
+        with C.session(engine()) as ses:  # a judgment of outputs that are no longer the candidates' does not count
+            judged = {
+                (j.item_id, frozenset((j.a, j.b)))
+                for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))
+                if j.a_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key
+            }
+        fresh = [
+            p for p in pairs if (ds.items[p[1]]["id"], frozenset(p[2:])) not in judged
+        ] or pairs  # pairs not judged yet first,
+        least = min(p[0] for p in fresh)
+        sim, i, a, b = random.choice([p for p in fresh if p[0] <= least + 0.02])  # and of those the most different
+        if random.random() < 0.5:
+            a, b = b, a  # which side is X is random
         it = ds.items[i]
+        left = sum(1 for p in pairs if (ds.items[p[1]]["id"], frozenset(p[2:])) not in judged)
         return dict(
+            remaining=left,
             pair=dict(
+                similarity=round(sim, 3),
                 item_id=it["id"],
                 input={k: v for k, v in it["input"].items() if k != "path"},
                 has_media=isinstance(it["input"].get("path"), str),
@@ -196,7 +253,7 @@ def mount(app, scheduler):
                         yk=C.result_key(s, s.candidate(b), it),
                     )
                 ),
-            )
+            ),
         )
 
     @app.post("/api/evals/{name}/judgments", status_code=201)
@@ -228,8 +285,37 @@ def mount(app, scheduler):
     @app.get("/api/evals/{name}/media/{item_id}")
     def get_media(name: str, item_id: str):
         s = spec_or_404(name)
-        it = next((x for x in C.load_dataset(s.dataset).items if x["id"] == item_id), None)
+        it = next((x for x in C.load_dataset(s.dataset, engine=engine()).items if x["id"] == item_id), None)
         p = it and it["input"].get("path")
         if not isinstance(p, str) or not os.path.isfile(p):
             raise HTTPException(404, "no file for this item")
+        clip = it["input"].get("clip")
+        if clip and (mimetypes.guess_type(p)[0] or "").startswith(
+            ("audio", "video")
+        ):  # the phrase only, not the whole recording
+            import subprocess
+
+            r = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-ss",
+                    str(float(clip[0])),
+                    "-to",
+                    str(float(clip[1])),
+                    "-i",
+                    p,
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-f",
+                    "wav",
+                    "-",
+                ],
+                capture_output=True,
+            )
+            if r.returncode == 0 and r.stdout:
+                return Response(content=r.stdout, media_type="audio/wav")
         return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or "application/octet-stream")

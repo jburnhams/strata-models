@@ -1,13 +1,13 @@
-# pyright: reportMissingImports=false
-# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """insightface model packs (buffalo_l): face boxes, five keypoints, detection score, the ArcFace embedding (L2-normalised, 512 floats) and, when the
 pack's landmark_3d_68 module is loaded, the 68 3D landmarks and head pose. One loaded pack serves every app; params choose what comes back.
 
 params: path (an image file), or paths (several, answered in order); max_side (shrink larger pictures first, the boxes are given back in the
 original's pixels); det_thresh; fields (subset of bbox, kps, det_score, embedding, landmark_3d_68, pose; default all but landmark_3d_68);
-views (one image only): a list of ways to look at it again, each {crop: [x, y, w, h], rotate: 90 | 270 (degrees clockwise, applied after the
-crop)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
-look harder for children lying down or small in the background, without sending the image itself."""
+views (one image only): a list of ways to look at it again, each {crop: [x, y, w, h], pad: factor (1-4: the picture centred on a
+mid-grey canvas that many times its size, so a face that fills the frame shrinks into the detector's range; after the crop), rotate: 90 | 270
+(degrees clockwise, applied last)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
+look harder for children lying down or small in the background, without sending the image itself; strata-stills uses pad for close-ups
+(buffalo_l at det_size 640 misses about 1 in 5 faces over 20 % of the frame; a pad 2 view finds most of them)."""
 
 import collections
 import os
@@ -102,13 +102,24 @@ def _view(img, v):
     if v.get("crop"):
         try:
             x, y, w, h = (int(round(float(a))) for a in v["crop"])
-        except (TypeError, ValueError) as exc:
-            raise RunError(f"crop must be [x, y, w, h], not {v['crop']!r}") from exc
+        except (TypeError, ValueError):
+            raise RunError(f"crop must be [x, y, w, h], not {v['crop']!r}")
         x, y = max(x, 0), max(y, 0)
         w, h = min(w, W - x), min(h, H - y)
         if w <= 0 or h <= 0:
             raise RunError(f"crop {v['crop']} is outside the {W}x{H} picture")
         img, ox, oy = img[y : y + h, x : x + w], x, y
+    if v.get("pad") is not None:
+        try:
+            k = float(v["pad"])
+        except (TypeError, ValueError):
+            raise RunError(f"pad must be a number from 1 to 4, not {v['pad']!r}")
+        if not 1 <= k <= 4:
+            raise RunError(f"pad must be a number from 1 to 4, not {v['pad']!r}")
+        h, w = img.shape[:2]
+        px, py = int(round(w * (k - 1) / 2)), int(round(h * (k - 1) / 2))
+        img = cv2.copyMakeBorder(img, py, py, px, px, cv2.BORDER_CONSTANT, value=(128, 128, 128))
+        ox, oy = ox - px, oy - py
     h, w = img.shape[:2]
     rot = int(v.get("rotate") or 0) % 360
     if rot == 90:
@@ -149,7 +160,7 @@ def run(handle, params):
         out = []
         for v in params["views"]:
             if not isinstance(v, dict):
-                raise RunError(f"a view is {{crop?, rotate?}}, not {v!r}")
+                raise RunError(f"a view is {{crop?, pad?, rotate?}}, not {v!r}")
             vimg, back = _view(img, v)
             found = detect(handle, vimg, params.get("max_side"), params.get("det_thresh"), fields)
             out.append(dict(view=v, faces=[_unview(f, back) for f in found["faces"]]))

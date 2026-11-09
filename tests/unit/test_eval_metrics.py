@@ -130,3 +130,57 @@ def test_summaries_and_comparisons_know_which_way_is_better():
         M.summarise("verification_auc", fitems, none)["value"] == 0.5
         and M.compare("verification_auc", fitems, none, none)["improves"] is None
     )  # every face missing: chance
+
+
+def test_description_metrics_against_a_reference():
+    ref = dict(
+        caption="a dog",
+        tags=["dog", "park", "grass"],
+        setting=dict(indoor_outdoor="outdoor", time_of_day="day", weather="sunny"),
+        people=dict(count=0, children=0, main_subject_is_person=False),
+        lighting=dict(sources=[dict(type="shade", share=0.2), dict(type="daylight", share=0.8)], level="normal"),
+        exposure=dict(sharpness="sharp"),
+        colour=dict(skin_visible=False),
+        text_visible=[],
+    )
+    item = dict(reference=dict(description=ref))
+    same = dict(json=dict(ref))
+    other = dict(
+        json=dict(
+            ref,
+            tags=["Dog", "tree"],
+            setting=dict(indoor_outdoor="outdoor", time_of_day="dusk", weather="sunny"),
+            people=dict(count=4, children=1, main_subject_is_person=True),
+        )
+    )
+    s = lambda name, out, err=None: M.METRICS[name].score(item, out, err)
+    assert (
+        s("desc_fields", same) == 1.0
+        and s("desc_fields", other) == pytest.approx(7 / 11)
+        and s("desc_fields", None, "failed") == 0.0
+    )
+    assert (
+        s("tag_f1", same) == 1.0
+        and s("tag_f1", other) == pytest.approx(2 * 1 / 5)
+        and s("tag_f1", dict(json=dict(tags=["cat"]))) == 0.0
+        and s("tag_f1", None, "x") == 0.0
+    )
+    assert (
+        s("desc_valid", same)
+        and not s("desc_valid", dict(json=None))
+        and not s("desc_valid", None, "x")
+        and s("desc_valid", ref)
+    )
+    assert (
+        M.METRICS["desc_fields"].score({}, same, None) is None
+        and M.METRICS["tag_f1"].score(dict(reference=dict(description=dict(tags=[]))), same, None) is None
+    )
+    assert (
+        M.description_of("text") is None
+        and M._bucket(True) is None
+        and [M._bucket(n) for n in (0, 1, 2, 4, 9)] == [0, 1, 2, "3-5", "6+"]
+    )
+    assert (
+        M.field_agreement(ref, dict(people=dict(count="x", children="y")))["people"] is False
+        and M._main_light({}) is None
+    )

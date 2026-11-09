@@ -347,3 +347,46 @@ def test_report_numbers_are_formatted_by_unit():
         "+0.250",
         "n/a",
     ]
+
+
+def test_specs_and_datasets_live_in_the_database_once_seen(setup, engine, tmp_path):
+    from stratamodels.db.models import EvalCandidate, EvalExperiment, EvalItem
+
+    ds = C.load_dataset("speech", engine=engine)
+    assert ds.version == setup.version and ds.items == setup.items and ds.description == setup.description
+    assert C.import_dataset(engine, setup) is False  # same version: nothing written
+    with C.session(engine) as s:
+        assert s.query(EvalItem).count() == 40
+    specs = C.list_specs(engine)
+    assert specs["fake-asr"].source.endswith("fake-asr.toml")
+    with C.session(engine) as s:
+        assert [c.name for c in s.query(EvalCandidate).order_by(EvalCandidate.position)] == [
+            "base",
+            "better",
+            "same",
+        ] and s.get(EvalExperiment, "fake-asr").edited is False
+    # a dataset rewritten with extra fields, and one that only the database has (its file gone)
+    items = [dict(setup.items[0], extra_field=1)] + setup.items[1:3]
+    ds2 = C.write_dataset("speech", items, "three now", engine=engine)
+    assert ds2.items[0]["extra_field"] == 1 and len(C.load_dataset("speech", engine=engine).items) == 3
+    C.write_dataset("only-db", items, "x", engine=engine)
+    os.remove(os.path.join(C.datasets_dir(), "only-db.jsonl"))
+    assert C.load_dataset("only-db", engine=engine).items == items and "only-db" in [
+        d["name"] for d in C.list_datasets(engine=engine)
+    ]
+    with pytest.raises(C.EvalError, match="no dataset"):
+        C.load_dataset("never", engine=engine)
+    # an experiment edited here is no longer overwritten by its file; one added here exists without a file
+    d = C.load_spec("fake-asr", engine).to_json()
+    d["question"] = "edited here"
+    d["decision"] = dict(primary="wer", baseline="base")
+    C.save_spec(engine, d)
+    assert C.load_spec("fake-asr", engine).question == "edited here"
+    C.save_spec(engine, dict(d, name="db-only", question="no file"))
+    assert C.load_spec("db-only", engine).question == "no file" and "db-only" not in C.list_specs()
+    with pytest.raises(C.EvalError):
+        C.save_spec(engine, dict(d, metrics=["nope"]))
+    with C.session(engine) as s:
+        s.get(EvalExperiment, "db-only").spec = dict(name="db-only")
+        s.commit()
+    assert isinstance(C.list_specs(engine)["db-only"], C.EvalError)

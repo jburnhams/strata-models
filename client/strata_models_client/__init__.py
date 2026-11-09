@@ -7,7 +7,14 @@
 
 The service URL is STRATA_MODELS_URL (default http://127.0.0.1:8366). Inputs are file paths: the service runs on the same machine."""
 
-import contextlib, json, os, threading, time, urllib.error, urllib.request, warnings
+import contextlib
+import json
+import os
+import threading
+import time
+import urllib.error
+import urllib.request
+import warnings
 
 __version__ = "0.1.0"
 POLL_S = 30  # one long-poll request waits this long at most
@@ -108,6 +115,21 @@ def transcribe(path, app, role="transcribe", priority="batch", model=None, **par
     if "clip" in params:
         params["clip"] = list(params["clip"])
     return run(role, params, app, priority=priority, model=model)
+
+
+def role_model(role):
+    """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
+    by an earlier model is made again when an eval changes the role's model."""
+    return next((r["model"] for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
+
+
+def speak(text, app, priority="batch", model=None, **params):
+    """Speech from text (role `speak`): params voice (a preset name, or a reference recording's path for the cloning models), speed (1.0 = the
+    model's own pace), instruct, language, seed. Without model and voice, the voice and settings the role's eval chose. Returns {path (a WAV on
+    this machine, the service's copy: copy it if it must last), duration_s, sample_rate, seconds, engine, voice}."""
+    if params.get("voice") and os.path.exists(str(params["voice"])):
+        params["voice"] = os.path.abspath(params["voice"])
+    return run("speak", dict(params, text=text), app, priority=priority, model=model)
 
 
 class Lease:

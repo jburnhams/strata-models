@@ -45,7 +45,7 @@ def test_landing_page_and_built_static_index(scheduler, tmp_path, monkeypatch):
     (static / "assets" / "a.js").write_text("1", encoding="utf8")
     monkeypatch.setattr(server_app, "STATIC", str(static))
     c2 = TestClient(create_app(scheduler))
-    assert c2.get("/").text == '<base href="./"><h1>built</h1>' and c2.get("/assets/a.js").text == "1"
+    assert c2.get("/").text == "<h1>built</h1>" and c2.get("/assets/a.js").text == "1"
 
 
 def test_submit_poll_and_list_jobs(client, scheduler):
@@ -194,3 +194,35 @@ def test_generated_pictures_gallery_files_and_uploads(client, scheduler, tmp_pat
         client.post("/api/images/upload", params=dict(name="x.exe"), content=b"x").status_code == 400
         and client.post("/api/images/upload", content=b"").status_code == 400
     )
+
+
+def test_registry_preferences_and_files_through_the_api(client, scheduler):
+    from stratamodels import registry as reg
+
+    reg.save_model(scheduler.store.engine, "small", roles=["echo"], runtime="fake", vram_gb=2)
+    reg.save_model(scheduler.store.engine, "big", roles=["echo"], runtime="fake", vram_gb=6)
+    reg.set_role(scheduler.store.engine, "echo", "small")
+    scheduler.reload_registry()
+    assert (
+        client.put("/api/roles/echo", json=dict(model="big")).json()["roles"][0]["model"] == "big"
+        and scheduler.registry.resolve("echo").key == "big"
+    )
+    assert client.put("/api/roles/echo", json=dict(model="nope")).status_code == 400
+    m = client.put("/api/models/tiny", json=dict(runtime="fake", vram_gb=0.5, roles=["echo"])).json()["models"]
+    assert any(x["key"] == "tiny" and x["served"] for x in m)
+    assert (
+        client.put("/api/preferences/bh/echo", json=dict(model="tiny", params=dict(k=1))).json()["items"][0]["model"]
+        == "tiny"
+    )
+    assert client.put("/api/preferences/bh/echo", json={}).status_code == 400
+    j = client.post("/api/jobs", json=dict(role="echo", app="bh", params=dict(path="/p/a.wav"))).json()
+    assert j["model"] == "tiny" and j["params"] == dict(k=1, path="/p/a.wav")
+    assert (
+        client.get("/api/files", params=dict(job=j["id"])).json()["items"][0]["path"] == "/p/a.wav"
+        and client.get("/api/files", params=dict(path="/p/a.wav")).json()["items"][0]["job_id"] == j["id"]
+    )
+    assert client.get("/api/files").status_code == 400
+    assert client.delete("/api/preferences/bh/echo").json()["items"] == []
+    assert client.post("/api/registry/seed", params=dict(follow="nope")).status_code == 400
+    out = client.post("/api/registry/seed", params=dict(follow="role:echo")).json()
+    assert "role faces" in out["added"] and scheduler.registry.resolve("faces").key == "buffalo_l"

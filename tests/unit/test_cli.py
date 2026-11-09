@@ -130,3 +130,60 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
         and '"ran": 6' in capsys.readouterr().out
         and len(calls) == 6
     )
+
+
+def test_role_prefer_and_seed_change_the_database(capsys, monkeypatch, tmp_path):
+    import urllib.request
+
+    calls = []
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: calls.append(req.full_url) or Resp({}))
+    assert (
+        cli.main(["seed"]) == 0
+        and "model buffalo_l" in capsys.readouterr().out
+        and calls[-1].endswith("/api/registry/seed")
+    )
+    assert (
+        cli.main(["role", "transcribe", "whisper-small"]) == 0
+        and "transcribe -> whisper-small" in capsys.readouterr().out
+    )
+    with pytest.raises(SystemExit, match="not in the registry"):
+        cli.main(["role", "transcribe", "nope"])  # the foreign key refuses it on a real database
+    assert (
+        cli.main(["prefer", "strata-360", "transcribe", "whisper-large-v3", "--params", '{"language": "en"}']) == 0
+        and '"language": "en"' in capsys.readouterr().out
+    )
+    with pytest.raises(SystemExit, match="JSON"):
+        cli.main(["prefer", "a", "transcribe", "--params", "{"])
+    with pytest.raises(SystemExit, match="no role"):
+        cli.main(["prefer", "a", "nope", "x"])
+    assert (
+        cli.main(["prefer", "strata-360", "transcribe", "--clear"]) == 0 and "no preference" in capsys.readouterr().out
+    )
+    assert cli.main(["seed", "--follow", "role:transcribe"]) == 0 and "role transcribe" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="no model"):
+        cli.main(["seed", "--follow", "model:nope"])
+    assert cli.main(["registry"]) == 0 and "whisper-large-v3-turbo" in capsys.readouterr().out
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(OSError("down")))
+    assert cli.main(["role", "transcribe", "whisper-small"]) == 0 and "next start" in capsys.readouterr().err
+
+
+def test_the_cli_never_migrates_a_database_at_another_revision(capsys, monkeypatch, tmp_path):
+    import sqlalchemy as sa
+
+    from stratamodels.store import StaleDatabase, Store
+
+    Store.connect()
+    e = sa.create_engine("sqlite:///" + str(tmp_path / "x.sqlite"))
+    url = "sqlite:///" + str(tmp_path / "old.sqlite")
+    monkeypatch.setenv("STRATAMODELS_DATABASE_URL", url)
+    from omarchy_db import upgrade
+
+    from stratamodels.db.models import Base
+
+    upgrade(sa.create_engine(url), "migrations", Base.metadata, "e1efec22b916")
+    with pytest.raises(StaleDatabase, match="e1efec22b916"):
+        Store.connect(migrate="new")
+    with pytest.raises(SystemExit, match="cannot be reached"):
+        cli.main(["role", "faces", "buffalo_l"])
+    assert cli.main(["eval", "list"]) == 0 and "reading the files" in capsys.readouterr().err
+    e.dispose()

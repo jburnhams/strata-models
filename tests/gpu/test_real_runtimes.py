@@ -88,7 +88,7 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
         )
         for v in r["views"]:
             got = min(v["faces"], key=lambda f: abs(f["bbox"][0] - want[0]) + abs(f["bbox"][1] - want[1]))["bbox"]
-            assert all(abs(a - c) < 0.05 * W for a, c in zip(got, want, strict=False)), (v["view"], got, want)
+            assert all(abs(a - c) < 0.05 * W for a, c in zip(got, want)), (v["view"], got, want)
         c = rt.run(
             h,
             dict(
@@ -98,7 +98,7 @@ def test_views_give_boxes_back_in_the_original_picture(tmp_path):
             ),
         )
         got = c["views"][0]["faces"][0]["bbox"]
-        assert all(abs(a - x) < 0.05 * W for a, x in zip(got, b, strict=False)), (got, b)
+        assert all(abs(a - x) < 0.05 * W for a, x in zip(got, b)), (got, b)
         with pytest.raises(runtimes.RunError, match="rotate"):
             rt.run(h, dict(path=IMAGE, views=[dict(rotate=45)]))
         with pytest.raises(runtimes.RunError, match="outside"):
@@ -172,3 +172,56 @@ def test_clip_embeddings_on_the_gpu(tmp_path):
         )  # the same picture squeezed to a square thumbnail against centre-cropped: close, not equal
     finally:
         rt.unload(h)
+
+
+SPEAKERS = ["kokoro-v1", "chatterbox", "chatterbox-turbo", "qwen3-tts-custom", "qwen3-tts-design", "qwen3-tts-clone"]
+VOICE = os.environ.get("STRATAMODELS_TEST_VOICE")  # a reference recording of more than 5 s, for the cloning models
+
+
+@pytest.mark.parametrize("key", SPEAKERS)
+def test_speak_on_the_gpu(key):
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().models[key]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip(f"no venv for {key}: scripts/setup_worker_venv.sh {m.options.get('venv')}")
+    params = dict(text="Two hundred kilometres behind me, and the second night is coming.")
+    if key in ("chatterbox-turbo", "qwen3-tts-clone"):
+        if not VOICE:
+            pytest.skip("needs STRATAMODELS_TEST_VOICE")
+        params["voice"] = VOICE
+    if key == "qwen3-tts-design":
+        params["instruct"] = "A calm British man in his forties, narrating a documentary"
+    out, _out2 = measure(m, params)
+    assert os.path.isfile(out["path"]) and 2.0 < out["duration_s"] < 12.0 and out["sample_rate"] >= 16000
+
+
+@pytest.mark.skipif(
+    not IMAGE or bool(runtimes.available()["face-kind"]) or bool(runtimes.available()["insightface"]),
+    reason="needs STRATAMODELS_TEST_IMAGE (a photo of a real person), insightface, open_clip and torch",
+)
+def test_face_kind_on_the_gpu():
+    import dataclasses
+
+    faces = Registry.load().resolve("faces")
+    fr = runtimes.get(faces.runtime)
+    fh = fr.load(faces, MODELS)
+    try:
+        boxes = [f["bbox"] for f in fr.run(fh, dict(path=IMAGE, fields=["bbox"]))["faces"]]
+    finally:
+        fr.unload(fh)
+    assert boxes
+    m = Registry.load().resolve("face-kind")
+    out, _ = measure(m, dict(path=IMAGE, boxes=boxes[:1]))
+    f = out["faces"][0]
+    assert abs(sum(f["probs"].values()) - 1) < 1e-3 and "real" in f["probs"]
+    if out["head"].startswith("trained"):
+        assert f["real"] > 0.5 and f["kind"] == "real"  # the test picture is of a real person
+    zs = dataclasses.replace(m, options={**m.options, "head": "no-such-head.npz"})
+    rt = runtimes.get(zs.runtime)
+    h = rt.load(zs, MODELS)
+    try:
+        z = rt.run(h, dict(path=IMAGE, boxes=boxes[:1]))
+    finally:
+        rt.unload(h)
+    assert z["head"] == "zero-shot" and set(z["faces"][0]["probs"]) == {"real", "statue", "picture", "toy", "animal"}

@@ -14,14 +14,11 @@ corrupting each other's work; sharing the card's time just makes both a little s
 Loading, running and unloading happen only on the worker thread; the API threads queue requests and wait on a condition variable."""
 
 import collections
-import logging
 import threading
 import time
 
 from stratamodels import gpu, runtimes
 from stratamodels.store import FINISHED
-
-log = logging.getLogger(__name__)
 
 PRIORITY = {"interactive": 0, "batch": 1}
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
@@ -86,18 +83,18 @@ class Scheduler:
     def submit(self, role, params, app, priority="batch", model=None, options=None):
         """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
         for an unknown role or a model that does not serve it."""
-        m = self.registry.resolve(role, model)
-        params = dict(params or {})
+        app = str(app or "unknown")[:64]
+        pref = self.registry.preference(app, role)
+        m = self.registry.resolve(role, model, app)
+        params = {
+            **((pref.params or {}) if pref else {}),
+            **(params or {}),
+        }  # the app's default params (preferences), its job's own over them
         if options:
             m = self.registry.variant(m.key, options)
             params[OPTIONS] = dict(options)  # kept with the job, so a restart can rebuild the variant
         j = self.store.add(
-            kind="run",
-            role=role,
-            model=m.key,
-            app=str(app or "unknown")[:64],
-            priority=self._priority(priority),
-            params=params,
+            kind="run", role=role, model=m.key, app=app, priority=self._priority(priority), params=params
         )
         self._notify()
         return j
@@ -170,6 +167,14 @@ class Scheduler:
                     return j
                 self.cv.wait(min(left, 1.0))
 
+    def reload_registry(self, registry=None):
+        """Take up a changed registry (an edit from the web app or the CLI): new jobs resolve against it, loaded models stay loaded."""
+        from stratamodels.registry import Registry
+
+        self.registry = registry if registry is not None else Registry.from_db(self.store.engine, keep=self.registry)
+        self._notify()
+        return self.registry
+
     def request(self, action, key):
         """Load or unload a model on the worker thread (from the Models page); returns at once, the change shows on the next status read."""
         if action not in ("load", "unload"):
@@ -239,8 +244,8 @@ class Scheduler:
             return
         try:
             self.get_runtime(r.model.runtime).unload(r.handle)
-        except Exception:  # freeing must not fail the job that needed the room, but it is not silent
-            log.warning("could not unload %s", key, exc_info=True)
+        except Exception:
+            pass  # freeing must not fail the job that needed the room
         self._event(f"unloaded {key} ({why})")
 
     def _make_room(self, need_mb, keep=None):
@@ -264,6 +269,13 @@ class Scheduler:
     def _ensure(self, model):
         """The loaded handle for `model`, loading it (after making room) when needed; returns (Resident, seconds spent loading)."""
         r = self.resident.get(model.key)
+        if r is not None and (r.model.runtime, r.model.name, r.model.options) != (
+            model.runtime,
+            model.name,
+            model.options,
+        ):
+            self._unload(model.key, "its runtime, file or options were edited")
+            r = None  # the old handle belongs to the old runtime and settings
         if r is not None:
             self.resident.move_to_end(model.key)
             return r, 0.0

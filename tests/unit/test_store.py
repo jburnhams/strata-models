@@ -40,3 +40,44 @@ def test_prune_drops_old_results_and_recover_fails_running_jobs(clock):
     assert s.prune() == 1 and s.get(j["id"])["result"] is None and s.get(j["id"])["status"] == "done"
     r = s.add(kind="run", role="r", model="m", app="a", priority="batch", status="running")
     assert s.recover() == 1 and s.get(r["id"])["status"] == "failed"
+
+
+def test_results_and_files_are_rows_of_their_own(clock):
+    from stratamodels.store import paths
+
+    s = memory_store(clock)
+    j = s.add(
+        kind="run",
+        role="image-generate",
+        model="m",
+        app="a",
+        priority="batch",
+        params=dict(
+            prompt="x",
+            ref_images=["/in/a.png", "/in/a.png"],
+            clip_path="/in/c.wav",
+            name="rel/x.png",
+            __options__=dict(path="/no"),
+        ),
+    )
+    assert s.files(job_id=j["id"]) == [
+        dict(job_id=j["id"], direction="input", path=p, created_at=clock.t) for p in ("/in/a.png", "/in/c.wav")
+    ]
+    clock.t += 5
+    done = s.update(j["id"], status="done", finished_at=clock.t, result=dict(path="/out/1.png", seed=3))
+    assert (
+        done["result"] == dict(path="/out/1.png", seed=3)
+        and s.get(j["id"])["result"]["seed"] == 3
+        and s.get(j["id"], result=False).get("result", "none") == "none"
+    )
+    assert s.files(path="/out/1.png") == [
+        dict(job_id=j["id"], direction="output", path="/out/1.png", created_at=clock.t)
+    ]
+    assert s.update(j["id"], result=dict(n=2))["result"] == dict(n=2)  # a second write replaces the output
+    lease = s.add(kind="lease", app="a", priority="batch", params=dict(path="/not/a/run"))
+    assert s.files(job_id=lease["id"]) == []
+    assert paths(dict(files=["C:\\x\\y.png", "rel"], other="/skip", deep=[dict(audio_path="/z.wav")])) == [
+        "C:\\x\\y.png",
+        "/z.wav",
+    ]
+    assert s.claim(j["id"], status="running") is None

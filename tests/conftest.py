@@ -14,6 +14,14 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.integration)
 
 
+@pytest.fixture(autouse=True)
+def isolated_database(isolated_env, tmp_path_factory, monkeypatch):
+    """Never the shared database: a test that connects by default gets a tmp SQLite file, and a stray omarchy-db default names a database that does not exist. (Home, data folder and network isolation come from the strata-python plugin.)"""
+    base = tmp_path_factory.mktemp("db")
+    monkeypatch.setenv("STRATAMODELS_DATABASE_URL", "sqlite:///" + str(base / "stratamodels.sqlite"))
+    monkeypatch.setenv("OMARCHY_DB_DATABASE", "stratamodels_tests_never_live")
+
+
 @pytest.fixture
 def fake_urlopen(monkeypatch):
     """Script `urllib.request.urlopen`: `fake_urlopen.reply({...}, http_error(429))`, then assert on `fake_urlopen.calls` (url, method, headers, parsed JSON body). Unexpected calls fail."""
@@ -82,7 +90,7 @@ def registry():
                 small=dict(runtime="fake", roles=["echo"], vram_gb=2),
                 big=dict(runtime="fake", roles=["echo"], vram_gb=6),
                 other=dict(runtime="fake", roles=["other"], vram_gb=2),
-                planned=dict(runtime="llama-server", roles=["later"], used_by=["strata-360"]),
+                planned=dict(runtime="ultralytics", roles=["later"], used_by=["strata-360"]),
             ),
         )
     )
@@ -186,3 +194,13 @@ params = { drop = 4 }
 options = { tweak = 1 }
 """)
     return ds
+
+
+@pytest.fixture(autouse=True)
+def unbound_settings():
+    """Settings start on the file in every test, and a test that binds them to a database (the CLI, build()) does not leak that to the next."""
+    from stratamodels import settings
+
+    settings.bind(None)
+    yield
+    settings.bind(None)

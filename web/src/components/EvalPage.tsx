@@ -55,23 +55,35 @@ function Results({ a }: { a: Analysis }) {
 /** The picture of an image job's output, if it is one. */
 export const imagePath = (o: unknown) => (o && typeof o === 'object' && typeof (o as { path?: unknown }).path === 'string' && /\.(png|jpe?g|webp)$/i.test((o as { path: string }).path) ? (o as { path: string }).path : null)
 
+/** The sound of a speech job's output (speak), if it is one. */
+export const audioPath = (o: unknown) => (o && typeof o === 'object' && typeof (o as { path?: unknown }).path === 'string' && /\.(wav|mp3|flac|ogg|m4a)$/i.test((o as { path: string }).path) ? (o as { path: string }).path : null)
+
+function Output({ o, label }: { o: unknown; label: string }) {
+  const img = imagePath(o); const snd = audioPath(o)
+  if (img) return <img src={imagesApi.fileUrl(img)} alt={label} className="h-auto max-w-full rounded-control" />
+  if (snd) return <audio controls preload="none" src={imagesApi.fileUrl(snd)} aria-label={`${label}, spoken`} className="w-full" />
+  return <p className="type-body whitespace-pre-wrap">{outputText(o)}</p>
+}
+
 function Judge({ name }: { name: string }) {
   const qc = useQueryClient(); const [n, setN] = useState(0)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
   const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { await evalsApi.judge(name, p.token, w); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
   return (
-    <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge yet">Run the experiment first: pairs need two candidates&apos; outputs for the same item.</EmptyState>}>
+    <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
       {({ pair }) => (
         <div className="grid gap-4">
           <p className="type-body">Which output is better for item <span className="font-mono">{pair!.item_id}</span>? The candidates are hidden until you answer.</p>
+          {pair!.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - pair!.similarity)} different`}{load.status === 'ready' && load.data.remaining !== undefined ? ` · ${format.count(load.data.remaining, 'pair')} not judged yet, most different first` : ''}</p>}
           {pair!.has_media && !imagePath(pair!.x) && <audio controls src={evalsApi.mediaUrl(name, pair!.item_id)} className="w-full" />}
           {typeof pair!.input.prompt === 'string' && <p className="type-body">Prompt: {pair!.input.prompt}</p>}
-          {pair!.reference && 'text' in pair!.reference && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}
+          {typeof pair!.input.text === 'string' && <p className="type-body">Text: {pair!.input.text}</p>}
+          {pair!.reference && 'text' in pair!.reference && pair!.reference.text !== pair!.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}
           <div className="grid gap-4 md:grid-cols-2">
             {(['x', 'y'] as const).map(k => (
               <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid gap-2 rounded-surface border border-border p-3">
                 <h3 className="type-label">Output {k.toUpperCase()}</h3>
-                {imagePath(pair![k]) ? <img src={imagesApi.fileUrl(imagePath(pair![k])!)} alt={`Output ${k.toUpperCase()}`} className="h-auto max-w-full rounded-control" /> : <p className="type-body whitespace-pre-wrap">{outputText(pair![k])}</p>}
+                <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />
                 <Button onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'}>{`${k.toUpperCase()} is better`}</Button>
               </section>
             ))}

@@ -85,7 +85,7 @@ def service(isolated_env, monkeypatch):
     deadline = time.time() + 60
     while True:
         try:
-            urllib.request.urlopen(base + "/api/health", timeout=1)  # noqa: S310  (loopback test server)
+            urllib.request.urlopen(base + "/api/health", timeout=1)
             break
         except OSError as exc:
             if p.poll() is not None or time.time() > deadline:

@@ -84,6 +84,28 @@ def _cer(item, output, error):
     return (len(r) if error else edits(r, list(" ".join(normalise(transcript(output))))), len(r))
 
 
+# ---- speech (text to speech) -----------------------------------------------------------------------------------------------------------------
+def _tts_wer(item, output, error):
+    """Intelligibility: the words the [score] pass heard in the audio (a transcription) against the text that was to be spoken. A failed job, or a
+    reading that failed, is all errors; an output not read yet does not count."""
+    ref = _ref_text(item) or (item.get("input") or {}).get("text")
+    if ref is None:
+        return None
+    r = normalise(ref)
+    if error:
+        return (len(r), len(r))
+    sc = (output or {}).get("scored")
+    if sc is None:
+        return None
+    return (len(r), len(r)) if sc.get("error") else (edits(r, normalise(transcript(sc.get("result")))), len(r))
+
+
+def _rtf(item, output, error):
+    if error or not isinstance(output, dict) or not output.get("duration_s"):
+        return None
+    return float(output.get("seconds") or item.get("_run_s") or 0) / float(output["duration_s"])
+
+
 # ---- faces --------------------------------------------------------------------------------------------------------------------------------
 def iou(a, b):
     """Intersection over union of two [x1, y1, x2, y2] boxes."""
@@ -148,7 +170,7 @@ def verification(items, outputs, far=0.01):
     dict(auc, tar, threshold, pairs): ROC AUC, and the share of same-person pairs accepted at the threshold that lets `far` of different-person
     pairs through. Items whose face was not found count as rejected (distance 2)."""
     emb, who = [], []
-    for it, out in zip(items, outputs, strict=False):
+    for it, out in zip(items, outputs):
         p = (it.get("reference") or {}).get("person")
         if p is None:
             continue
@@ -174,6 +196,105 @@ def verification(items, outputs, far=0.01):
     thr = float(np.quantile(neg, 1 - far))
     tar = float((pos > thr).mean())
     return dict(auc=float(auc), tar=tar, threshold=thr, pairs=int(s.size))
+
+
+# ---- picture descriptions (structured, against a reference description) -------------------------------------------------------------------
+def description_of(output):
+    """The parsed description of a vision-language output (its `json`), or a recorded one given whole."""
+    if not isinstance(output, dict):
+        return None
+    d = output.get("json", output if "caption" in output else None)
+    return d if isinstance(d, dict) else None
+
+
+def _g(d, path):
+    for k in path.split("."):
+        d = d.get(k) if isinstance(d, dict) else None
+    return d
+
+
+def _bucket(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        return None
+    return 0 if n <= 0 else 1 if n == 1 else 2 if n == 2 else "3-5" if n <= 5 else "6+"
+
+
+def _main_light(d):
+    src = [s for s in (_g(d, "lighting.sources") or []) if isinstance(s, dict)]
+    return (
+        max(src, key=lambda s: s.get("share") if isinstance(s.get("share"), (int, float)) else 0).get("type")
+        if src
+        else None
+    )
+
+
+# The fields an app filters or sorts on, each read the same way from both descriptions. Free text (caption, place, event) is judged blind instead.
+DESCRIPTION_FIELDS = {
+    "indoor_outdoor": lambda d: _g(d, "setting.indoor_outdoor"),
+    "time_of_day": lambda d: _g(d, "setting.time_of_day"),
+    "weather": lambda d: _g(d, "setting.weather"),
+    "people": lambda d: _bucket(_g(d, "people.count")),
+    "children": lambda d: None if not isinstance(_g(d, "people.children"), int) else _g(d, "people.children") > 0,
+    "person_subject": lambda d: _g(d, "people.main_subject_is_person"),
+    "main_light": _main_light,
+    "light_level": lambda d: _g(d, "lighting.level"),
+    "sharpness": lambda d: _g(d, "exposure.sharpness"),
+    "skin_visible": lambda d: _g(d, "colour.skin_visible"),
+    "has_text": lambda d: None if not isinstance(_g(d, "text_visible"), list) else len(_g(d, "text_visible")) > 0,
+}
+
+
+def _ref_desc(item):
+    return description_of((item.get("reference") or {}).get("description"))
+
+
+def field_agreement(ref, got):
+    """{field: True/False} for the fields the reference fills (a missing answer is a disagreement)."""
+    out = {}
+    for f, read in DESCRIPTION_FIELDS.items():
+        want = read(ref)
+        if want is None:
+            continue
+        have = read(got) if got else None
+        out[f] = have is not None and str(have).lower() == str(want).lower()
+    return out
+
+
+def _desc_fields(item, output, error):
+    ref = _ref_desc(item)
+    if ref is None:
+        return None
+    a = field_agreement(ref, None if error else description_of(output))
+    return sum(a.values()) / len(a) if a else None
+
+
+def _tagset(d):
+    return {" ".join(str(t).lower().split()) for t in (d or {}).get("tags") or [] if str(t).strip()}
+
+
+def _tag_f1(item, output, error):
+    ref = _ref_desc(item)
+    if ref is None:
+        return None
+    r = _tagset(ref)
+    g = set() if error else _tagset(description_of(output))
+    if not r:
+        return None
+    tp = len(r & g)
+    return 0.0 if not tp else 2 * tp / (len(r) + len(g))
+
+
+def _desc_valid(item, output, error):
+    if error:
+        return False
+    d = description_of(output)
+    return bool(
+        d
+        and isinstance(d.get("caption"), str)
+        and d["caption"].strip()
+        and isinstance(d.get("tags"), list)
+        and d["tags"]
+    )
 
 
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
@@ -253,6 +374,25 @@ METRICS = {
             lambda it, out: verification(it, out)["tar"],
         ),
         Metric(
+            "desc_fields",
+            "mean",
+            "higher",
+            "Share of the reference description's structured fields (indoor/outdoor, time of day, weather, people, children, person subject, main light, light level, sharpness, skin, text) given the same answer",
+            "%",
+            _desc_fields,
+        ),
+        Metric(
+            "tag_f1",
+            "mean",
+            "higher",
+            "F1 of the search tags against the reference description's tags (lower case, exact words)",
+            "%",
+            _tag_f1,
+        ),
+        Metric(
+            "desc_valid", "binary", "higher", "The output is a description with a caption and tags", "%", _desc_valid
+        ),
+        Metric(
             "exact_match", "binary", "higher", "The answer equals the reference answer after normalise()", "%", _exact
         ),
         Metric("parsed", "binary", "higher", "The output is valid JSON", "%", _parsed),
@@ -264,6 +404,29 @@ METRICS = {
             "Highest VRAM the job's own process used (image generation runs as its own process)",
             "GB",
             _peak_vram,
+        ),
+        Metric(
+            "tts_wer",
+            "ratio",
+            "lower",
+            "Intelligibility of speech made from text: the [score] model transcribes the audio back, word error rate against the text",
+            "%",
+            _tts_wer,
+        ),
+        Metric(
+            "rtf",
+            "mean",
+            "lower",
+            "Real-time factor: seconds to make the audio over the audio's length (under 1 is faster than speaking it)",
+            "",
+            _rtf,
+        ),
+        Metric(
+            "judged",
+            "judged",
+            "higher",
+            "Blind human judgments: share of head-to-head pairs against the baseline the candidate won (a tie is half a win)",
+            "%",
         ),
         Metric(
             "latency_s",
@@ -296,7 +459,7 @@ def summarise(metric, items, outputs, seed=None):
             else (float("nan"), float("nan"))
         )
         return dict(value=val, low=lo, high=hi, n=n)
-    vals = [m.score(it, o, e) for it, (o, e) in zip(items, outputs, strict=False)]
+    vals = [m.score(it, o, e) for it, (o, e) in zip(items, outputs)]
     vals = [v for v in vals if v is not None]
     if m.shape == "ratio":
         v, lo, hi = S.bootstrap_ratio([a for a, _ in vals], [b for _, b in vals], seed=seed)
@@ -334,9 +497,7 @@ def compare(metric, items, base_outputs, cand_outputs, seed=None):
         )
         r = dict(n=n, mean_a=a, mean_b=b, diff=b - a, low=lo, high=hi, p=min(p, 1.0))
     else:
-        pairs = [
-            (m.score(it, *ab), m.score(it, *cb)) for it, ab, cb in zip(items, base_outputs, cand_outputs, strict=False)
-        ]
+        pairs = [(m.score(it, *ab), m.score(it, *cb)) for it, ab, cb in zip(items, base_outputs, cand_outputs)]
         pairs = [(x, y) for x, y in pairs if x is not None and y is not None]
         if m.shape == "ratio":
             r = S.paired_ratio_diff(

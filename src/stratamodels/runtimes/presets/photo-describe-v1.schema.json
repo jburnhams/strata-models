@@ -1,0 +1,489 @@
+{
+ "type": "object",
+ "properties": {
+  "caption": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "setting": {
+   "type": "object",
+   "properties": {
+    "indoor_outdoor": {
+     "type": "string",
+     "enum": [
+      "indoor",
+      "outdoor",
+      "mixed",
+      "unknown"
+     ]
+    },
+    "place_type": {
+     "type": "string"
+    },
+    "place_guess": {
+     "type": "string"
+    },
+    "time_of_day": {
+     "type": "string",
+     "enum": [
+      "dawn",
+      "day",
+      "golden hour",
+      "dusk",
+      "night",
+      "unknown"
+     ]
+    },
+    "weather": {
+     "type": "string",
+     "enum": [
+      "sunny",
+      "overcast",
+      "rain",
+      "snow",
+      "fog",
+      "n/a",
+      "unknown"
+     ]
+    },
+    "season": {
+     "type": "string",
+     "enum": [
+      "spring",
+      "summer",
+      "autumn",
+      "winter",
+      "unknown"
+     ]
+    }
+   },
+   "required": [
+    "indoor_outdoor",
+    "place_type",
+    "place_guess",
+    "time_of_day",
+    "weather",
+    "season"
+   ],
+   "additionalProperties": false
+  },
+  "event": {
+   "type": "string"
+  },
+  "people": {
+   "type": "object",
+   "properties": {
+    "count": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "children": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "main_subject_is_person": {
+     "type": "boolean"
+    },
+    "faces": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "box": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 4,
+        "maxItems": 4
+       },
+       "size": {
+        "type": "string",
+        "enum": [
+         "small",
+         "medium",
+         "large"
+        ]
+       },
+       "facing": {
+        "type": "string",
+        "enum": [
+         "camera",
+         "away",
+         "profile"
+        ]
+       }
+      },
+      "required": [
+       "box",
+       "size",
+       "facing"
+      ],
+      "additionalProperties": false
+     },
+     "maxItems": 20
+    }
+   },
+   "required": [
+    "count",
+    "children",
+    "main_subject_is_person",
+    "faces"
+   ],
+   "additionalProperties": false
+  },
+  "objects": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "label": {
+      "type": "string"
+     },
+     "box": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+     }
+    },
+    "required": [
+     "label",
+     "box"
+    ],
+    "additionalProperties": false
+   },
+   "maxItems": 12
+  },
+  "text_visible": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 20
+  },
+  "tags": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 25,
+   "minItems": 5
+  },
+  "lighting": {
+   "type": "object",
+   "properties": {
+    "sources": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "type": {
+        "type": "string",
+        "enum": [
+         "daylight",
+         "overcast sky",
+         "shade",
+         "sunset sun",
+         "tungsten",
+         "halogen",
+         "fluorescent",
+         "LED white",
+         "LED coloured",
+         "stage lights",
+         "candle",
+         "fire",
+         "flash",
+         "screen",
+         "street light",
+         "mixed"
+        ]
+       },
+       "colour": {
+        "type": "string"
+       },
+       "share": {
+        "type": "number"
+       }
+      },
+      "required": [
+       "type",
+       "colour",
+       "share"
+      ],
+      "additionalProperties": false
+     },
+     "maxItems": 5,
+     "minItems": 1
+    },
+    "mixed": {
+     "type": "boolean"
+    },
+    "direction": {
+     "type": "string",
+     "enum": [
+      "front",
+      "side",
+      "back",
+      "top",
+      "diffuse",
+      "unknown"
+     ]
+    },
+    "contrast": {
+     "type": "string",
+     "enum": [
+      "low",
+      "medium",
+      "high"
+     ]
+    },
+    "level": {
+     "type": "string",
+     "enum": [
+      "very dark",
+      "dark",
+      "normal",
+      "bright",
+      "very bright"
+     ]
+    }
+   },
+   "required": [
+    "sources",
+    "mixed",
+    "direction",
+    "contrast",
+    "level"
+   ],
+   "additionalProperties": false
+  },
+  "colour": {
+   "type": "object",
+   "properties": {
+    "cast_now": {
+     "type": "string"
+    },
+    "neutral_refs": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "what": {
+        "type": "string"
+       },
+       "box": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 4,
+        "maxItems": 4
+       },
+       "looks": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "what",
+       "box",
+       "looks"
+      ],
+      "additionalProperties": false
+     },
+     "maxItems": 5
+    },
+    "skin_visible": {
+     "type": "boolean"
+    },
+    "skin_looks": {
+     "type": "string"
+    },
+    "dominant": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 4,
+     "minItems": 1
+    }
+   },
+   "required": [
+    "cast_now",
+    "neutral_refs",
+    "skin_visible",
+    "skin_looks",
+    "dominant"
+   ],
+   "additionalProperties": false
+  },
+  "exposure": {
+   "type": "object",
+   "properties": {
+    "intended_dark": {
+     "type": "boolean"
+    },
+    "clipped_highlights": {
+     "type": "string",
+     "enum": [
+      "none",
+      "some",
+      "large"
+     ]
+    },
+    "crushed_shadows": {
+     "type": "string",
+     "enum": [
+      "none",
+      "some",
+      "large"
+     ]
+    },
+    "noise": {
+     "type": "string",
+     "enum": [
+      "low",
+      "medium",
+      "high"
+     ]
+    },
+    "sharpness": {
+     "type": "string",
+     "enum": [
+      "sharp",
+      "soft",
+      "motion blur",
+      "out of focus"
+     ]
+    }
+   },
+   "required": [
+    "intended_dark",
+    "clipped_highlights",
+    "crushed_shadows",
+    "noise",
+    "sharpness"
+   ],
+   "additionalProperties": false
+  },
+  "composition": {
+   "type": "object",
+   "properties": {
+    "main_subject_box": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "minItems": 4,
+     "maxItems": 4
+    },
+    "horizon_tilt_deg": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "orientation_ok": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "main_subject_box",
+    "horizon_tilt_deg",
+    "orientation_ok"
+   ],
+   "additionalProperties": false
+  },
+  "quality": {
+   "type": "object",
+   "properties": {
+    "technical": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 5
+    },
+    "aesthetic": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 5
+    },
+    "keeper": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "technical",
+    "aesthetic",
+    "keeper"
+   ],
+   "additionalProperties": false
+  },
+  "sensitive": {
+   "type": "object",
+   "properties": {
+    "nudity": {
+     "type": "string",
+     "enum": [
+      "none",
+      "partial",
+      "explicit"
+     ]
+    },
+    "child_focus": {
+     "type": "boolean"
+    },
+    "private_document": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "nudity",
+    "child_focus",
+    "private_document"
+   ],
+   "additionalProperties": false
+  },
+  "confidence": {
+   "type": "object",
+   "properties": {
+    "lighting": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 3
+    },
+    "place": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 3
+    }
+   },
+   "required": [
+    "lighting",
+    "place"
+   ],
+   "additionalProperties": false
+  }
+ },
+ "required": [
+  "caption",
+  "description",
+  "setting",
+  "event",
+  "people",
+  "objects",
+  "text_visible",
+  "tags",
+  "lighting",
+  "colour",
+  "exposure",
+  "composition",
+  "quality",
+  "sensitive",
+  "confidence"
+ ],
+ "additionalProperties": false
+}

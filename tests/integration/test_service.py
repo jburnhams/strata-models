@@ -11,7 +11,7 @@ import strata_models_client as sm
 
 
 def get(base, path):
-    with urllib.request.urlopen(base + path, timeout=10) as r:  # noqa: S310  (loopback test server)
+    with urllib.request.urlopen(base + path, timeout=10) as r:
         return json.load(r)
 
 
@@ -30,6 +30,9 @@ def test_run_submit_wait_and_failures(service):
         sm.faces("/x.jpg", app="it", model="echo-small")
     with pytest.raises(sm.JobFailed, match="does not serve"):
         sm.transcribe("/a.wav", app="it", model="buffalo_l", clip=(0, 1))
+    with pytest.raises(sm.JobFailed, match="does not serve"):
+        sm.speak("hello", app="it", model="buffalo_l", voice=__file__)
+    assert sm.role_model("echo") == "echo-small" and sm.role_model("nope") is None
     hist = get(service, "/api/jobs?app=it")["items"]
     assert [x["status"] for x in hist[:2]] == ["failed", "done"]
     assert get(service, "/api/status")["resident"][0]["model"] == "echo-small"
@@ -79,3 +82,27 @@ def test_without_the_service_the_client_says_so(monkeypatch):
     assert "not running" in str(w[0].message)
     with pytest.raises(sm.Unavailable), sm.gpu_lease("x", required=True):
         pass
+
+
+def test_the_judge_plays_only_the_phrase(service, tmp_path):
+    import os
+    import shutil
+    import subprocess
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    wav = tmp_path / "long.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=10", str(wav)], check=True)
+    data = os.environ["STRATAMODELS_DATA"]
+    os.makedirs(os.path.join(data, "evals", "datasets"), exist_ok=True)
+    os.makedirs(os.path.join(data, "evals", "specs"), exist_ok=True)
+    open(os.path.join(data, "evals", "datasets", "phr.jsonl"), "w").write(
+        json.dumps(dict(id="p", input=dict(path=str(wav), clip=[2.0, 3.0]), reference=dict(text="x"))) + "\n"
+    )
+    open(os.path.join(data, "evals", "specs", "phr.toml"), "w").write(
+        'name = "phr"\nquestion = "q"\nrole = "echo"\ndataset = "phr"\nmetrics = ["failed"]\n[[candidates]]\nname = "a"\nmodel = "echo-small"\n'
+    )
+    with urllib.request.urlopen(service + "/api/evals/phr/media/p", timeout=30) as r:
+        body = r.read()
+        ctype = r.headers["content-type"]
+    assert ctype == "audio/wav" and len(body) < wav.stat().st_size / 5
