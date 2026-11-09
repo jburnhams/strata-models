@@ -21,7 +21,7 @@ def test_load_resolves_files_and_refuses_what_is_missing(handle, tmp_path, monke
     assert handle['files']['llm'].endswith(os.path.join('sd', 'org--te-GGUF', 'te.gguf')) and handle['defaults']['steps'] == 16
     m = Model(key='x', runtime='sd-cpp', name='x', roles=(), vram_gb=1, options={})
     with pytest.raises(RunError, match='names no diffusion'): sdcpp.load(m, str(tmp_path))
-    with pytest.raises(RunError, match='no such model file'): sdcpp.fetch('/nope.gguf', str(tmp_path))
+    with pytest.raises(RunError, match='no such model file'): sdcpp.fetch(str(tmp_path / 'nope.gguf'), str(tmp_path))
     with pytest.raises(RunError, match='repo:path'): sdcpp.fetch('just-a-name', str(tmp_path))
     def gated(*a, **k): raise PermissionError('401')
     sys.modules['huggingface_hub'].hf_hub_download = gated

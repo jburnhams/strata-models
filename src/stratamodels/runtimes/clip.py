@@ -73,8 +73,8 @@ def _encode_images(h, rgb_u8, resize):
 
 
 def _read_rgb(path):
-    from PIL import Image, ImageOps
     if not isinstance(path, str) or not os.path.isfile(path): raise RunError(f'no such image: {path!r}')
+    from PIL import Image, ImageOps
     with Image.open(path) as im: return np.asarray(ImageOps.exif_transpose(im).convert('RGB'))
 
 
