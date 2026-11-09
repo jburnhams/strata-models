@@ -69,3 +69,10 @@ def test_broken_specs_and_datasets_are_reported(client, setup):
     C_run = C.run; C.run = boom
     try: client.post('/api/evals/one/run'); st = wait_run(client, 'one'); assert st['state'] == 'failed' and 'db away' in st['error']
     finally: C.run = C_run
+
+
+def test_no_observations_come_back_as_null_not_nan(client):
+    from stratamodels.evals.api import finite
+    assert finite(dict(a=float('nan'), b=[1.0, float('inf')], c=(2, 'x'))) == dict(a=None, b=[1.0, None], c=[2, 'x'])
+    a = client.get('/api/evals/fake-asr').json()                                                             # nothing run yet: every value is null, and it is valid JSON
+    assert a['dataset']['compared'] == 0

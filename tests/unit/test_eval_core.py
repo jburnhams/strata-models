@@ -81,3 +81,17 @@ def test_executors_pass_through(scheduler):
     ex = C.ClientExecutor(SM()); assert ex.submit('r', {}, 'm', {}) == 7 and ex.wait(7)['status'] == 'done' and calls == [('r', 'evals', 'batch', 'm', None)]
     j = C.SchedulerExecutor(scheduler).submit('echo', dict(x=1), 'small', None); scheduler.step()
     assert C.SchedulerExecutor(scheduler).wait(j)['status'] == 'done'
+
+
+def test_guards_hold_against_a_zero_baseline_and_duplicates_run_once(setup, scheduler, engine):
+    s = C.parse_spec(dict(name='z', question='q', role='echo', dataset='speech', metrics=['wer', 'failed'], decision=dict(primary='wer', baseline='a', guards=dict(failed=1.0)),
+                          candidates=[dict(name='a', model='small', params=dict(drop=4)), dict(name='b', model='big', params=dict(drop=12)), dict(name='b2', model='big', params=dict(drop=12))]))
+    stop = scheduler.start()
+    try: assert C.run(s, engine, C.SchedulerExecutor(scheduler), log=lambda m: None)['ran'] == 80          # b2 is the same job as b
+    finally: stop.set()
+    from sqlalchemy.orm import Session
+    from stratamodels.db.models import EvalResult
+    with Session(engine) as ses:                                                                             # b fails on one item: 1 failure against the baseline's 0
+        r = ses.query(EvalResult).filter(EvalResult.model == 'big').first(); r.error = 'boom'; r.output = None; ses.commit()
+    d = C.analyse(s, engine)['decision']['per_candidate']
+    assert d['b']['verdict'] == 'reject' and 'against 0' in d['b']['why']

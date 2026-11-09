@@ -37,6 +37,14 @@ def _unsign(tok):
     return json.loads(base64.urlsafe_b64decode(raw))
 
 
+def finite(x):
+    """The analysis with NaN and infinities as null: JSON has no NaN, and a metric with no observations (every job failed) has no value."""
+    if isinstance(x, float): return x if x == x and x not in (float('inf'), float('-inf')) else None
+    if isinstance(x, dict): return {k: finite(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)): return [finite(v) for v in x]
+    return x
+
+
 def mount(app, scheduler):
     runs = {}; engine = lambda: scheduler.store.engine; memo = {}
 
@@ -68,7 +76,7 @@ def mount(app, scheduler):
     @app.get('/api/evals/{name}')
     def get_eval(name: str):
         s = spec_or_404(name)
-        try: return analysis(s)
+        try: return finite(analysis(s))
         except C.EvalError as e: raise HTTPException(400, str(e))
 
     @app.post('/api/evals/{name}/run', status_code=202)

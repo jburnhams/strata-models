@@ -73,3 +73,14 @@ def test_whisper_detects_the_language_alone():
         assert r['language'] == 'en' and r['all_language_probs']['en'] > 0.5 and 'segments' not in r
         with pytest.raises(runtimes.RunError, match='unknown params'): rt.run(h, dict(path=AUDIO, colour='red'))
     finally: rt.unload(h)
+
+
+@pytest.mark.skipif(bool(runtimes.available()['sd-cpp']), reason='needs the sd-cli binary (stable-diffusion.cpp) and huggingface_hub; gated models need HF_TOKEN')
+@pytest.mark.parametrize('model', ['flux3-klein', 'qwen-image-2.1-turbo'])
+def test_image_generation_on_the_gpu(model, tmp_path):
+    m = Registry.load().resolve('image-generate', model); rt = runtimes.get(m.runtime); h = rt.load(m, MODELS)
+    try:
+        r = rt.run(h, dict(prompt='a red apple on a white table, studio photo', width=512, height=512, seed=1), out_dir=str(tmp_path))
+        print(f'\n{model}: {r["seconds"]} s, peak VRAM {r["peak_vram_mb"]} MB')
+        assert os.path.getsize(r['path']) > 10_000 and r['width'] == 512 and r['peak_vram_mb'] > 0
+    finally: rt.unload(h)

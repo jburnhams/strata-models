@@ -207,7 +207,8 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     cands = [spec.candidate(c) for c in candidates] if candidates else spec.candidates; todo = []
     for c in cands:
         keys = {result_key(spec, c, it): it for it in items}; have = cached(engine, keys)
-        todo += [(c, it, k) for k, it in keys.items() if k not in have]
+        queued = {k for _, _, k in todo}
+        todo += [(c, it, k) for k, it in keys.items() if k not in have and k not in queued]       # two candidates that are the same job run it once
     total = len(cands) * len(items); log(f'{spec.name}: {total - len(todo)} of {total} outputs cached, {len(todo)} to run'); failed = 0
     for i in range(0, len(todo), batch):
         chunk = todo[i:i + batch]; ids = [executor.submit(spec.role, job_params(spec, c, it), c.model, c.options) for c, it, _ in chunk]
@@ -300,8 +301,10 @@ def decide(spec, res, items, oo, base):
         c = comp[spec.primary]; gain = sign * c['diff'] if c['n'] else float('nan'); broken = []
         for g, limit in spec.guards.items():
             bv = res['candidates'][base]['metrics'][g]['value']; cv = res['candidates'][n]['metrics'][g]['value']
-            if bv and cv and M.METRICS[g].better == 'lower' and cv > limit * bv: broken.append(f'{g} {cv / bv:.2f}x the baseline (limit {limit:g}x)')
-            if bv and cv and M.METRICS[g].better == 'higher' and cv < bv / limit: broken.append(f'{g} {cv / bv:.2f}x the baseline (limit 1/{limit:g})')
+            if bv is None or cv is None or bv != bv or cv != cv: continue                     # no observations on one side: nothing to hold the guard to
+            ratio = f'{cv / bv:.2f}x' if bv else f'{cv:g} against 0'
+            if M.METRICS[g].better == 'lower' and cv > limit * bv + 1e-12: broken.append(f'{g} {ratio} the baseline (limit {limit:g}x)')                 # a baseline of 0 failures allows none
+            if M.METRICS[g].better == 'higher' and cv < bv / limit - 1e-12: broken.append(f'{g} {ratio} the baseline (limit 1/{limit:g})')
         if broken: verdict, why = 'reject', '; '.join(broken)
         elif c['improves'] is True and gain >= spec.min_effect: verdict, why = 'adopt', f'{spec.primary} better by {_fmt(m, gain)} (95 % interval {_fmt(m, min(sign * c["low"], sign * c["high"]))} to {_fmt(m, max(sign * c["low"], sign * c["high"]))})'
         elif c['improves'] is True: verdict, why = 'reject', f'better by only {_fmt(m, gain)}, under the {_fmt(m, spec.min_effect)} worth a change'
