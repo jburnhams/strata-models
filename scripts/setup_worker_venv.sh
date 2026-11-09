@@ -7,7 +7,7 @@ name=${1:?give the venv name: kokoro, chatterbox or qwen3-tts}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 case $name in
   kokoro) pkgs="kokoro-onnx soundfile numpy" ;;          # model files: <models>/tts/kokoro/{kokoro-v1.0.onnx,voices-v1.0.bin}
-  chatterbox) pkgs="chatterbox-tts soundfile" ;;
+  chatterbox) pkgs="chatterbox-tts soundfile setuptools<81" ;;   # its watermarker (resemble-perth) imports pkg_resources, gone from setuptools 81
   qwen3-tts) pkgs="qwen-tts soundfile" ;;
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
