@@ -39,3 +39,27 @@ def test_whisper_on_the_gpu(role):
     out, _ = measure(Registry.load().resolve(role), dict(path=AUDIO, language='en'))
     text = ' '.join(s['text'] for s in out['segments']).lower()
     assert 'ask not what your country' in text and out['segments'][0]['words']
+
+
+@pytest.mark.skipif(not IMAGE or runtimes.available()['insightface'], reason='needs STRATAMODELS_TEST_IMAGE and insightface')
+def test_views_give_boxes_back_in_the_original_picture(tmp_path):
+    """A face lying on its side (the test picture turned anticlockwise) is found by the view that turns it back upright, and its box comes back
+    in the turned picture's pixels; a crop of 70 % around the upright face gives the same box as the whole picture."""
+    import cv2
+    m = Registry.load().resolve('faces'); rt = runtimes.get(m.runtime); h = rt.load(m, MODELS)
+    try:
+        whole = rt.run(h, dict(path=IMAGE, fields=['bbox']))
+        W, H = whole['width'], whole['height']; b = whole['faces'][0]['bbox']
+        lying = str(tmp_path / 'lying.png'); cv2.imwrite(lying, cv2.rotate(cv2.imread(IMAGE), cv2.ROTATE_90_COUNTERCLOCKWISE))
+        want = [b[1], W - 1 - b[2], b[3], W - 1 - b[0]]                    # the box, turned anticlockwise with the picture
+        r = rt.run(h, dict(path=lying, fields=['bbox', 'kps'], views=[dict(rotate=90), dict(crop=[0, 0, H, W], rotate=90)]))
+        for v in r['views']:
+            got = min(v['faces'], key=lambda f: abs(f['bbox'][0] - want[0]) + abs(f['bbox'][1] - want[1]))['bbox']
+            assert all(abs(a - c) < 0.05 * W for a, c in zip(got, want)), (v['view'], got, want)
+        c = rt.run(h, dict(path=IMAGE, fields=['bbox'], views=[dict(crop=[max(b[0] - W * 0.3, 0), max(b[1] - H * 0.3, 0), W * 0.7, H * 0.7])]))
+        got = c['views'][0]['faces'][0]['bbox']; assert all(abs(a - x) < 0.05 * W for a, x in zip(got, b)), (got, b)
+        with pytest.raises(runtimes.RunError, match='rotate'): rt.run(h, dict(path=IMAGE, views=[dict(rotate=45)]))
+        with pytest.raises(runtimes.RunError, match='outside'): rt.run(h, dict(path=IMAGE, views=[dict(crop=[W + 5, 0, 10, 10])]))
+        with pytest.raises(runtimes.RunError, match='one image'): rt.run(h, dict(paths=[IMAGE], views=[{}]))
+        with pytest.raises(runtimes.RunError, match='crop must'): rt.run(h, dict(path=IMAGE, views=[dict(crop='x')]))
+    finally: rt.unload(h)

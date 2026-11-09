@@ -2,7 +2,10 @@
 pack's landmark_3d_68 module is loaded, the 68 3D landmarks and head pose. One loaded pack serves every app; params choose what comes back.
 
 params: path (an image file), or paths (several, answered in order); max_side (shrink larger pictures first, the boxes are given back in the
-original's pixels); det_thresh; fields (subset of bbox, kps, det_score, embedding, landmark_3d_68, pose; default all but landmark_3d_68)."""
+original's pixels); det_thresh; fields (subset of bbox, kps, det_score, embedding, landmark_3d_68, pose; default all but landmark_3d_68);
+views (one image only): a list of ways to look at it again, each {crop: [x, y, w, h], rotate: 90 | 270 (degrees clockwise, applied after the
+crop)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
+look harder for children lying down or small in the background, without sending the image itself."""
 import os
 
 from stratamodels.runtimes import RunError
@@ -49,10 +52,47 @@ def detect(handle, img, max_side=None, det_thresh=None, fields=DEFAULT_FIELDS):
     return dict(width=w, height=h, faces=[_face(f, scale, fields) for f in faces])
 
 
+def _view(img, v):
+    """The image as the view sees it, and the function that takes a point of that view back to the original."""
+    import cv2
+    H, W = img.shape[:2]; ox = oy = 0
+    if v.get('crop'):
+        try: x, y, w, h = (int(round(float(a))) for a in v['crop'])
+        except (TypeError, ValueError): raise RunError(f'crop must be [x, y, w, h], not {v["crop"]!r}')
+        x, y = max(x, 0), max(y, 0); w, h = min(w, W - x), min(h, H - y)
+        if w <= 0 or h <= 0: raise RunError(f'crop {v["crop"]} is outside the {W}x{H} picture')
+        img, ox, oy = img[y:y + h, x:x + w], x, y
+    h, w = img.shape[:2]; rot = int(v.get('rotate') or 0) % 360
+    if rot == 90: img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE); back = lambda px, py: (py + ox, h - 1 - px + oy)
+    elif rot == 270: img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE); back = lambda px, py: (w - 1 - py + ox, px + oy)
+    elif rot == 0: back = lambda px, py: (px + ox, py + oy)
+    else: raise RunError(f'rotate must be 90 or 270, not {v.get("rotate")!r}')
+    return img, back
+
+
+def _unview(face, back):
+    """A face found in a view, with its box (the corners' bounding box) and points in the original's pixels."""
+    out = dict(face)
+    if 'bbox' in face:
+        (ax, ay), (bx, by) = back(face['bbox'][0], face['bbox'][1]), back(face['bbox'][2], face['bbox'][3])
+        out['bbox'] = [round(min(ax, bx), 2), round(min(ay, by), 2), round(max(ax, bx), 2), round(max(ay, by), 2)]
+    if 'kps' in face: out['kps'] = [[round(c, 2) for c in back(px, py)] for px, py in face['kps']]
+    if 'landmark_3d_68' in face: out['landmark_3d_68'] = [[*(round(c, 2) for c in back(p[0], p[1])), p[2]] for p in face['landmark_3d_68']]
+    return out
+
+
 def run(handle, params):
     fields = tuple(params.get('fields') or DEFAULT_FIELDS)
     bad = [f for f in fields if f not in ALL_FIELDS]
     if bad: raise RunError(f'unknown fields {bad} (known: {", ".join(ALL_FIELDS)})')
+    if params.get('views') is not None:
+        if not isinstance(params['views'], list) or params.get('paths') is not None: raise RunError('views is a list, for one image (path)')
+        img = _read(params.get('path')); out = []
+        for v in params['views']:
+            if not isinstance(v, dict): raise RunError(f'a view is {{crop?, rotate?}}, not {v!r}')
+            vimg, back = _view(img, v); found = detect(handle, vimg, params.get('max_side'), params.get('det_thresh'), fields)
+            out.append(dict(view=v, faces=[_unview(f, back) for f in found['faces']]))
+        return dict(path=params['path'], width=img.shape[1], height=img.shape[0], views=out)
     paths = params.get('paths') if params.get('paths') is not None else [params.get('path')]
     if not isinstance(paths, list) or not paths: raise RunError('give path (one image) or paths (a list)')
     res = [dict(path=p, **detect(handle, _read(p), params.get('max_side'), params.get('det_thresh'), fields)) for p in paths]
