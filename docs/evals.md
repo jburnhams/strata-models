@@ -23,7 +23,10 @@ can be compared and revisited when a new model appears.
    *reject* (worse, too small, or a guard broken), or *unclear* (the interval includes no change; the report says roughly how many items
    would settle it).
 7. **Blind judging** (the Judge tab) where no reference exists (pictures, captions, transcripts of real speech): two outputs for the same item,
-   candidates hidden until answered.
+   candidates hidden until answered. **Most different first**: `evals/similarity.py` scores how alike two outputs are (text: word and phonetic
+   edit similarity; images: perceptual hash, structure, colour; anything else: JSON), pairs that say the same thing are never shown, and the
+   unjudged pair that differs most comes next, so a judge's time goes where the candidates really disagree. A spec can name the kind
+   (`similarity = "text" | "image" | "json"`).
 8. **The write-up** (`./strata-models eval report NAME --out FILE`, or the Write-up tab), always in this order: Answer, Setup, Results,
    Compared with the baseline, Human judgments, Cost, Failures and worst items, What the numbers do not show (a person writes it), Decision and
    follow-ups (a person writes it), Method, Reproduce. Final reports go in the docs repo under `tech/code/strata-models/evals/`
