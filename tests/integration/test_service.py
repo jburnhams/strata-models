@@ -102,7 +102,7 @@ def test_the_judge_plays_only_the_phrase(service, tmp_path):
     open(os.path.join(data, "evals", "specs", "phr.toml"), "w").write(
         'name = "phr"\nquestion = "q"\nrole = "echo"\ndataset = "phr"\nmetrics = ["failed"]\n[[candidates]]\nname = "a"\nmodel = "echo-small"\n'
     )
-    with urllib.request.urlopen(service + "/api/evals/phr/media/p", timeout=30) as r:
+    with urllib.request.urlopen(service + "/api/evals/phr/media/p?cut=1", timeout=30) as r:
         body = r.read()
         ctype = r.headers["content-type"]
     assert ctype == "audio/wav" and len(body) < wav.stat().st_size / 5

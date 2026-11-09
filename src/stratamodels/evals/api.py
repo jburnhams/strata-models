@@ -75,6 +75,21 @@ def same(x, y, kind=None):
     return SIM.similarity(x, y, kind) >= 0.9999
 
 
+MEDIA_EXT = (".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".mp4", ".mov", ".mkv", ".osv", ".insv")
+MEDIA_TYPES = {
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+}
+CONTEXT_S = 2.0  # seconds either side of a phrase in a ?cut=1 answer
+
+
 def mount(app, scheduler):
     runs = {}
     engine = lambda: scheduler.store.engine
@@ -314,18 +329,18 @@ def mount(app, scheduler):
         return finite(dict(candidates=[c.to_json() for c in s.candidates], items=items))
 
     @app.get("/api/evals/{name}/media/{item_id}")
-    def get_media(name: str, item_id: str):
+    def get_media(name: str, item_id: str, cut: bool = False):
         s = spec_or_404(name)
         it = next((x for x in C.load_dataset(s.dataset, engine=engine()).items if x["id"] == item_id), None)
         p = it and it["input"].get("path")
         if not isinstance(p, str) or not os.path.isfile(p):
             raise HTTPException(404, "no file for this item")
         clip = it["input"].get("clip")
-        if clip and (mimetypes.guess_type(p)[0] or "").startswith(
-            ("audio", "video")
-        ):  # the phrase only, not the whole recording
+        ext = os.path.splitext(p)[1].lower()
+        if cut and clip and ext in MEDIA_EXT:  # ?cut=1: just the phrase with a little either side
             import subprocess
 
+            a, b = max(float(clip[0]) - CONTEXT_S, 0.0), float(clip[1]) + CONTEXT_S
             r = subprocess.run(
                 [
                     "ffmpeg",
@@ -333,9 +348,9 @@ def mount(app, scheduler):
                     "-v",
                     "error",
                     "-ss",
-                    str(float(clip[0])),
+                    f"{a:.2f}",
                     "-to",
-                    str(float(clip[1])),
+                    f"{b:.2f}",
                     "-i",
                     p,
                     "-vn",
@@ -349,4 +364,7 @@ def mount(app, scheduler):
             )
             if r.returncode == 0 and r.stdout:
                 return Response(content=r.stdout, media_type="audio/wav")
-        return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or "application/octet-stream")
+        # the whole file, with ranges and its real type (Python's mimetypes does not know .flac here): the page cues it to the phrase
+        return FileResponse(
+            p, media_type=MEDIA_TYPES.get(ext) or mimetypes.guess_type(p)[0] or "application/octet-stream"
+        )
