@@ -13,6 +13,7 @@ import base64, hashlib, hmac, json, mimetypes, os, random, secrets, threading, t
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from stratamodels.db.models import EvalJudgment
 from stratamodels.evals import core as C, report as R
@@ -43,6 +44,17 @@ def finite(x):
     if isinstance(x, dict): return {k: finite(v) for k, v in x.items()}
     if isinstance(x, (list, tuple)): return [finite(v) for v in x]
     return x
+
+
+VOLATILE = ('seconds', 'peak_vram_mb')     # differ between identical runs; never a reason to judge
+
+
+def same(x, y):
+    """Whether two outputs say the same thing: transcripts after normalising the text, anything else as JSON without its timings."""
+    from stratamodels.evals import metrics as M
+    if isinstance(x, dict) and isinstance(y, dict) and 'segments' in x and 'segments' in y: return M.normalise(M.transcript(x)) == M.normalise(M.transcript(y))
+    strip = lambda o: {k: v for k, v in o.items() if k not in VOLATILE} if isinstance(o, dict) else o
+    return json.dumps(strip(x), sort_keys=True) == json.dumps(strip(y), sort_keys=True)
 
 
 def mount(app, scheduler):
@@ -102,9 +114,16 @@ def mount(app, scheduler):
     def get_pair(name: str):
         s = spec_or_404(name)
         if len(s.candidates) < 2: raise HTTPException(400, 'an experiment needs two candidates to judge')
-        ds, outs, _ = C.outputs_for(s, engine()); ready = [i for i in range(len(ds.items)) if sum(1 for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]) >= 2]
-        if not ready: return dict(pair=None)
-        i = random.choice(ready); ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]; a, b = random.sample(ok, 2); it = ds.items[i]
+        ds, outs, _ = C.outputs_for(s, engine()); pairs = []
+        for i in range(len(ds.items)):
+            ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
+            pairs += [(i, a, b) for n, a in enumerate(ok) for b in ok[n + 1:] if not same(outs[a][i][0], outs[b][i][0])]      # identical outputs teach nothing: not shown
+        if not pairs: return dict(pair=None)
+        with C.session(engine()) as ses: judged = {(j.item_id, frozenset((j.a, j.b))) for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))}
+        fresh = [p for p in pairs if (ds.items[p[0]]['id'], frozenset(p[1:])) not in judged]                                  # pairs not judged yet first
+        i, a, b = random.choice(fresh or pairs)
+        if random.random() < 0.5: a, b = b, a                                                                               # which side is X is random too
+        it = ds.items[i]
         return dict(pair=dict(item_id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
                               x=outs[a][i][0], y=outs[b][i][0], token=_sign(dict(e=name, i=it['id'], x=a, y=b, xk=C.result_key(s, s.candidate(a), it), yk=C.result_key(s, s.candidate(b), it)))))
 
