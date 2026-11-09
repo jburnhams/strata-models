@@ -184,3 +184,29 @@ def test_a_child_process_on_the_card_is_ours(monkeypatch):
 
     monkeypatch.setattr(gpu, "open", fake_open, raising=False)
     assert gpu.parent_of(42) == 7 and gpu.parent_of(43) is None and gpu.parent_of("x") is None
+
+
+def test_a_worker_gets_its_own_cuda_libraries_and_none_of_the_services(tmp_path, monkeypatch):
+    import sys as _sys
+
+    from stratamodels.registry import Model
+
+    venv = tmp_path / "venvs" / "w"
+    lib = venv / "lib" / "python3.12" / "site-packages" / "nvidia" / "cublas" / "lib"
+    lib.mkdir(parents=True)
+    (venv / "bin").mkdir()
+    (venv / "bin" / "python").write_text("")
+    service_lib = os.path.join(_sys.prefix, "lib", "nvidia", "cu13", "lib")
+    monkeypatch.setenv("LD_LIBRARY_PATH", os.pathsep.join([service_lib, "/opt/other/.venv-like/lib"]))
+    seen = {}
+
+    def popen(cmd, **kw):
+        seen["env"] = kw["env"]
+        return FakeWorker(cmd, **kw)
+
+    m = Model(
+        key="w", runtime="venv-worker", name="w", roles=("r",), vram_gb=1, options=dict(worker="tts", venv=str(venv))
+    )
+    worker.load(m, str(tmp_path), popen=popen)
+    path = seen["env"]["LD_LIBRARY_PATH"].split(os.pathsep)
+    assert path[0] == str(lib) and service_lib not in path and "/opt/other/.venv-like/lib" in path
