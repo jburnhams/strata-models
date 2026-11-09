@@ -6,7 +6,13 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/health                       version, and whether a GPU was found
   GET  /api/status                       the GPU now, the VRAM budget, loaded models, the running job, the queue, recent events
   GET  /api/gpu/history                  samples of the last hour (util %, memory used)
-  GET  /api/registry                     roles and models (with load stats and which runtimes are installed)
+  GET  /api/registry                     roles, models (with load stats and which runtimes are installed) and apps' preferences
+  PUT  /api/roles/{key}                  {model?, description?} choose a role's model (the row then stops following models.toml)
+  PUT  /api/models/{key}                 {runtime?, name?, vram_gb?, licence?, source?, used_by?, options?, roles?} add or change a model
+  POST /api/registry/seed                import models.toml again (new entries; changed ones not edited here); ?follow=model:KEY|role:KEY first
+  GET  /api/preferences                  every app's own choices
+  PUT/DELETE /api/preferences/{app}/{role}   {model?, params?, note?} the model and default params an app's jobs for a role get
+  GET  /api/files?path=|job=             which jobs read or wrote a file, or the files a job touched (paths only)
   POST /api/models/{key}/load|unload     ask the worker to load or free a model
   POST /api/jobs                         {role, params, app, priority?, model?} queue a model job
   POST /api/run/{role}                   {params, app, priority?, model?, timeout?} queue it and wait for the result (504 with the job if it takes longer)
@@ -66,6 +72,28 @@ class LeaseIn(BaseModel):
     note: str | None = None
 
 
+class RoleIn(BaseModel):
+    model: str | None = None
+    description: str | None = None
+
+
+class ModelIn(BaseModel):
+    runtime: str | None = None
+    name: str | None = None
+    vram_gb: float | None = None
+    licence: str | None = None
+    source: str | None = None
+    used_by: list[str] | None = None
+    options: dict | None = None
+    roles: list[str] | None = None
+
+
+class PreferenceIn(BaseModel):
+    model: str | None = None
+    params: dict | None = None
+    note: str | None = None
+
+
 class SettingsIn(BaseModel):
     data_dir: str | None = None
     models_dir: str | None = None
@@ -106,6 +134,40 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         stats = s.store.model_stats(); missing = runtimes.available(); d = s.registry.to_json()
         for m in d['models']: m['stats'] = stats.get(m['key']); m['missing'] = missing.get(m['runtime'], []) if m['served'] else []; m['resident'] = m['key'] in s.resident
         return d
+
+    from stratamodels import registry as reg
+
+    @app.put('/api/roles/{key}')
+    def put_role(key: str, b: RoleIn): reg.set_role(s.store.engine, key, b.model, b.description); s.reload_registry(); return get_registry()
+
+    @app.put('/api/models/{key}')
+    def put_model(key: str, b: ModelIn):
+        d = b.model_dump(exclude_none=True); roles = d.pop('roles', None)
+        reg.save_model(s.store.engine, key, roles=roles, **d); s.reload_registry(); return get_registry()
+
+    @app.post('/api/registry/seed')
+    def post_seed(follow: str | None = None):
+        if follow:
+            kind, _, key = follow.partition(':')
+            if kind not in ('model', 'role') or not key: raise HTTPException(400, 'follow is model:KEY or role:KEY')
+            reg.follow_seed(s.store.engine, kind, key)
+        out = reg.seed(s.store.engine); s.reload_registry(); return out
+
+    @app.get('/api/preferences')
+    def get_preferences(): return dict(items=[p.to_json() for p in s.registry.preferences.values()])
+
+    @app.put('/api/preferences/{app_name}/{role}')
+    def put_preference(app_name: str, role: str, b: PreferenceIn):
+        if b.model is None and not b.params: raise HTTPException(400, 'give a model or params (DELETE removes a preference)')
+        reg.set_preference(s.store.engine, app_name, role, b.model, b.params, b.note); s.reload_registry(); return get_preferences()
+
+    @app.delete('/api/preferences/{app_name}/{role}')
+    def delete_preference(app_name: str, role: str): reg.set_preference(s.store.engine, app_name, role); s.reload_registry(); return get_preferences()
+
+    @app.get('/api/files')
+    def get_files(path: str | None = None, job: int | None = None):
+        if path is None and job is None: raise HTTPException(400, 'give path or job')
+        return dict(items=s.store.files(job_id=job, path=path))
 
     @app.post('/api/models/{key}/{action}', status_code=202)
     def post_model(key: str, action: str): s.request(action, key); return dict(ok=True)
@@ -214,9 +276,13 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 def build(memory=False, sample_every_s=5.0):
     """The scheduler, sampler and app for this machine (the database, the registry, nvidia-smi), with the worker and sampler started."""
     from stratamodels.store import Store, memory_store
+    from stratamodels import registry as reg
     store = memory_store() if memory else Store.connect()
+    if not memory: settings.bind(store.engine)                          # the settings live in the database (a demo keeps the file)
+    try: reg.seed(store.engine, log=print)                               # models.toml: new entries in, edited rows kept
+    except reg.RegistryError as e: print(f'registry seed refused, serving the database as it is: {e}')
     history = gpu.History(gpu.query, every_s=sample_every_s); history.sample()
-    sch = Scheduler(store, Registry.load(), settings.models_dir(), probe=gpu.query, reserve_gb=settings.vram_reserve_gb())
+    sch = Scheduler(store, Registry.from_db(store.engine), settings.models_dir(), probe=gpu.query, reserve_gb=settings.vram_reserve_gb())
     sch.start(); history.start(); return create_app(sch, history)
 
 

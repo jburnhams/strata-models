@@ -19,6 +19,8 @@ def isolated_env(tmp_path_factory, monkeypatch):
     monkeypatch.setenv('HOME', str(base / 'home')); monkeypatch.setenv('USERPROFILE', str(base / 'home'))
     monkeypatch.setenv('STRATAMODELS_HOME', str(base / 'app-home')); monkeypatch.setenv('STRATAMODELS_DATA', str(base / 'data'))
     for k in TUNING: monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv('STRATAMODELS_DATABASE_URL', 'sqlite:///' + str(base / 'stratamodels.sqlite'))     # never the shared database: a test that connects by default gets this file
+    monkeypatch.setenv('OMARCHY_DB_DATABASE', 'stratamodels_tests_never_live')                             # and a stray omarchy-db default names a database that does not exist
     return base
 
 
@@ -141,3 +143,10 @@ params = { drop = 4 }
 options = { tweak = 1 }
 ''')
     return ds
+
+
+@pytest.fixture(autouse=True)
+def unbound_settings():
+    """Settings start on the file in every test, and a test that binds them to a database (the CLI, build()) does not leak that to the next."""
+    from stratamodels import settings
+    settings.bind(None); yield; settings.bind(None)

@@ -1,6 +1,7 @@
 """The Evals part of the API (mounted by server/app.py):
 
   GET  /api/evals                              experiments (spec, how many outputs are in) and datasets
+  PUT  /api/evals/{name}/spec                  {spec as JSON, the TOML's fields} add or change an experiment in the database (its file no longer overwrites it)
   GET  /api/evals/{name}                       the analysis: every metric with its interval, comparisons with the baseline, the decision
   POST /api/evals/{name}/run                   run what is missing, in the background, through the queue (batch); progress in GET .../status
   GET  /api/evals/{name}/status
@@ -61,24 +62,30 @@ def mount(app, scheduler):
         from stratamodels.db.models import EvalJudgment as J, EvalResult as Rr
         with C.session(engine()) as ses:
             sig = (C._canon(s.to_json()), ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)), ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
-                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset).version)
+                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset, engine=engine()).version)
         hit = memo.get(s.name)
         if hit and hit[0] == sig: return hit[1]
         res = C.analyse(s, engine()); memo[s.name] = (sig, res); return res
 
     def spec_or_404(name):
-        try: return C.load_spec(name)
+        try: return C.load_spec(name, engine())
         except C.EvalError as e: raise HTTPException(404 if 'no experiment' in str(e) else 400, str(e))
 
     @app.get('/api/evals')
     def get_evals():
         out = []
-        for name, s in C.list_specs().items():
+        for name, s in C.list_specs(engine()).items():
             if isinstance(s, C.EvalError): out.append(dict(name=name, error=str(s))); continue
-            try: ds = C.load_dataset(s.dataset); keys = [C.result_key(s, c, it) for c in s.candidates for it in ds.items]; have = len(C.cached(engine(), keys)); total = len(keys)
+            try: ds = C.load_dataset(s.dataset, engine=engine()); keys = [C.result_key(s, c, it) for c in s.candidates for it in ds.items]; have = len(C.cached(engine(), keys)); total = len(keys)
             except C.EvalError as e: out.append(dict(s.to_json(), error=str(e))); continue
             out.append(dict(s.to_json(), outputs=have, total=total, running=runs.get(name, {}).get('state') == 'running'))
-        return dict(experiments=out, datasets=C.list_datasets())
+        return dict(experiments=out, datasets=C.list_datasets(engine=engine()))
+
+    @app.put('/api/evals/{name}/spec')
+    def put_spec(name: str, d: dict):
+        d = {**d, 'name': name}
+        try: return C.save_spec(engine(), d).to_json()
+        except C.EvalError as e: raise HTTPException(400, str(e))
 
     @app.get('/api/evals/{name}')
     def get_eval(name: str):
@@ -143,7 +150,7 @@ def mount(app, scheduler):
 
     @app.get('/api/evals/{name}/media/{item_id}')
     def get_media(name: str, item_id: str):
-        s = spec_or_404(name); it = next((x for x in C.load_dataset(s.dataset).items if x['id'] == item_id), None)
+        s = spec_or_404(name); it = next((x for x in C.load_dataset(s.dataset, engine=engine()).items if x['id'] == item_id), None)
         p = it and it['input'].get('path')
         if not isinstance(p, str) or not os.path.isfile(p): raise HTTPException(404, 'no file for this item')
         clip = it['input'].get('clip')
