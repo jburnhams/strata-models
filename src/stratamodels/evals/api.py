@@ -8,7 +8,8 @@
   GET  /api/evals/{name}/report                the standard write-up, as Markdown
   GET  /api/evals/{name}/pair                  a blind pair to judge: one item, two candidates' outputs as X and Y (a token says which is which)
   POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
-  GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names"""
+  GET  /api/evals/{name}/media/{item_id}?cut=  the item's input file (audio, picture), for the judging page (the page cues it to the item's clip);
+                                               cut=1: just the clip with 2 s either side; only files a dataset names"""
 import base64, hashlib, hmac, json, mimetypes, os, random, secrets, threading, time
 
 from fastapi import HTTPException
@@ -54,6 +55,7 @@ def same(x, y, kind=None):
 
 
 MEDIA_EXT = ('.flac', '.wav', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.mp4', '.mov', '.mkv', '.osv', '.insv')     # by extension: Python's mimetypes does not know .flac on every system
+MEDIA_TYPES = {'.flac': 'audio/flac', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.mp4': 'video/mp4', '.mov': 'video/quicktime'}
 CONTEXT_S = 2.0                                                                                                        # seconds played either side of a phrase, to hear it in context
 
 
@@ -154,14 +156,15 @@ def mount(app, scheduler):
         return dict(ok=True, x=d['x'], y=d['y'], winner=win)
 
     @app.get('/api/evals/{name}/media/{item_id}')
-    def get_media(name: str, item_id: str):
+    def get_media(name: str, item_id: str, cut: bool = False):
         s = spec_or_404(name); it = next((x for x in C.load_dataset(s.dataset, engine=engine()).items if x['id'] == item_id), None)
         p = it and it['input'].get('path')
         if not isinstance(p, str) or not os.path.isfile(p): raise HTTPException(404, 'no file for this item')
         clip = it['input'].get('clip')
-        if clip and os.path.splitext(p)[1].lower() in MEDIA_EXT:                          # the phrase with a little either side, not the whole recording
+        ext = os.path.splitext(p)[1].lower()
+        if cut and clip and ext in MEDIA_EXT:                                                 # ?cut=1: just the phrase with a little either side
             import subprocess
             a, b = max(float(clip[0]) - CONTEXT_S, 0.0), float(clip[1]) + CONTEXT_S
             r = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-ss', f'{a:.2f}', '-to', f'{b:.2f}', '-i', p, '-vn', '-ac', '1', '-f', 'wav', '-'], capture_output=True)
             if r.returncode == 0 and r.stdout: return Response(content=r.stdout, media_type='audio/wav')
-        return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or 'application/octet-stream')
+        return FileResponse(p, media_type=MEDIA_TYPES.get(ext) or mimetypes.guess_type(p)[0] or 'application/octet-stream')       # the whole file, with ranges: the page cues it to the phrase

@@ -50,6 +50,11 @@ describe('An experiment', () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
     expect(await screen.findByText('ask knot')).toBeInTheDocument()
     expect(screen.getByText('Reference: ask not')).toBeInTheDocument()
+    expect(screen.getByText('12.4 s to 17.2 s of the recording')).toBeInTheDocument()
+    const audio = screen.getByLabelText('The whole recording') as HTMLAudioElement
+    audio.play = () => Promise.resolve(); audio.dispatchEvent(new Event('loadedmetadata')); expect(audio.currentTime).toBeCloseTo(12.4)
+    await user.click(screen.getByRole('button', { name: 'Play the phrase' })); expect(audio.currentTime).toBeCloseTo(12.4)
+    audio.currentTime = 17.5; audio.pause = () => { (audio as unknown as { paused2: boolean }).paused2 = true }; audio.dispatchEvent(new Event('timeupdate')); expect((audio as unknown as { paused2: boolean }).paused2).toBe(true)
     expect(screen.getByText(/38% different · 12\spairs not judged yet, most different first/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'X is better' }))
     await user.click(await screen.findByRole('button', { name: 'About the same' }))

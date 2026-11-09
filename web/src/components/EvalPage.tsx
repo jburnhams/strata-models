@@ -7,6 +7,7 @@ import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skele
 import { evalsApi, imagesApi, type Analysis, type Pair } from '../api'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
+import PhrasePlayer from './PhrasePlayer'
 
 function finding(a: Analysis) {
   const d = a.decision
@@ -75,7 +76,7 @@ function Judge({ name }: { name: string }) {
         <div className="grid gap-4">
           <p className="type-body">Which output is better for item <span className="font-mono">{pair!.item_id}</span>? The candidates are hidden until you answer.</p>
           {pair!.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - pair!.similarity)} different`}{load.status === 'ready' && load.data.remaining !== undefined ? ` · ${format.count(load.data.remaining, 'pair')} not judged yet, most different first` : ''}</p>}
-          {pair!.has_media && !imagePath(pair!.x) && <audio controls src={evalsApi.mediaUrl(name, pair!.item_id)} className="w-full" />}
+          {pair!.has_media && !imagePath(pair!.x) && <PhrasePlayer key={pair!.item_id} src={evalsApi.mediaUrl(name, pair!.item_id)} clip={Array.isArray(pair!.input.clip) ? pair!.input.clip as [number, number] : undefined} />}
           {typeof pair!.input.prompt === 'string' && <p className="type-body">Prompt: {pair!.input.prompt}</p>}
           {typeof pair!.input.text === 'string' && <p className="type-body">Text: {pair!.input.text}</p>}
           {pair!.reference && 'text' in pair!.reference && pair!.reference.text !== pair!.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}

@@ -109,9 +109,10 @@ def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup, fake_run)
     wav = tmp_path / 'long.flac'; wav.write_bytes(b'RIFF' + b'0' * 1000)
     C.write_dataset('speech', [dict(id='p', input=dict(path=str(wav), clip=[2.0, 3.0], say='x'), reference=dict(text='x'))])
     fake_run.returns['ffmpeg'] = b'RIFFcut'
-    r = client.get('/api/evals/fake-asr/media/p'); assert r.headers['content-type'] == 'audio/wav' and r.content == b'RIFFcut'
+    whole = client.get('/api/evals/fake-asr/media/p'); assert whole.headers['content-type'] == 'audio/flac' and whole.content.startswith(b'RIFF0') and not fake_run.calls
+    r = client.get('/api/evals/fake-asr/media/p', params=dict(cut=1)); assert r.headers['content-type'] == 'audio/wav' and r.content == b'RIFFcut'
     cmd = fake_run.calls[-1]; assert cmd[cmd.index('-ss') + 1] == '0.00' and cmd[cmd.index('-to') + 1] == '5.00'          # 2 s either side, never before the start
-    fake_run.code = 1; assert client.get('/api/evals/fake-asr/media/p').content.startswith(b'RIFF0')          # ffmpeg failed: the whole file
+    fake_run.code = 1; assert client.get('/api/evals/fake-asr/media/p', params=dict(cut=1)).content.startswith(b'RIFF0')          # ffmpeg failed: the whole file
 
 def test_the_most_different_pairs_come_first(client, scheduler, setup):
     from stratamodels.evals import core as C

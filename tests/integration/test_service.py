@@ -72,5 +72,5 @@ def test_the_judge_plays_only_the_phrase(service, tmp_path):
     data = os.environ['STRATAMODELS_DATA']; os.makedirs(os.path.join(data, 'evals', 'datasets'), exist_ok=True); os.makedirs(os.path.join(data, 'evals', 'specs'), exist_ok=True)
     open(os.path.join(data, 'evals', 'datasets', 'phr.jsonl'), 'w').write(json.dumps(dict(id='p', input=dict(path=str(wav), clip=[2.0, 3.0]), reference=dict(text='x'))) + '\n')
     open(os.path.join(data, 'evals', 'specs', 'phr.toml'), 'w').write('name = "phr"\nquestion = "q"\nrole = "echo"\ndataset = "phr"\nmetrics = ["failed"]\n[[candidates]]\nname = "a"\nmodel = "echo-small"\n')
-    with urllib.request.urlopen(service + '/api/evals/phr/media/p', timeout=30) as r: body = r.read(); ctype = r.headers['content-type']
+    with urllib.request.urlopen(service + '/api/evals/phr/media/p?cut=1', timeout=30) as r: body = r.read(); ctype = r.headers['content-type']
     assert ctype == 'audio/wav' and len(body) < wav.stat().st_size / 5
