@@ -1,7 +1,10 @@
 # The model runtimes (install into the same venv on the machine with the GPU). One copy of each, for every app.
-onnxruntime-gpu            # insightface (faces)
+onnxruntime-gpu==1.23.2    # insightface (faces). 1.24+ is built for CUDA 13, while CTranslate2 needs CUDA 12: one set of CUDA 12 libraries serves both
 insightface
 opencv-python-headless
-faster-whisper             # transcribe (CTranslate2; pulls its CUDA 12 libraries)
+faster-whisper             # transcribe (CTranslate2). Audio is decoded with ffmpeg, not its PyAV decoder (broken by PyAV 15+)
 nvidia-cublas-cu12
 nvidia-cudnn-cu12
+nvidia-cuda-runtime-cu12   # onnxruntime-gpu's CUDA provider also loads these three
+nvidia-curand-cu12
+nvidia-cufft-cu12

@@ -18,6 +18,15 @@ def load(model, models_dir):
     return dict(model=m)
 
 
+def decode(path, rate=16000):
+    """The file as mono float32 at 16 kHz, decoded by ffmpeg (faster-whisper's own decoder uses PyAV, whose API changed under it in PyAV 15+)."""
+    import subprocess
+    import numpy as np
+    p = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', path, '-vn', '-f', 's16le', '-ac', '1', '-ar', str(rate), '-'], capture_output=True)
+    if p.returncode != 0: raise RunError(f'ffmpeg could not decode {path}: {p.stderr.decode(errors="replace").strip()[-300:]}')
+    return np.frombuffer(p.stdout, np.int16).astype(np.float32) / 32768.0
+
+
 def _r(v): return round(float(v), 3)
 
 
@@ -29,7 +38,7 @@ def run(handle, params):
     kw = dict(word_timestamps=True, vad_filter=False, beam_size=5, condition_on_previous_text=False)
     kw.update({k: params[k] for k in KEYS if k in params})
     if params.get('clip'): kw['clip_timestamps'] = [float(v) for v in params['clip']]
-    segs, info = handle['model'].transcribe(path, **kw)
+    segs, info = handle['model'].transcribe(decode(path), **kw)
     out = []
     for s in segs:
         d = dict(start=_r(s.start), end=_r(s.end), text=s.text, avg_logprob=_r(s.avg_logprob), no_speech_prob=_r(s.no_speech_prob))
