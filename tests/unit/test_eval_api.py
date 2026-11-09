@@ -104,14 +104,14 @@ def test_pairs_with_the_same_output_are_not_offered(client, scheduler):
     assert len(seen) > 20                                                               # unjudged pairs come first, so it moves through the items
 
 
-def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup):
-    import shutil, subprocess
-    if not shutil.which('ffmpeg'): return
+def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup, fake_run):
     from stratamodels.evals import core as C
-    wav = tmp_path / 'long.wav'; subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=10', str(wav)], check=True)
+    wav = tmp_path / 'long.wav'; wav.write_bytes(b'RIFF' + b'0' * 1000)
     C.write_dataset('speech', [dict(id='p', input=dict(path=str(wav), clip=[2.0, 3.0], say='x'), reference=dict(text='x'))])
-    r = client.get('/api/evals/fake-asr/media/p'); assert r.headers['content-type'] == 'audio/wav' and len(r.content) < wav.stat().st_size / 5
-
+    fake_run.returns['ffmpeg'] = b'RIFFcut'
+    r = client.get('/api/evals/fake-asr/media/p'); assert r.headers['content-type'] == 'audio/wav' and r.content == b'RIFFcut'
+    cmd = fake_run.calls[-1]; assert cmd[cmd.index('-ss') + 1] == '2.0' and cmd[cmd.index('-to') + 1] == '3.0'
+    fake_run.code = 1; assert client.get('/api/evals/fake-asr/media/p').content.startswith(b'RIFF0')          # ffmpeg failed: the whole file
 
 def test_the_most_different_pairs_come_first(client, scheduler, setup):
     from stratamodels.evals import core as C
@@ -125,3 +125,17 @@ def test_the_most_different_pairs_come_first(client, scheduler, setup):
     assert sims == sorted(sims) or max(sims) - min(sims) < 0.05                     # least alike first (ties within 0.02 are picked at random)
     import pytest
     with pytest.raises(C.EvalError, match='unknown similarity'): C.parse_spec(dict(name='x', question='q', role='r', dataset='d', metrics=['wer'], similarity='audio', candidates=[dict(name='a', model='m')]))
+
+
+def test_judging_skips_only_judgments_of_current_outputs_and_rescores_new_outputs(client, scheduler):
+    from stratamodels.evals import core as C
+    from stratamodels.db.models import EvalJudgment
+    client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
+    first = client.get('/api/evals/fake-asr/pair').json(); n0 = first['remaining']
+    with C.session(scheduler.store.engine) as ses:                                    # a stale judgment (old outputs) of every pair: must not count as judged
+        for it in C.load_dataset('speech').items: ses.add(EvalJudgment(experiment='fake-asr', item_id=it['id'], a='base', b='better', winner='tie', rater='x', at=1.0, a_key='old', b_key='old'))
+        ses.commit()
+    assert client.get('/api/evals/fake-asr/pair').json()['remaining'] == n0
+    s = C.load_spec('fake-asr'); C.forget(s, scheduler.store.engine, 'same')
+    client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
+    assert client.get('/api/evals/fake-asr/pair').json()['pair'] is not None
