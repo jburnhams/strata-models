@@ -69,3 +69,10 @@ describe('eval numbers', () => {
     expect(outputText({ segments: [{ text: ' a' }, { text: 'b' }, {}] })).toBe('a b'); expect(outputText({ faces: [] })).toContain('faces')
   })
 })
+
+import { window_ } from '../../src/components/PhrasePlayer'
+describe('the phrase window', () => {
+  it('starts 2 s before and stops 1 s after, never before 0', () => {
+    expect(window_([14.4, 16.2])).toEqual({ from: 12.4, to: 17.2 }); expect(window_([1, 2]).from).toBe(0); expect(window_(undefined)).toEqual({ from: 0, to: Infinity })
+  })
+})

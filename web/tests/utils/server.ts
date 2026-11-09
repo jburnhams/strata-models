@@ -58,7 +58,7 @@ export const evalFixtures = {
       { id: 'u2', input: { prompt: 'a dog' }, has_media: false, reference: null, outputs: { 'large-v3': { output: { segments: [{ text: ' dog' }] }, error: null }, turbo: null, small: null } },
     ],
   }),
-  pair: (): Pair => ({ similarity: 0.62, item_id: 'u1', input: { language: 'en' }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
+  pair: (): Pair => ({ similarity: 0.62, item_id: 'u1', input: { language: 'en', clip: [14.4, 16.2] }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
 }
 
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1 }

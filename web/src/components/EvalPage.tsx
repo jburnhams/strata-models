@@ -2,6 +2,7 @@
 // Then: every candidate's results with their intervals, the paired comparisons with the baseline, the human judgments, and the tabs to judge
 // pairs blind and to read the standard write-up. Running fills in missing outputs through the GPU queue.
 import { useParams } from 'react-router'
+import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useLoad, type Column } from 'strata-react'
 import { evalsApi, imagesApi, type Analysis, type Pair, type Step } from '../api'
@@ -144,7 +145,7 @@ function Judge({ name }: { name: string }) {
         <div className="grid gap-4">
           <p className="type-body">Which output is better for item <span className="font-mono">{pair!.item_id}</span>? The candidates are hidden until you answer.</p>
           {pair!.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - pair!.similarity)} different`}{load.status === 'ready' && load.data.remaining !== undefined ? ` · ${format.count(load.data.remaining, 'pair')} not judged yet, most different first` : ''}</p>}
-          {pair!.has_media && !imagePath(pair!.x) && <audio controls src={evalsApi.mediaUrl(name, pair!.item_id)} className="w-full" />}
+          {pair!.has_media && !imagePath(pair!.x) && <PhrasePlayer key={pair!.item_id} src={evalsApi.mediaUrl(name, pair!.item_id)} clip={Array.isArray(pair!.input.clip) ? pair!.input.clip as [number, number] : undefined} />}
           {typeof pair!.input.prompt === 'string' && <p className="type-body">Prompt: {pair!.input.prompt}</p>}
           {typeof pair!.input.text === 'string' && <p className="type-body">Text: {pair!.input.text}</p>}
           {pair!.reference && 'text' in pair!.reference && pair!.reference.text !== pair!.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}
