@@ -50,6 +50,35 @@ def cmd_jobs(args):
     return 0
 
 
+def cmd_eval(args):
+    """Experiments: list, run (through the running service's queue), report (the standard write-up), forget (cached outputs)."""
+    from stratamodels.evals import core as C, report as R
+    if args.action == 'list':
+        for name, s in C.list_specs().items(): print(f'  {name:28} {"ERROR " + str(s) if isinstance(s, C.EvalError) else s.question}')
+        for d in C.list_datasets(): print(f'  dataset {d["name"]:20} {d.get("n", "?")} items  {d.get("version") or d.get("error")}')
+        return 0
+    if not args.name: sys.exit('name the experiment')
+    try: spec = C.load_spec(args.name)
+    except C.EvalError as e: sys.exit(str(e))
+    from stratamodels.store import Store
+    engine = Store.connect(migrate=args.action == 'run').engine
+    if args.action == 'run':
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'client'))
+        import strata_models_client as sm
+        if not sm.available(): sys.exit(f'strata-models is not running at {sm.url()}: eval jobs go through its queue')
+        r = C.run(spec, engine, C.ClientExecutor(sm), candidates=args.candidate or None, limit=args.limit); print(json.dumps(r)); return 0
+    if args.action == 'forget': print(f'{C.forget(spec, engine, args.candidate[0] if args.candidate else None)} outputs forgotten'); return 0
+    res = C.analyse(spec, engine)
+    if args.json: print(json.dumps(res, indent=1, default=str)); return 0
+    ds, outs, _ = C.outputs_for(spec, engine); text = R.render(res, R.worst(spec, outs, ds.items, spec.primary))
+    if args.out:
+        with open(args.out, 'w', encoding='utf8') as f: f.write(text)
+        print(f'wrote {args.out}')
+    else: print(text)
+    return 0
+
+
 def cmd_set(args):
     if args.value is None: print(f'{args.key} = {settings.all_settings().get(args.key)}'); return 0
     try: settings.save({args.key: None if args.value == 'default' else args.value})
@@ -69,6 +98,8 @@ def main(argv=None):
         c = sub.add_parser(name, help=h); c.add_argument('--url', default='http://127.0.0.1:8366'); c.add_argument('--json', action='store_true'); c.set_defaults(fn=fn)
         if name == 'jobs': c.add_argument('--limit', type=int, default=20)
     r = sub.add_parser('registry', help='roles and the model chosen for each'); r.add_argument('--json', action='store_true'); r.set_defaults(fn=cmd_registry)
+    e = sub.add_parser('eval', help='experiments: list | run NAME | report NAME [--out FILE] | forget NAME'); e.add_argument('action', choices=['list', 'run', 'report', 'forget']); e.add_argument('name', nargs='?')
+    e.add_argument('--candidate', action='append', help='only this candidate (repeatable)'); e.add_argument('--limit', type=int, help='only the first N items (a trial run)'); e.add_argument('--out', help='write the report here'); e.add_argument('--json', action='store_true'); e.set_defaults(fn=cmd_eval)
     s = sub.add_parser('set', help='show or change a setting (data_dir, models_dir, vram_reserve_gb); value "default" resets it'); s.add_argument('key'); s.add_argument('value', nargs='?'); s.set_defaults(fn=cmd_set)
     v = sub.add_parser('serve', help='start the service'); v.add_argument('--host', default='127.0.0.1'); v.add_argument('--port', type=int, default=8366); v.add_argument('--memory', action='store_true', help='keep jobs in memory instead of the database'); v.set_defaults(fn=cmd_serve)
     a = p.parse_args(argv); return a.fn(a)

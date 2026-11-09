@@ -1,7 +1,7 @@
 // The service as the web app sees it: fixtures plus msw handlers for every endpoint the app calls (one without a handler fails the test).
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import type { Job, Model, Registry, Settings, Status, Usage } from '../../src/api'
+import type { Analysis, Evals, Job, Model, Pair, Registry, RunStatus, Settings, Status, Usage } from '../../src/api'
 
 export const NOW = 1_800_000_000
 const job = (o: Partial<Job>): Job => ({ id: 1, kind: 'run', app: 'bright-horizons', priority: 'batch', status: 'done', submitted_at: NOW - 60, role: 'faces', model: 'buffalo_l', note: null, params: { path: '/p/a.jpg' }, error: null, vram_gb: null, ttl_s: null, started_at: NOW - 59, finished_at: NOW - 58, heartbeat_at: null, load_s: 0.7, run_s: 0.05, wait_s: 1, ...o })
@@ -16,20 +16,45 @@ export const fixtures = {
     events: [{ at: NOW - 600, text: 'loaded whisper-large-v3 in 2.9 s (3.6 GB)' }],
   }),
   registry: (): Registry => ({
-    roles: [{ key: 'faces', description: 'Find faces', model: 'buffalo_l' }, { key: 'transcribe', description: 'Speech to text', model: 'whisper-large-v3' }, { key: 'vision-language', description: 'Pictures', model: 'qwen' }],
+    roles: [{ key: 'image-generate', description: 'Pictures', model: 'flux3-klein' }, { key: 'faces', description: 'Find faces', model: 'buffalo_l' }, { key: 'transcribe', description: 'Speech to text', model: 'whisper-large-v3' }, { key: 'vision-language', description: 'Pictures', model: 'qwen' }],
     models: [
       { key: 'buffalo_l', runtime: 'insightface', name: 'buffalo_l', roles: ['faces'], vram_gb: 1, licence: 'non-commercial', source: 'https://example.org/i', used_by: ['bright-horizons'], options: {}, served: true, resident: true, missing: [], stats: { jobs: 300, mean_run_s: 0.05, last_at: NOW } },
       { key: 'whisper-large-v3', runtime: 'faster-whisper', name: 'large-v3', roles: ['transcribe'], vram_gb: 4.5, licence: 'MIT', source: '', used_by: ['strata-360'], options: {}, served: true, resident: false, missing: [], stats: null },
+      { key: 'flux3-klein', runtime: 'sd-cpp', name: 'FLUX.3 [klein]', roles: ['image-generate'], vram_gb: 7, licence: 'FLUX Kommunity', source: '', used_by: [], options: { steps: 16 }, served: true, resident: false, missing: [], stats: null },
       { key: 'qwen', runtime: 'llama-server', name: 'q', roles: ['vision-language'], vram_gb: 7, licence: 'Apache-2.0', source: '', used_by: ['strata-360'], options: {}, served: false, resident: false, missing: [], stats: null },
     ] as Model[],
   }),
   jobs: (): Job[] => [job({ id: 3, status: 'failed', error: 'no such image: /p/x.jpg', run_s: null }), job({ id: 2, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'running', finished_at: null }), job({ id: 1 })],
   usage: (): Usage => ({ hours: 24, rows: [{ app: 'bright-horizons', kind: 'run', role: 'faces', jobs: 300, failed: 1, gpu_s: 15 }, { app: 'strata-stills', kind: 'lease', role: null, jobs: 2, failed: 0, gpu_s: 600 }] }),
 }
+const iv = (value: number, d = 0.01) => ({ value, low: value - d, high: value + d, n: 200 })
+const wer = { name: 'wer', shape: 'ratio', better: 'lower', description: 'Word error rate', unit: '%' } as const
+const lat = { name: 'latency_s', shape: 'mean', better: 'lower', description: 'Seconds per item', unit: 's' } as const
+export const evalFixtures = {
+  list: (): Evals => ({
+    experiments: [
+      { name: 'transcribe-en', question: 'Which Whisper model for English?', role: 'transcribe', dataset: 'librispeech', candidates: [{ name: 'large-v3', model: 'whisper-large-v3', params: {}, options: {}, note: '' }, { name: 'turbo', model: 'whisper-large-v3-turbo', params: {}, options: {}, note: '' }], outputs: 400, total: 400, running: false },
+      { name: 'faces-bh', question: 'Which face model?', role: 'faces', dataset: 'bh', candidates: [], outputs: 10, total: 300, running: true },
+      { name: 'broken', error: 'unknown metrics' },
+    ],
+    datasets: [{ name: 'librispeech', version: 'abc123', n: 200, description: 'LibriSpeech test-clean' }, { name: 'bad', error: 'line 3' }],
+  }),
+  analysis: (): Analysis => ({
+    experiment: { name: 'transcribe-en', question: 'Which Whisper model for English?', role: 'transcribe', dataset: 'librispeech', metrics: ['wer', 'latency_s'], candidates: [{ name: 'large-v3', model: 'whisper-large-v3', params: {}, options: {}, note: '' }, { name: 'turbo', model: 'whisper-large-v3-turbo', params: {}, options: {}, note: '' }], primary: 'wer', baseline: 'large-v3', min_effect: 0.005, guards: {}, judge: true },
+    dataset: { name: 'librispeech', version: 'abc123', n: 200, compared: 200 },
+    candidates: { 'large-v3': { done: 200, failed: 0, load_s: 3, metrics: { wer: iv(0.031), latency_s: iv(0.4, 0.05) } }, turbo: { done: 200, failed: 0, load_s: 2, metrics: { wer: iv(0.033), latency_s: iv(0.2, 0.02) } } },
+    comparisons: { turbo: { wer: { n: 200, mean_a: 0.031, mean_b: 0.033, diff: 0.002, low: -0.001, high: 0.005, p: 0.2, p_holm: 0.2, improves: null }, latency_s: { n: 200, mean_a: 0.4, mean_b: 0.2, diff: -0.2, low: -0.25, high: -0.15, p: 0.0002, improves: true } } },
+    metrics: { wer, latency_s: lat },
+    decision: { per_candidate: { turbo: { verdict: 'unclear', why: 'difference -0.20 points, interval includes no change', gain: -0.002 } }, recommendation: 'large-v3', change: false },
+    judgments: { n: 12, strength: { 'large-v3': [1.2, 0.8, 1.6], turbo: [0.8, 0.5, 1.1] } },
+  }),
+  pair: (): Pair => ({ item_id: 'u1', input: { language: 'en' }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
+}
+
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1 }
 
-export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100 }
-export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100 }
+export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
+export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }
 
 export const handlers = [
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0', gpu: true })),
@@ -44,9 +69,21 @@ export const handlers = [
     const items = rows.slice(0, mock.pageSize)
     return HttpResponse.json({ items, next: rows.length > items.length ? items[items.length - 1].id : null })
   }),
+  http.post('/api/jobs', async ({ request }) => { const b = (await request.json()) as { params: { prompt: string } }; mock.calls.push(`generate ${b.params.prompt}`); if (b.params.prompt === 'fail') return HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'queued' }, { status: 201 }); return HttpResponse.json({ ...fixtures.jobs()[0], id: 99, status: 'queued' }, { status: 201 }) }),
+  http.get('/api/jobs/98', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'failed', error: 'stable-diffusion.cpp is not installed' })),
+  http.get('/api/jobs/99', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 99, role: 'image-generate', model: 'flux3-klein', params: { prompt: 'a hare' }, status: 'done', result: { path: '/d/generated/a.png', width: 1024, height: 1024, seed: 5, steps: 16, seconds: 9.4, peak_vram_mb: 6200 } })),
+  http.get('/api/images', () => HttpResponse.json({ items: mock.images, next: null })),
+  http.post('/api/images/upload', () => { mock.calls.push('upload'); return HttpResponse.json({ path: '/d/uploads/r.png' }, { status: 201 }) }),
   http.get('/api/jobs/:id', ({ params }) => { const j = fixtures.jobs().find(x => x.id === Number(params.id)); return j ? HttpResponse.json({ ...j, result: j.status === 'done' ? { faces: [] } : null }) : HttpResponse.json({ detail: 'no job' }, { status: 404 }) }),
   http.delete('/api/jobs/:id', ({ params }) => { mock.calls.push(`cancel ${params.id}`); return HttpResponse.json(fixtures.jobs()[0]) }),
   http.get('/api/usage', ({ request }) => HttpResponse.json({ ...fixtures.usage(), hours: Number(new URL(request.url).searchParams.get('hours')) })),
+  http.get('/api/evals', () => HttpResponse.json(evalFixtures.list())),
+  http.get('/api/evals/:name/status', () => HttpResponse.json(mock.run)),
+  http.post('/api/evals/:name/run', ({ params }) => { mock.calls.push(`run ${params.name}`); mock.run = { state: 'running', log: ['transcribe-en: 0 of 400 outputs cached, 400 to run'] }; return HttpResponse.json(mock.run, { status: 202 }) }),
+  http.get('/api/evals/:name/report', () => HttpResponse.text('# transcribe-en: Which Whisper model for English?\n\n## Answer\n')),
+  http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair() })),
+  http.post('/api/evals/:name/judgments', async ({ request }) => { const b = (await request.json()) as { winner: string }; mock.calls.push(`judge ${b.winner}`); return HttpResponse.json({ ok: true, x: 'turbo', y: 'large-v3', winner: b.winner }, { status: 201 }) }),
+  http.get('/api/evals/:name', ({ params }) => params.name === 'nope' ? HttpResponse.json({ detail: 'no experiment' }, { status: 404 }) : HttpResponse.json(mock.analysis)),
   http.get('/api/settings', () => HttpResponse.json(mock.settings)),
   http.put('/api/settings', async ({ request }) => {
     const body = (await request.json()) as Partial<Settings>

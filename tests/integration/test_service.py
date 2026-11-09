@@ -24,9 +24,14 @@ def test_run_submit_wait_and_failures(service):
     assert get(service, '/api/status')['resident'][0]['model'] == 'echo-small'
 
 
-def test_a_lease_holds_the_gpu_and_jobs_wait_for_it(service):
+def test_a_sized_lease_lets_jobs_run_beside_it(service):
+    with sm.gpu_lease('it-stills', vram_gb=1, ttl_s=30, note='shared') as lease:
+        assert lease.job['status'] == 'running' and sm.run('echo', dict(z=1), app='it', timeout=20) == dict(model='echo-small', echo=dict(z=1))
+
+
+def test_a_whole_gpu_lease_holds_it_and_jobs_wait_for_it(service):
     order = []
-    with sm.gpu_lease('it-stills', vram_gb=1, ttl_s=6, note='integration') as lease:
+    with sm.gpu_lease('it-stills', vram_gb=None, ttl_s=6, note='integration') as lease:
         assert lease.job['status'] == 'running'
         t = threading.Thread(target=lambda: order.append(('job', sm.run('echo', {}, app='it')))); t.start()
         time.sleep(3)                                                    # longer than ttl/3: the heartbeat thread must keep it

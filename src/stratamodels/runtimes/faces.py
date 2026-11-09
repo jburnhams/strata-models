@@ -8,7 +8,7 @@ mid-grey canvas that many times its size, so a face that fills the frame shrinks
 (degrees clockwise, applied last)}, answered as `views: [{faces}, ...]` with every box and point given back in the original picture's pixels. bright-horizons uses them to
 look harder for children lying down or small in the background, without sending the image itself; strata-stills uses pad for close-ups
 (buffalo_l at det_size 640 misses about 1 in 5 faces over 20 % of the frame; a pad 2 view finds most of them)."""
-import os
+import collections, os
 
 from stratamodels.runtimes import RunError
 
@@ -24,11 +24,19 @@ def load(model, models_dir):
     return dict(fa=fa, det_thresh=fa.det_model.det_thresh)
 
 
+_recent = collections.OrderedDict()          # (path, mtime_ns, size) -> decoded image: an app that looks at a photo twice (bright-horizons' harder looks) decodes it once
+RECENT = 4
+
+
 def _read(path):
     import cv2
     if not isinstance(path, str) or not os.path.isfile(path): raise RunError(f'no such image: {path!r}')
+    st = os.stat(path); key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    if key in _recent: _recent.move_to_end(key); return _recent[key]
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     if img is None: raise RunError(f'not an image OpenCV can read: {path}')
+    _recent[key] = img
+    while len(_recent) > RECENT: _recent.popitem(last=False)
     return img
 
 
@@ -107,4 +115,4 @@ def run(handle, params):
     return res[0] if params.get('paths') is None else dict(images=res)
 
 
-def unload(handle): handle.clear()
+def unload(handle): handle.clear(); _recent.clear()

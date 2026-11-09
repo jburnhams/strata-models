@@ -1,0 +1,24 @@
+name = "image-models"
+question = "Which local model should serve image-generate: FLUX.3 Klein or Qwen-Image 2.1 Turbo, at 1 MP?"
+role = "image-generate"
+dataset = "image-prompts-20"
+metrics = ["latency_s", "peak_vram_gb", "failed"]
+judge = true                 # quality is judged blind, pair by pair, on the Judge tab: there is no reference picture
+
+[decision]
+primary = "latency_s"        # until enough judgments are in; the write-up reads the Bradley-Terry strengths first
+baseline = "flux3-klein"
+min_effect = 1.0
+guards = { peak_vram_gb = 1.5 }
+
+[[candidates]]
+name = "flux3-klein"
+model = "flux3-klein"
+params = { width = 1024, height = 1024 }
+note = "16 steps, Q4 (UD-Q4_K_XL)"
+
+[[candidates]]
+name = "qwen-image-2.1-turbo"
+model = "qwen-image-2.1-turbo"
+params = { width = 1024, height = 1024 }
+note = "8 steps, Q4_K_M, text encoder on the CPU"

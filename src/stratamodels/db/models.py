@@ -31,3 +31,38 @@ class Job(Base):
     heartbeat_at: Mapped[float | None] = mapped_column(default=None)
     load_s: Mapped[float | None] = mapped_column(default=None)                      # time spent loading the model for this job (0 when it was resident)
     run_s: Mapped[float | None] = mapped_column(default=None)
+
+
+class EvalResult(Base):
+    """One model output for one eval item, keyed by everything that decides it (role, model, load options, the job's params, the item): the same
+    candidate on the same item is never run twice, across experiments. Outputs are kept (they are what a report's examples and the judging page show)."""
+    __tablename__ = 'eval_results'
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    key: Mapped[str] = mapped_column(sa.String(64), unique=True)
+    dataset: Mapped[str] = mapped_column(sa.String(128), index=True)
+    item_id: Mapped[str] = mapped_column(sa.String(256))
+    role: Mapped[str] = mapped_column(sa.String(64))
+    model: Mapped[str] = mapped_column(sa.String(128))
+    created_at: Mapped[float]
+    output: Mapped[dict | None] = mapped_column(sa.JSON, default=None)
+    error: Mapped[str | None] = mapped_column(sa.Text, default=None)
+    run_s: Mapped[float | None] = mapped_column(default=None)
+    load_s: Mapped[float | None] = mapped_column(default=None)
+    job_id: Mapped[int | None] = mapped_column(default=None)
+
+
+class EvalJudgment(Base):
+    """A person's blind choice between two candidates' outputs for one item (or a tie): what metrics cannot measure (is this transcript better,
+    is this caption right). Analysed with Bradley-Terry."""
+    __tablename__ = 'eval_judgments'
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    experiment: Mapped[str] = mapped_column(sa.String(128), index=True)
+    item_id: Mapped[str] = mapped_column(sa.String(256))
+    a: Mapped[str] = mapped_column(sa.String(128))
+    b: Mapped[str] = mapped_column(sa.String(128))
+    winner: Mapped[str] = mapped_column(sa.String(128))                          # a's name, b's name, or 'tie'
+    rater: Mapped[str] = mapped_column(sa.String(64))
+    at: Mapped[float]
+    note: Mapped[str | None] = mapped_column(sa.String(500), default=None)
+    a_key: Mapped[str | None] = mapped_column(sa.String(64), default=None)               # the result keys of the two outputs judged: a judgment counts only
+    b_key: Mapped[str | None] = mapped_column(sa.String(64), default=None)               # while they are still the candidates' outputs

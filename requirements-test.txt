@@ -2,6 +2,7 @@
 fastapi
 uvicorn
 pydantic
+numpy                      # evals: statistics and metrics
 httpx
 sqlalchemy>=2
 omarchy-db @ git+https://github.com/jburnhams/database#subdirectory=python

@@ -1,0 +1,34 @@
+name = "transcribe-en"
+question = "Which Whisper model and beam size should serve the transcribe role for English speech?"
+role = "transcribe"
+dataset = "librispeech-clean-200"
+metrics = ["wer", "cer", "latency_s", "failed"]
+judge = true
+
+[decision]
+primary = "wer"
+baseline = "large-v3"
+min_effect = 0.003          # under a third of a point of WER is not worth a change
+guards = { latency_s = 2.0 }
+
+[[candidates]]
+name = "large-v3"
+model = "whisper-large-v3"
+params = { language = "en" }
+note = "what serves transcribe today"
+
+[[candidates]]
+name = "large-v3-turbo"
+model = "whisper-large-v3-turbo"
+params = { language = "en" }
+
+[[candidates]]
+name = "large-v3-turbo-beam1"
+model = "whisper-large-v3-turbo"
+params = { language = "en", beam_size = 1 }
+note = "greedy decoding: faster"
+
+[[candidates]]
+name = "small"
+model = "whisper-small"
+params = { language = "en" }
