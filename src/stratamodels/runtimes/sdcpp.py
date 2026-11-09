@@ -77,7 +77,8 @@ def command(handle, params, out):
 def run(handle, params, popen=subprocess.Popen, probe=gpu.query, out_dir=None):
     day = datetime.date.today().isoformat(); folder = out_dir or os.path.join(settings.data_dir(), 'generated', day); os.makedirs(folder, exist_ok=True)
     out = os.path.join(folder, f'{uuid.uuid4().hex[:12]}.png'); cmd, seed = command(handle, params, out)
-    t0 = time.perf_counter(); p = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True); peak = [0.0]; stop = threading.Event()
+    env = dict(os.environ, LD_LIBRARY_PATH=os.path.dirname(handle['exe']) + os.pathsep + os.environ.get('LD_LIBRARY_PATH', ''))     # its ggml libraries sit beside it
+    t0 = time.perf_counter(); p = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env); peak = [0.0]; stop = threading.Event()
 
     def watch():                                                    # peak VRAM of the sd-cli process, sampled while it runs
         while not stop.wait(0.5):
