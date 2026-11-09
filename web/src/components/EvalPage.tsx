@@ -4,7 +4,7 @@
 import { useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useLoad, type Column } from 'strata-react'
-import { evalsApi, type Analysis, type Pair } from '../api'
+import { evalsApi, imagesApi, type Analysis, type Pair } from '../api'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
 
@@ -52,6 +52,9 @@ function Results({ a }: { a: Analysis }) {
   )
 }
 
+/** The picture of an image job's output, if it is one. */
+export const imagePath = (o: unknown) => (o && typeof o === 'object' && typeof (o as { path?: unknown }).path === 'string' && /\.(png|jpe?g|webp)$/i.test((o as { path: string }).path) ? (o as { path: string }).path : null)
+
 function Judge({ name }: { name: string }) {
   const qc = useQueryClient(); const [n, setN] = useState(0)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
@@ -61,13 +64,14 @@ function Judge({ name }: { name: string }) {
       {({ pair }) => (
         <div className="grid gap-4">
           <p className="type-body">Which output is better for item <span className="font-mono">{pair!.item_id}</span>? The candidates are hidden until you answer.</p>
-          {pair!.has_media && <audio controls src={evalsApi.mediaUrl(name, pair!.item_id)} className="w-full" />}
+          {pair!.has_media && !imagePath(pair!.x) && <audio controls src={evalsApi.mediaUrl(name, pair!.item_id)} className="w-full" />}
+          {typeof pair!.input.prompt === 'string' && <p className="type-body">Prompt: {pair!.input.prompt}</p>}
           {pair!.reference && 'text' in pair!.reference && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}
           <div className="grid gap-4 md:grid-cols-2">
             {(['x', 'y'] as const).map(k => (
               <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid gap-2 rounded-surface border border-border p-3">
                 <h3 className="type-label">Output {k.toUpperCase()}</h3>
-                <p className="type-body whitespace-pre-wrap">{outputText(pair![k])}</p>
+                {imagePath(pair![k]) ? <img src={imagesApi.fileUrl(imagePath(pair![k])!)} alt={`Output ${k.toUpperCase()}`} className="h-auto max-w-full rounded-control" /> : <p className="type-body whitespace-pre-wrap">{outputText(pair![k])}</p>}
                 <Button onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'}>{`${k.toUpperCase()} is better`}</Button>
               </section>
             ))}

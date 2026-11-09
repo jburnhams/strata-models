@@ -71,3 +71,12 @@ describe('Evals list, odd entries', () => {
     expect(screen.getByText('0 of 1 experiments have every output in; 1 still need a run.')).toBeInTheDocument()
   })
 })
+
+describe('Judging pictures', () => {
+  it('shows the two pictures and the prompt', async () => {
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { item_id: 'hands', input: { prompt: 'two hands' }, has_media: false, reference: null, x: { path: '/d/generated/a.png' }, y: { path: '/d/generated/b.png' }, token: 't' } })))
+    setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    expect(await screen.findByRole('img', { name: 'Output X' })).toBeInTheDocument()
+    expect(screen.getByText('Prompt: two hands')).toBeInTheDocument()
+  })
+})

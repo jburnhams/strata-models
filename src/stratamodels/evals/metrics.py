@@ -162,6 +162,11 @@ def _parsed(item, output, error):
 def _failed(item, output, error): return error is not None
 
 
+def _peak_vram(item, output, error):
+    v = output.get('peak_vram_mb') if isinstance(output, dict) and not error else None
+    return None if not v else v / 1024
+
+
 METRICS = {m.name: m for m in [
     Metric('wer', 'ratio', 'lower', 'Word error rate: word substitutions, deletions and insertions over the reference words, after normalise()', '%', _wer),
     Metric('cer', 'ratio', 'lower', 'Character error rate, the same on characters', '%', _cer),
@@ -172,6 +177,7 @@ METRICS = {m.name: m for m in [
     Metric('exact_match', 'binary', 'higher', 'The answer equals the reference answer after normalise()', '%', _exact),
     Metric('parsed', 'binary', 'higher', 'The output is valid JSON', '%', _parsed),
     Metric('failed', 'binary', 'lower', 'The job failed', '%', _failed),
+    Metric('peak_vram_gb', 'mean', 'lower', 'Highest VRAM the job\'s own process used (image generation runs as its own process)', 'GB', _peak_vram),
     Metric('latency_s', 'mean', 'lower', 'Seconds the model ran per item (model already loaded; load time is reported apart)', 's', _latency),
 ]}
 
