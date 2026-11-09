@@ -45,8 +45,8 @@ def main():
         arr = clip._array(dict(path=c, key=a.key, bgr=a.bgr)); lab = json.load(open(l))
         if len(lab) != len(arr): sys.exit(f'{l}: {len(lab)} labels for {len(arr)} crops')
         X.append(arr); y += lab
-    h = clip.load(types.SimpleNamespace(name=a.model, options={}), a.models_dir); crops = np.concatenate(X)
-    E = np.concatenate([clip._encode_images(h, [np.ascontiguousarray(f)], 'crop') for f in crops]); y = np.array(y)
+    h = clip.load(types.SimpleNamespace(name=a.model, options={}), a.models_dir)
+    E = np.concatenate([clip._encode_images(h, [np.ascontiguousarray(f) for f in arr], 'crop') for arr in X]); y = np.array(y)          # each set's crops may be another size: embed set by set, join the vectors
     if 'real' not in set(y): sys.exit("no 'real' labels")
     classes = sorted(set(y)); Y = np.array([classes.index(v) for v in y]); r = y == 'real'
     folds = np.zeros(len(y), int); rng = np.random.default_rng(0)
