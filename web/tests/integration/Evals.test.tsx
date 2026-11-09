@@ -59,7 +59,7 @@ describe('An experiment', () => {
   it('says when there is nothing to judge', async () => {
     server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: null })))
     setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
-    expect(await screen.findByText('Nothing to judge yet')).toBeInTheDocument()
+    expect(await screen.findByText('Nothing to judge')).toBeInTheDocument()
   })
 })
 

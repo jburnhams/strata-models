@@ -88,3 +88,17 @@ def test_judgments_count_only_while_their_outputs_are_current(client, scheduler)
     assert len(C.judgments(scheduler.store.engine, 'fake-asr')) == 4
     keys = {(c.name, it['id']): 'changed' for c in s.candidates for it in C.load_dataset('speech').items}
     assert C.judgments(scheduler.store.engine, 'fake-asr', keys) == []
+
+
+def test_pairs_with_the_same_output_are_not_offered(client, scheduler):
+    from stratamodels.evals.api import same
+    assert same(dict(segments=[dict(text=" Anders' face grew red.")]), dict(segments=[dict(text="anders' face grew red")]))
+    assert not same(dict(segments=[dict(text='a b')]), dict(segments=[dict(text='a c')]))
+    assert same(dict(path='/a.png', seconds=1.0), dict(path='/a.png', seconds=2.0)) and not same(dict(path='/a.png'), dict(path='/b.png'))
+    client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
+    seen = set()
+    for _ in range(30):
+        p = client.get('/api/evals/fake-asr/pair').json()['pair']
+        assert not same(p['x'], p['y']); seen.add(p['item_id'])
+        client.post('/api/evals/fake-asr/judgments', json=dict(token=p['token'], winner='tie'))
+    assert len(seen) > 20                                                               # unjudged pairs come first, so it moves through the items
