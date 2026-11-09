@@ -3,6 +3,7 @@ fastapi
 uvicorn
 pydantic
 numpy                      # evals: statistics and metrics
+pillow                     # evals: image similarity
 httpx
 sqlalchemy>=2
 omarchy-db @ git+https://github.com/jburnhams/database#subdirectory=python

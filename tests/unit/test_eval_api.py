@@ -13,7 +13,7 @@ def client(scheduler, setup):
 
 
 def wait_run(client, name):
-    for _ in range(200):
+    for _ in range(1200):                                                               # up to a minute: a loaded machine runs the fake jobs slowly
         st = client.get(f'/api/evals/{name}/status').json()
         if st['state'] != 'running': return st
         time.sleep(0.05)
@@ -111,3 +111,17 @@ def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup):
     wav = tmp_path / 'long.wav'; subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=10', str(wav)], check=True)
     C.write_dataset('speech', [dict(id='p', input=dict(path=str(wav), clip=[2.0, 3.0], say='x'), reference=dict(text='x'))])
     r = client.get('/api/evals/fake-asr/media/p'); assert r.headers['content-type'] == 'audio/wav' and len(r.content) < wav.stat().st_size / 5
+
+
+def test_the_most_different_pairs_come_first(client, scheduler, setup):
+    from stratamodels.evals import core as C
+    client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
+    first = client.get('/api/evals/fake-asr/pair').json()
+    assert 0 < first['pair']['similarity'] < 1 and first['remaining'] > 0
+    sims = []
+    for _ in range(10):
+        p = client.get('/api/evals/fake-asr/pair').json(); sims.append(p['pair']['similarity'])
+        client.post('/api/evals/fake-asr/judgments', json=dict(token=p['pair']['token'], winner='tie'))
+    assert sims == sorted(sims) or max(sims) - min(sims) < 0.05                     # least alike first (ties within 0.02 are picked at random)
+    import pytest
+    with pytest.raises(C.EvalError, match='unknown similarity'): C.parse_spec(dict(name='x', question='q', role='r', dataset='d', metrics=['wer'], similarity='audio', candidates=[dict(name='a', model='m')]))

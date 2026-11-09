@@ -46,19 +46,14 @@ def finite(x):
     return x
 
 
-VOLATILE = ('seconds', 'peak_vram_mb')     # differ between identical runs; never a reason to judge
-
-
-def same(x, y):
-    """Whether two outputs say the same thing: transcripts after normalising the text, anything else as JSON without its timings."""
-    from stratamodels.evals import metrics as M
-    if isinstance(x, dict) and isinstance(y, dict) and 'segments' in x and 'segments' in y: return M.normalise(M.transcript(x)) == M.normalise(M.transcript(y))
-    strip = lambda o: {k: v for k, v in o.items() if k not in VOLATILE} if isinstance(o, dict) else o
-    return json.dumps(strip(x), sort_keys=True) == json.dumps(strip(y), sort_keys=True)
+def same(x, y, kind=None):
+    """Whether two outputs say the same thing (similarity 1)."""
+    from stratamodels.evals import similarity as SIM
+    return SIM.similarity(x, y, kind) >= 0.9999
 
 
 def mount(app, scheduler):
-    runs = {}; engine = lambda: scheduler.store.engine; memo = {}
+    runs = {}; engine = lambda: scheduler.store.engine; memo = {}; sims = {}       # sims: (result key, result key) -> similarity, outputs never change under a key
 
     def analysis(s):
         """The analysis, recomputed only when the spec, the outputs or the judgments changed: the bootstraps take seconds to a minute."""
@@ -115,16 +110,22 @@ def mount(app, scheduler):
         s = spec_or_404(name)
         if len(s.candidates) < 2: raise HTTPException(400, 'an experiment needs two candidates to judge')
         ds, outs, _ = C.outputs_for(s, engine()); pairs = []
-        for i in range(len(ds.items)):
+        from stratamodels.evals import similarity as SIM
+        for i, it in enumerate(ds.items):
             ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
-            pairs += [(i, a, b) for n, a in enumerate(ok) for b in ok[n + 1:] if not same(outs[a][i][0], outs[b][i][0])]      # identical outputs teach nothing: not shown
+            for n, a in enumerate(ok):
+                for b in ok[n + 1:]:
+                    key = (C.result_key(s, s.candidate(a), it), C.result_key(s, s.candidate(b), it))
+                    if key not in sims: sims[key] = SIM.similarity(outs[a][i][0], outs[b][i][0], s.similarity or None)
+                    if sims[key] < 0.9999: pairs.append((sims[key], i, a, b))                                    # identical outputs teach nothing: not shown
         if not pairs: return dict(pair=None)
         with C.session(engine()) as ses: judged = {(j.item_id, frozenset((j.a, j.b))) for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))}
-        fresh = [p for p in pairs if (ds.items[p[0]]['id'], frozenset(p[1:])) not in judged]                                  # pairs not judged yet first
-        i, a, b = random.choice(fresh or pairs)
-        if random.random() < 0.5: a, b = b, a                                                                               # which side is X is random too
+        fresh = [p for p in pairs if (ds.items[p[1]]['id'], frozenset(p[2:])) not in judged] or pairs                  # pairs not judged yet first,
+        least = min(p[0] for p in fresh); sim, i, a, b = random.choice([p for p in fresh if p[0] <= least + 0.02])          # and of those the most different
+        if random.random() < 0.5: a, b = b, a                                                                               # which side is X is random
         it = ds.items[i]
-        return dict(pair=dict(item_id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
+        left = sum(1 for p in pairs if (ds.items[p[1]]['id'], frozenset(p[2:])) not in judged)
+        return dict(remaining=left, pair=dict(similarity=round(sim, 3), item_id=it['id'], input={k: v for k, v in it['input'].items() if k != 'path'}, has_media=isinstance(it['input'].get('path'), str), reference=it.get('reference'),
                               x=outs[a][i][0], y=outs[b][i][0], token=_sign(dict(e=name, i=it['id'], x=a, y=b, xk=C.result_key(s, s.candidate(a), it), yk=C.result_key(s, s.candidate(b), it)))))
 
     @app.post('/api/evals/{name}/judgments', status_code=201)
