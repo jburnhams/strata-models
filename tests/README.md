@@ -1,6 +1,6 @@
 # Python tests
 
-pytest 8, pytest-cov, **hypothesis**, **pytest-randomly**, **pytest-timeout**, pytest-xdist, diff-cover (`pip install -r requirements-test.txt`). The web tests are in `web/tests` (see `web/tests/README.md`).
+pytest 8, pytest-cov, **hypothesis**, **pytest-randomly**, **pytest-timeout**, pytest-xdist, diff-cover (`uv sync`; the dev group). The web tests are in `web/tests` (see `web/tests/README.md`).
 
 This file holds only what **both** Python suites share, and it is rarely edited. Each suite keeps its own notes so that parallel work on them does not collide:
 
@@ -40,7 +40,7 @@ CI (`.github/workflows/`): `unit.yml` (lint, unit tests with coverage on Linux f
 | Notes | `tests/unit/README.md` | `tests/integration/README.md` |
 | Coverage gate | `fail_under` in `pyproject.toml` (the only writer) | none: integration coverage is informational |
 
-Don't edit `tests/README.md` (this file), `AGENTS.md`, `CLAUDE.md`, `requirements-test.txt` or `.github/workflows/*` unless the task cannot be done without it; say why in the PR.
+Don't edit `tests/README.md` (this file), `AGENTS.md`, `CLAUDE.md` or `.github/workflows/*` unless the task cannot be done without it; say why in the PR.
 
 ## Shared conventions
 

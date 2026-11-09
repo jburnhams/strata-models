@@ -23,15 +23,15 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/images/file?path=            one generated or uploaded picture
   POST /api/images/upload?name=          a reference picture (body = the file) -> {path}
   /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
-The page at / serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html`."""
+Every other path serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html` (from strata_python.web)."""
 
 import os
 import time
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from strata_python import web
 
 from stratamodels import __version__, gpu, runtimes, settings
 from stratamodels.registry import Registry, RegistryError
@@ -83,19 +83,8 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     def bad_request(_req: Request, e: Exception):
         return JSONResponse(status_code=400, content=dict(detail=str(e)))
 
-    def found(j, what="job"):
-        if j is None:
-            raise HTTPException(404, f"no {what}")
-        return j
-
     def latest():
         return history.latest if history is not None and history.latest is not None else s.probe()
-
-    @app.get("/", response_class=HTMLResponse)
-    def index():
-        built = os.path.join(STATIC, "index.html")
-        with open(built if os.path.exists(built) else LANDING, encoding="utf8") as f:
-            return f.read()
 
     @app.get("/api/health")
     def get_health():
@@ -199,8 +188,6 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         for k in ("data_dir", "models_dir"):
             v = getattr(b, k)
             if v is not None:
-                if not os.path.isabs(os.path.expanduser(v)):
-                    raise HTTPException(400, f"{k} must be an absolute path")
                 changes[k] = v
         if b.vram_reserve_gb is not None:
             changes["vram_reserve_gb"] = b.vram_reserve_gb
@@ -271,8 +258,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     evals_api.mount(app, s)
 
-    if os.path.isdir(os.path.join(STATIC, "assets")):
-        app.mount("/assets", StaticFiles(directory=os.path.join(STATIC, "assets")), name="assets")
+    web.add_web(app, STATIC, LANDING)  # last: the catch-all page route
     return app
 
 
@@ -294,13 +280,14 @@ def build(memory=False, sample_every_s=5.0):
 def main(argv=None):
     import argparse
 
-    import uvicorn
-
     a = argparse.ArgumentParser()
     a.add_argument("--host", default="127.0.0.1")
     a.add_argument("--port", type=int, default=8366)
     a.add_argument("--memory", action="store_true", help="keep jobs in memory (a demo without the database)")
     a = a.parse_args(argv)
-    app = build(memory=a.memory)
-    print(f"models folder: {settings.models_dir()}\nhttp://{a.host}:{a.port}/")
-    uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+    web.serve(
+        build(memory=a.memory),
+        ["--host", a.host, "--port", str(a.port)],
+        default_port=8366,
+        banner=f"models folder: {settings.models_dir()}",
+    )

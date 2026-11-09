@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """Image generation with stable-diffusion.cpp (`sd-cli`, GGUF models): FLUX.3 Klein, Qwen-Image 2.1 Turbo, and whatever else it runs.
 
 A model's files are named in models.toml as Hugging Face references, "repo:path/in/repo" (or absolute paths), under options:

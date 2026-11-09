@@ -2826,6 +2826,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "sqlalchemy" },
+    { name = "strata-python" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn" },
 ]
@@ -2842,6 +2843,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "strata-models-client" },
     { name = "ty" },
 ]
 gpu = [
@@ -2866,6 +2868,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "sqlalchemy", specifier = ">=2" },
+    { name = "strata-python", git = "https://github.com/jburnhams/strata-python" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
@@ -2882,6 +2885,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "strata-models-client", editable = "client" },
     { name = "ty" },
 ]
 gpu = [
@@ -2896,6 +2900,23 @@ gpu = [
     { name = "open-clip-torch" },
     { name = "opencv-python-headless" },
     { name = "torch" },
+]
+
+[[package]]
+name = "strata-models-client"
+version = "0.1.0"
+source = { editable = "client" }
+
+[[package]]
+name = "strata-python"
+version = "0.1.0"
+source = { git = "https://github.com/jburnhams/strata-python#25d5f8f12fe818d5585891dfd0ed8ae793abbee6" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pytest" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+    { name = "uvicorn" },
 ]
 
 [[package]]

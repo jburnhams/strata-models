@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """insightface model packs (buffalo_l): face boxes, five keypoints, detection score, the ArcFace embedding (L2-normalised, 512 floats) and, when the
 pack's landmark_3d_68 module is loaded, the 68 3D landmarks and head pose. One loaded pack serves every app; params choose what comes back.
 

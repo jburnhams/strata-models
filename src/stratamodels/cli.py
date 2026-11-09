@@ -6,6 +6,8 @@ import json
 import sys
 import urllib.request
 
+from strata_python import cli as shared
+
 from stratamodels import __version__, gpu, runtimes, settings
 
 CHECKS = (
@@ -146,18 +148,6 @@ def cmd_eval(args):
     return 0
 
 
-def cmd_set(args):
-    if args.value is None:
-        print(f"{args.key} = {settings.all_settings().get(args.key)}")
-        return 0
-    try:
-        settings.save({args.key: None if args.value == "default" else args.value})
-    except (KeyError, ValueError) as e:
-        sys.exit(str(e))
-    print(f"{args.key} = {settings.all_settings()[args.key]}")
-    return 0
-
-
 def cmd_serve(args):
     from stratamodels.server import app as server_app
 
@@ -190,12 +180,7 @@ def main(argv=None):
     e.add_argument("--out", help="write the report here")
     e.add_argument("--json", action="store_true")
     e.set_defaults(fn=cmd_eval)
-    s = sub.add_parser(
-        "set", help='show or change a setting (data_dir, models_dir, vram_reserve_gb); value "default" resets it'
-    )
-    s.add_argument("key")
-    s.add_argument("value", nargs="?")
-    s.set_defaults(fn=cmd_set)
+    shared.add_set(sub, settings.SETTINGS)
     v = sub.add_parser("serve", help="start the service")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8366)

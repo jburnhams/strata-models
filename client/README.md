@@ -9,11 +9,13 @@ pip install "strata-models-client @ git+https://github.com/jburnhams/strata-mode
 ```python
 import strata_models_client as sm
 
-if sm.available():                                   # the service is running
-    faces = sm.faces('/path/a.jpg', app='bright-horizons')['faces']
-    text = sm.transcribe('/path/talk.wav', app='strata-360', language='en')
+if sm.available():  # the service is running
+    faces = sm.faces("/path/a.jpg", app="bright-horizons")["faces"]
+    text = sm.transcribe("/path/talk.wav", app="strata-360", language="en")
 
-with sm.gpu_lease('strata-stills', vram_gb=4, note='arena build'):     # waits its turn, then the GPU is yours until the block ends
+with sm.gpu_lease(
+    "strata-stills", vram_gb=4, note="arena build"
+):  # waits its turn, then the GPU is yours until the block ends
     run_my_own_cuda_code()
 ```
 

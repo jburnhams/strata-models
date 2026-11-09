@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """Whisper through faster-whisper (CTranslate2): float16 on the GPU, int8 on the CPU when there is none.
 
 params: path (an audio or video file ffmpeg can read); language (ISO code, else detected); task (transcribe | translate); word_timestamps (default
@@ -42,8 +44,8 @@ def decode(path, rate=16000):
 
     import numpy as np
 
-    p = subprocess.run(  # noqa: S603, S607  (fixed ffmpeg command line; the path is one argument)
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-vn", "-f", "s16le", "-ac", "1", "-ar", str(rate), "-"],
+    p = subprocess.run(  # noqa: S603  (fixed ffmpeg command line; the path is one argument; ffmpeg is found on PATH)
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-vn", "-f", "s16le", "-ac", "1", "-ar", str(rate), "-"],  # noqa: S607
         capture_output=True,
     )
     if p.returncode != 0:

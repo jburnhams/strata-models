@@ -45,7 +45,7 @@ def test_landing_page_and_built_static_index(scheduler, tmp_path, monkeypatch):
     (static / "assets" / "a.js").write_text("1", encoding="utf8")
     monkeypatch.setattr(server_app, "STATIC", str(static))
     c2 = TestClient(create_app(scheduler))
-    assert c2.get("/").text == "<h1>built</h1>" and c2.get("/assets/a.js").text == "1"
+    assert c2.get("/").text == '<base href="./"><h1>built</h1>' and c2.get("/assets/a.js").text == "1"
 
 
 def test_submit_poll_and_list_jobs(client, scheduler):

@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy>=2",
     "psycopg[binary]",
     "omarchy-db",
+    "strata-python",     # shared server code: oslib, settings, web serving, CLI commands, test plugin, strata-check
     "tzdata; sys_platform == 'win32'",
 ]
 
@@ -25,6 +26,7 @@ strata-models = "stratamodels.cli:main"
 [dependency-groups]
 dev = [
     "httpx>=0.27",
+    "strata-models-client",
     "pytest>=8",
     "pytest-cov>=5",
     "hypothesis",
@@ -52,6 +54,9 @@ gpu = [
 ]
 
 [tool.uv.sources]
+# strata-python tracks main (no tag): uv.lock pins the commit, `uv lock --upgrade-package strata-python` moves it.
+strata-models-client = { path = "client", editable = true }   # the in-repo client, so its imports resolve for the type checkers and the CLI
+strata-python = { git = "https://github.com/jburnhams/strata-python" }
 omarchy-db = { git = "https://github.com/jburnhams/database", subdirectory = "python" }
 
 [tool.hatch.build.targets.wheel]
@@ -64,6 +69,8 @@ migrations = "migrations"
 
 [tool.pytest.ini_options]
 pythonpath = ["tests/utils"]
+strata_env_prefix = "STRATAMODELS"        # strata-python plugin: STRATAMODELS_HOME and _DATA point into a tmp dir for every test
+strata_tuning_vars = ["STRATAMODELS_MODELS", "STRATAMODELS_VRAM_RESERVE_GB", "STRATAMODELS_DATABASE_URL", "OMARCHY_DB_URL", "STRATA_MODELS_URL"]    # removed from the environment for every test
 testpaths = ["tests/unit"]
 addopts = "-ra --timeout=300 --strict-markers --strict-config"
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]       # TestClient noise from the installed starlette; remove when the dependency moves on
@@ -109,7 +116,27 @@ ignore = [
 
 [tool.pyright]
 include = ["src"]
+extraPaths = ["client"]   # the standard-library client package is installed editable; pyright does not follow its path entry
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 # Ratchet: files listed here are checked strictly; the rest in basic mode. Add a file when it is fully annotated; never remove one.
-strict = []
+strict = ["src/stratamodels/__init__.py", "src/stratamodels/settings.py"]
+# Findings in the code that is not yet in the strict list above are warnings, so they are visible without blocking: they come from dict(...) literals whose value types
+# pyright narrows too far, and from SQLAlchemy's Result.rowcount. They become errors file by file as each file moves into the list.
+reportArgumentType = "warning"
+reportCallIssue = "warning"
+reportIndexIssue = "warning"
+reportOptionalOperand = "warning"
+reportOperatorIssue = "warning"
+reportAttributeAccessIssue = "warning"
+
+[tool.ty.rules]
+# ty exits 1 on warnings too, so the rules below are off, not warnings. pyright (above) reports the same code as visible warnings and is the ratchet; turn a rule back on
+# here once pyright's matching warning is gone. They come from dict(...) literals and SQLAlchemy's Result.rowcount that the checkers narrow too far, and import-not-found from
+# the GPU libraries (torch, open_clip, insightface, cv2, faster-whisper) that are only installed on the machine with the GPU.
+call-non-callable = "ignore"
+import-not-found = "ignore"
+invalid-assignment = "ignore"
+not-subscriptable = "ignore"
+unresolved-attribute = "ignore"
+unsupported-operator = "ignore"

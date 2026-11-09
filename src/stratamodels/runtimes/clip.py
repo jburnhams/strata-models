@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+# (the GPU stack is the optional `gpu` dependency group; this module imports it inside load(), by design)
 """Image and text embeddings with open_clip (CLIP ViT-B/32 laion2b, ViT-bigG, SigLIP, ...): one vector per picture or prompt, L2-normalised, so
 a dot product is a cosine similarity. Zero-shot labels are a softmax over the similarities to a list of prompts.
 

@@ -1,52 +1,17 @@
-"""Shared pytest configuration: every test is hermetic (its own home and data folder, no network, no stray override variables). Tests under tests/integration get the `integration` marker automatically."""
+"""Shared pytest configuration. Hermetic tests (own home and data folder, no network, no stray override variables) and the `http_server` / `live_app` fixtures come from the strata-python plugin, configured in pyproject.toml. Tests under tests/integration get the `integration` marker automatically."""
 
 import os
-import socket
 import sys
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
-TUNING = (
-    "STRATAMODELS_MODELS",
-    "STRATAMODELS_VRAM_RESERVE_GB",
-    "STRATAMODELS_DATABASE_URL",
-    "OMARCHY_DB_URL",
-    "STRATA_MODELS_URL",
-)
 
 
 def pytest_collection_modifyitems(items):
     for item in items:
         if os.sep + "integration" + os.sep in str(item.fspath):
             item.add_marker(pytest.mark.integration)
-
-
-@pytest.fixture(autouse=True)
-def isolated_env(tmp_path_factory, monkeypatch):
-    """`~/.strata-models`, the data and models folders point into a tmp dir (outside the test's own tmp_path), so nothing reads or writes the developer's real settings or data; override variables are removed."""
-    base = tmp_path_factory.mktemp("env")
-    monkeypatch.setenv("HOME", str(base / "home"))
-    monkeypatch.setenv("USERPROFILE", str(base / "home"))
-    monkeypatch.setenv("STRATAMODELS_HOME", str(base / "app-home"))
-    monkeypatch.setenv("STRATAMODELS_DATA", str(base / "data"))
-    for k in TUNING:
-        monkeypatch.delenv(k, raising=False)
-    return base
-
-
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """A test that opens an outbound connection fails at once (loopback and unix sockets are fine)."""
-    real = socket.socket.connect
-
-    def guarded(self, address, *a, **kw):
-        host = address[0] if isinstance(address, tuple) else None
-        if self.family in (socket.AF_INET, socket.AF_INET6) and host not in ("127.0.0.1", "::1", "localhost"):
-            raise AssertionError(f"tests must not use the network (tried {address!r})")
-        return real(self, address, *a, **kw)
-
-    monkeypatch.setattr(socket.socket, "connect", guarded)
 
 
 @pytest.fixture
@@ -205,7 +170,7 @@ judge = true
 primary = "wer"
 baseline = "base"
 min_effect = 0.02
-guards = { latency_s = 1000.0 }
+guards = { latency_s = 1e9 }   # the fake runs in microseconds, so latency ratios are scheduler noise (a 1000x guard failed ~1 run in 7): this test is about the wer decision, guards have tests of their own
 [[candidates]]
 name = "base"
 model = "small"

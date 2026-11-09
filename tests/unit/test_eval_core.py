@@ -38,9 +38,7 @@ def test_datasets_are_versioned_and_checked(setup, tmp_path):
 
 def test_specs_are_parsed_and_refused_when_wrong(setup):
     s = C.load_spec("fake-asr")
-    assert (
-        s.baseline == "base" and s.guards == dict(latency_s=1000.0) and s.judge and s.candidate("better").model == "big"
-    )
+    assert s.baseline == "base" and s.guards == dict(latency_s=1e9) and s.judge and s.candidate("better").model == "big"
     with pytest.raises(C.EvalError, match="no candidate"):
         s.candidate("x")
     with pytest.raises(C.EvalError, match="no experiment"):
@@ -128,6 +126,10 @@ def test_run_caches_outputs_and_analysis_decides(setup, scheduler, engine):
         ):
             assert h in text
         assert "u0" in text and '"drop": 12' in text
+        judged = dict(res, judgments=dict(n=12, strength=dict(base=(0.8, 0.5, 1.1), better=(1.25, 0.9, 1.7))))
+        jtext = R.render(judged, R.worst(s, outs, ds.items, "wer"), date="2026-11-09")
+        assert "## Human judgments" in jtext and "12 blind pairwise judgments" in jtext
+        assert jtext.index("`better`: 1.25 [0.90, 1.70]") < jtext.index("`base`: 0.80 [0.50, 1.10]")  # strongest first
         assert (
             C.forget(s, engine, "same") == 40
             and C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=["same"], limit=5, log=log.append)["ran"]
@@ -297,3 +299,51 @@ def test_a_concurrent_run_that_stored_the_same_output_first_wins(setup, schedule
     monkeypatch.undo()
     got = C.cached(engine, [k, k2])
     assert got[k].output == dict(first=True) and got[k2].output == dict(ok=1)
+
+
+def test_a_higher_is_better_guard_rejects_a_candidate_that_falls_too_far_below_the_baseline():
+    s = C.parse_spec(
+        dict(
+            name="h",
+            question="q",
+            role="r",
+            dataset="d",
+            metrics=["wer", "parsed"],
+            decision=dict(primary="wer", baseline="a", min_effect=0.02, guards=dict(parsed=2.0)),
+            candidates=[dict(name="a", model="m"), dict(name="b", model="m"), dict(name="c", model="m")],
+        )
+    )
+    better = dict(n=40, diff=-0.1, low=-0.2, high=-0.01, improves=True)
+    res = dict(
+        comparisons=dict(b=dict(wer=better), c=dict(wer=better)),
+        candidates=dict(
+            a=dict(metrics=dict(parsed=dict(value=1.0))),
+            b=dict(metrics=dict(parsed=dict(value=0.3))),  # under 1/2 of the baseline: broken
+            c=dict(metrics=dict(parsed=dict(value=0.9))),  # within the guard
+        ),
+    )
+    d = C.decide(s, res, [], lambda _name: [], "a")
+    assert (
+        d["per_candidate"]["b"]["verdict"] == "reject"
+        and "parsed 0.30x the baseline (limit 1/2)" in d["per_candidate"]["b"]["why"]
+    )
+    assert d["per_candidate"]["c"]["verdict"] == "adopt" and d["recommendation"] == "c" and d["change"]
+
+
+def test_report_numbers_are_formatted_by_unit():
+    from types import SimpleNamespace
+
+    pct, sec, plain = SimpleNamespace(unit="%"), SimpleNamespace(unit="s"), SimpleNamespace(unit="")
+    assert [R._v(m, x) for m, x in ((pct, 0.1234), (sec, 1.2345), (plain, 0.5), (sec, None), (pct, float("nan")))] == [
+        "12.34%",
+        "1.234 s",
+        "0.5000",
+        "n/a",
+        "n/a",
+    ]
+    assert [R._d(m, x) for m, x in ((pct, -0.05), (sec, 0.25), (plain, 0.25), (sec, None))] == [
+        "-5.00 pts",
+        "+0.250 s",
+        "+0.250",
+        "n/a",
+    ]
