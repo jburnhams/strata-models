@@ -41,6 +41,19 @@ can be compared and revisited when a new model appears.
   a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
   the words are scored against the text that was to be spoken, an intelligibility guard for text to speech.
 
+## Pipelines: a step before the candidate
+A candidate can run **stages** before its own job (`[[candidates.stages]]`: role, optional model, params, `input` template over the item's
+fields, the `send` param that carries it, the `into` param its answer replaces). The first use: a text model turns a short image prompt into a
+detailed caption (`role = "text"`, `system_preset = "image-prompt-*"`, see `runtimes/presets/`), then the image model draws it.
+- Each stage's output is cached under its own key, so candidates that share a first step run it once; stages run level by level, grouped by
+  model, so a text model loads once and not once per item between pictures.
+- The end result keeps every step under `pipeline` (sent, answered, model, run time). Its `latency_s` is all of the steps' run time together.
+- **Blind judging shows only the end result**: the steps would tell the candidates apart. After a judgment the Judge tab unblinds the last
+  pair with its steps; the **Outputs** tab (`GET /api/evals/{name}/outputs`) shows every candidate's output for every item with each step's
+  input and output, and the write-up has a **Pipelines** section (words in and out, step time, examples).
+- A failed stage fails the output (the error names the stage) without running the candidate's job.
+- `forget` keeps shared stage outputs unless asked (`stages=True`).
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

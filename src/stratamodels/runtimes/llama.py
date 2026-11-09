@@ -16,6 +16,8 @@ params:
   prompt       the question or instruction (or preset: a prompt kept in this package, see presets/; its {context} is filled from `context`)
   context      a dict of facts about the picture (capture metadata), given to a preset prompt
   schema       a JSON schema the answer must follow (grammar-constrained); a preset brings its own. Off with schema=false.
+  system_preset  a system prompt kept in this package (presets/<name>.md), instead of `system`: e.g. image-prompt-bfl, the prompt that turns a
+               short image request into a detailed caption
   system, max_tokens (default 2048), temperature (default 0.2), seed (default 0), think (default false: thinking models answer directly)
 Result: {text, json (when a schema was used and the answer parses), tokens_in, tokens_out, seconds, peak_vram_mb, model}."""
 
@@ -47,6 +49,7 @@ PARAMS = {
     "context",
     "schema",
     "system",
+    "system_preset",
     "max_tokens",
     "temperature",
     "seed",
@@ -194,10 +197,15 @@ def request(params):
         text = params.get("prompt")
         if not isinstance(text, str) or not text.strip():
             raise RunError("give a prompt (or a preset)")
+    system = params.get("system")
+    if params.get("system_preset"):
+        if system:
+            raise RunError("give a system or a system_preset, not both")
+        system = preset(params["system_preset"])[0].strip()
     imgs = params.get("images") or ([params["image"]] if params.get("image") else [])
     if not isinstance(imgs, list):
         raise RunError("images is a list of paths")
-    msgs = ([{"role": "system", "content": str(params["system"])}] if params.get("system") else []) + [
+    msgs = ([{"role": "system", "content": str(system)}] if system else []) + [
         {"role": "user", "content": [_image_part(i) for i in imgs] + [{"type": "text", "text": text}]}
     ]
     body = dict(

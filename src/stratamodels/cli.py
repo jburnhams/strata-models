@@ -219,7 +219,7 @@ def cmd_eval(args):
         print(json.dumps(res, indent=1, default=str))
         return 0
     ds, outs, _ = C.outputs_for(spec, engine)
-    text = R.render(res, R.worst(spec, outs, ds.items, spec.primary))
+    text = R.render(res, R.worst(spec, outs, ds.items, spec.primary), pipelines=R.pipelines(spec, outs, ds.items))
     if args.out:
         with open(args.out, "w", encoding="utf8") as f:
             f.write(text)

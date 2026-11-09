@@ -46,8 +46,9 @@ def _p(p):
     return "n/a" if p is None or (isinstance(p, float) and math.isnan(p)) else ("< 0.001" if p < 0.001 else f"{p:.3f}")
 
 
-def render(res, examples=None, date=None):
-    """Markdown for one analysis (core.analyse). `examples`: {candidate: [(item_id, text)]} of failures or worst items, shown under Failures."""
+def render(res, examples=None, date=None, pipelines=None):
+    """Markdown for one analysis (core.analyse). `examples`: {candidate: [(item_id, text)]} of failures or worst items, shown under Failures.
+    `pipelines` (from pipelines()): what each pipeline candidate's steps were sent and answered, shown under Pipelines."""
     e = res["experiment"]
     ds = res["dataset"]
     dec = res["decision"]
@@ -85,9 +86,19 @@ def render(res, examples=None, date=None):
     L += ["- **Candidates** (baseline first):", ""]
     L += ["| Candidate | Model | Params | Load options |", "|---|---|---|---|"]
     for c in sorted(e["candidates"], key=lambda c: c["name"] != base):
+        chain = "".join("`" + (st.get("model") or st["role"]) + "` → " for st in c.get("stages") or [])
         L.append(
-            f"| `{c['name']}`{' (baseline)' if c['name'] == base else ''} | `{c['model']}` | `{json.dumps(c['params'], sort_keys=True)}` | `{json.dumps(c['options'], sort_keys=True)}` |"
+            f"| `{c['name']}`{' (baseline)' if c['name'] == base else ''} | {chain}`{c['model']}` | `{json.dumps(c['params'], sort_keys=True)}` | `{json.dumps(c['options'], sort_keys=True)}` |"
         )
+    staged = [c for c in e["candidates"] if c.get("stages")]
+    if staged:
+        L += ["", "Pipeline steps (each runs before the candidate's own job; its answer replaces the named param):", ""]
+        for c in staged:
+            for i, st in enumerate(c["stages"], 1):
+                L.append(
+                    f"- `{c['name']}` step {i}: role `{st['role']}`, model `{st.get('model') or '(the role default)'}`, params `{json.dumps(st['params'], sort_keys=True)}`, sent `{st['input']}` as `{st['send']}`, answer into `{st['into']}`"
+                    + (f". {st['note']}" if st.get("note") else "")
+                )
     L += [
         "",
         "## Results",
@@ -154,6 +165,24 @@ def render(res, examples=None, date=None):
         L.append(
             f"| `{n}` | {c['done']} | {c['failed']} | {_v(M.METRICS['latency_s'], lat.get('value'))}, {_v(M.METRICS['latency_s'], lat.get('p95'))} | {load} |"
         )
+    if pipelines:
+        L += [
+            "",
+            "## Pipelines",
+            "",
+            "What each pipeline's steps were sent and answered (all of them: the Outputs tab; the judges saw only the end result).",
+            "",
+            "| Candidate | Words in, out (mean) | Step time per item (mean) | Failed steps |",
+            "|---|---|---|---|",
+        ]
+        for n, p in pipelines.items():
+            L.append(f"| `{n}` | {p['words_in']:.0f}, {p['words_out']:.0f} | {p['stage_s']:.1f} s | {p['failed']} |")
+        for n, p in pipelines.items():
+            L += ["", f"`{n}`:"]
+            for item_id, steps in p["examples"]:
+                L.append(f"- `{item_id}`:")
+                for sent, answer in steps:
+                    L += [f"  - sent: {sent}", f"  - answered: {answer}"]
     L += ["", "## Failures and worst items", ""]
     if examples:
         for n, ex in examples.items():
@@ -211,4 +240,30 @@ def worst(spec, res_outputs, items, metric, k=5):
             text = M.transcript(o[0])[:160] if spec.role.startswith("transcribe") else ""
             rows.append((bad, it["id"], f"{metric} {_v(m, v)}" + (f': "{text}"' if text else "")))
         out[n] = [(i, t) for _, i, t in sorted(rows, key=lambda r: -r[0])[:k]]
+    return out
+
+
+def pipelines(spec, res_outputs, items, k=2):
+    """{pipeline candidate: dict(words_in, words_out, stage_s, failed, examples=[(item_id, [(sent, answered) per step])])}: the first `k` items with
+    every step's text, and means over all its outputs. Words in = the item's input to the first step, out = what the last step answered."""
+    out = {}
+    for c in spec.candidates:
+        if not c.stages:
+            continue
+        win, wout, secs, ex, failed = [], [], [], [], 0
+        for it, o in zip(items, res_outputs.get(c.name) or []):
+            if o is None:
+                continue
+            trace = (o[0] or {}).get("pipeline") if isinstance(o[0], dict) else None
+            if not trace:
+                failed += 1 if o[1] and "stage" in o[1] else 0
+                continue
+            steps = trace[:-1]
+            win.append(len(str(steps[0]["sent"]).split()))
+            wout.append(len(str(steps[-1]["answer"]).split()))
+            secs.append(sum(t.get("run_s") or 0 for t in steps))
+            if len(ex) < k:
+                ex.append((it["id"], [(t["sent"], t["answer"]) for t in steps]))
+        mean = lambda v: sum(v) / len(v) if v else float("nan")
+        out[c.name] = dict(words_in=mean(win), words_out=mean(wout), stage_s=mean(secs), failed=failed, examples=ex)
     return out

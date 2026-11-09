@@ -1,0 +1,1 @@
+Rewrite the user's image prompt as a rich, detailed description of the scene, for a text-to-image model. Keep everything the prompt asks for. Output only the description, as one paragraph of plain prose.

@@ -1,3 +1,6 @@
 Third-party material used or ported (see docs/progress.md for context):
 
 Structure, build configuration, test harness and conventions extracted from strata-360 and strata-stills.
+
+src/stratamodels/runtimes/presets/image-prompt-bfl.md is the "t2i" system prompt from Black Forest Labs' system_prompts.json
+(https://huggingface.co/black-forest-labs/flux-3-image-klein-pup), Apache-2.0.

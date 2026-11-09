@@ -48,6 +48,16 @@ export const evalFixtures = {
     decision: { per_candidate: { turbo: { verdict: 'unclear', why: 'difference -0.20 points, interval includes no change', gain: -0.002 } }, recommendation: 'large-v3', change: false },
     judgments: { n: 12, strength: { 'large-v3': [1.2, 0.8, 1.6], turbo: [0.8, 0.5, 1.1] } },
   }),
+  outputs: () => ({
+    candidates: [{ name: 'large-v3', model: 'whisper-large-v3', params: {}, options: {}, note: '' }, { name: 'turbo', model: 'whisper-large-v3-turbo', params: {}, options: {}, note: '' }, { name: 'small', model: 'whisper-small', params: {}, options: {}, note: '' }],
+    items: [
+      { id: 'u1', input: { prompt: 'a cat' }, has_media: false, reference: null, outputs: {
+        'large-v3': { output: { segments: [{ text: ' plain cat' }] }, error: null, run_s: 1.5 },
+        turbo: { output: { segments: [{ text: ' rich cat' }], pipeline: [{ role: 'text', model: 'qwen3.5-9b-vl', sent: 'a cat', answer: 'a fluffy ginger cat asleep on a windowsill', run_s: 4.2 }, { role: 'transcribe', model: 'whisper-large-v3-turbo', sent: 'a fluffy ginger cat asleep on a windowsill', run_s: 1.1 }] }, error: null, run_s: 5.3 },
+        small: { output: null, error: 'stage 1 (qwen3.5-9b-vl): out of memory' } } },
+      { id: 'u2', input: { prompt: 'a dog' }, has_media: false, reference: null, outputs: { 'large-v3': { output: { segments: [{ text: ' dog' }] }, error: null }, turbo: null, small: null } },
+    ],
+  }),
   pair: (): Pair => ({ similarity: 0.62, item_id: 'u1', input: { language: 'en' }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
 }
 
@@ -82,6 +92,7 @@ export const handlers = [
   http.post('/api/evals/:name/run', ({ params }) => { mock.calls.push(`run ${params.name}`); mock.run = { state: 'running', log: ['transcribe-en: 0 of 400 outputs cached, 400 to run'] }; return HttpResponse.json(mock.run, { status: 202 }) }),
   http.get('/api/evals/:name/report', () => HttpResponse.text('# transcribe-en: Which Whisper model for English?\n\n## Answer\n')),
   http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair(), remaining: 12 })),
+  http.get('/api/evals/:name/outputs', ({ request }) => { const item = new URL(request.url).searchParams.get('item_id'); const d = evalFixtures.outputs(); return HttpResponse.json(item ? { ...d, items: d.items.filter(i => i.id === item) } : d) }),
   http.post('/api/evals/:name/judgments', async ({ request }) => { const b = (await request.json()) as { winner: string }; mock.calls.push(`judge ${b.winner}`); return HttpResponse.json({ ok: true, x: 'turbo', y: 'large-v3', winner: b.winner }, { status: 201 }) }),
   http.get('/api/evals/:name', ({ params }) => params.name === 'nope' ? HttpResponse.json({ detail: 'no experiment' }, { status: 404 }) : HttpResponse.json(mock.analysis)),
   http.get('/api/settings', () => HttpResponse.json(mock.settings)),
