@@ -80,4 +80,13 @@ describe('Judging pictures', () => {
     expect(await screen.findByRole('img', { name: 'Output X' })).toBeInTheDocument()
     expect(screen.getByText('Prompt: two hands')).toBeInTheDocument()
   })
+
+  it('plays the two spoken outputs and shows the text they say', async () => {
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { item_id: 'n001', input: { text: 'Two hundred kilometres behind me.' }, has_media: false, reference: { text: 'Two hundred kilometres behind me.' }, x: { path: '/d/generated/tts-a.wav', duration_s: 2 }, y: { path: '/d/generated/tts-b.wav', duration_s: 2.2 }, token: 't' } })))
+    setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    expect(await screen.findByLabelText('Output X, spoken')).toHaveAttribute('src', expect.stringContaining(encodeURIComponent('/d/generated/tts-a.wav')))
+    expect(screen.getByLabelText('Output Y, spoken').tagName).toBe('AUDIO')
+    expect(screen.getByText('Text: Two hundred kilometres behind me.')).toBeInTheDocument()
+    expect(screen.queryByText(/^Reference:/)).not.toBeInTheDocument()
+  })
 })

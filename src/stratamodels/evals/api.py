@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from stratamodels.db.models import EvalJudgment
-from stratamodels.evals import core as C, report as R
+from stratamodels.evals import core as C, metrics as M, report as R
 
 SECRET = secrets.token_bytes(16)          # signs judging tokens for this process's life: a token says which output was X without the page knowing
 
@@ -62,7 +62,7 @@ def mount(app, scheduler):
         from stratamodels.db.models import EvalJudgment as J, EvalResult as Rr
         with C.session(engine()) as ses:
             sig = (C._canon(s.to_json()), ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)), ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
-                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset, engine=engine()).version)
+                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset, engine=engine()).version, C.SCORED[0])
         hit = memo.get(s.name)
         if hit and hit[0] == sig: return hit[1]
         res = C.analyse(s, engine()); memo[s.name] = (sig, res); return res
@@ -110,7 +110,7 @@ def mount(app, scheduler):
     @app.get('/api/evals/{name}/report', response_class=PlainTextResponse)
     def get_report(name: str):
         s = spec_or_404(name); res = analysis(s); ds, outs, _ = C.outputs_for(s, engine())
-        return R.render(res, R.worst(s, outs, ds.items, s.primary))
+        return R.render(res, R.worst(s, outs, ds.items, s.primary if s.primary != 'judged' else next((m for m in s.metrics if M.METRICS[m].score), s.primary)))
 
     @app.get('/api/evals/{name}/pair')
     def get_pair(name: str):
@@ -126,6 +126,7 @@ def mount(app, scheduler):
                     key = (s.similarity, hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest())    # the outputs themselves: a rerun after forget, or another kind, is scored again
                     if key not in sims: sims[key] = SIM.similarity(oa, ob, s.similarity or None)
                     if sims[key] < 0.9999: pairs.append((sims[key], i, a, b))                                    # identical outputs teach nothing: not shown
+        if s.primary == 'judged': pairs = [p for p in pairs if s.baseline in p[2:]]                                          # decided head to head with the baseline: only those pairs
         if not pairs: return dict(pair=None)
         current = {(c.name, it['id']): C.result_key(s, c, it) for c in s.candidates for it in ds.items}
         with C.session(engine()) as ses:                                                                     # a judgment of outputs that are no longer the candidates' does not count

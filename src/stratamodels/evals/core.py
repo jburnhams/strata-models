@@ -30,7 +30,7 @@ reads the tables. Without an engine (scripts, the offline CLI) the files are rea
 
 Outputs are cached in eval_results under a key of everything that decides them, so adding a candidate runs only that candidate, and a rerun of
 an unchanged experiment runs nothing."""
-import dataclasses, hashlib, json, os, time, tomllib
+import contextlib, dataclasses, hashlib, json, math, os, time, tomllib
 
 from sqlalchemy import select
 
@@ -186,6 +186,7 @@ class Spec:
     judge: bool = False                    # offer the blind A/B judging page for this experiment
     similarity: str = ''                   # how outputs are compared to order judging (evals.similarity: text, image, json); '' picks from the outputs
     source: str = ''
+    score: dict = dataclasses.field(default_factory=dict)     # a second model that reads each output for the metrics (TTS: transcribe the audio back): {role, model?, params}
 
     def candidate(self, name):
         c = next((c for c in self.candidates if c.name == name), None)
@@ -194,7 +195,7 @@ class Spec:
 
     def to_json(self):
         return dict(name=self.name, question=self.question, role=self.role, dataset=self.dataset, metrics=self.metrics, candidates=[c.to_json() for c in self.candidates],
-                    primary=self.primary, baseline=self.baseline, min_effect=self.min_effect, guards=self.guards, judge=self.judge, similarity=self.similarity, source=self.source)
+                    primary=self.primary, baseline=self.baseline, min_effect=self.min_effect, guards=self.guards, judge=self.judge, similarity=self.similarity, source=self.source, score=self.score)
 
 
 def parse_spec(d, source=''):
@@ -202,12 +203,14 @@ def parse_spec(d, source=''):
         dec = d.get('decision') or {}; cands = [Candidate(name=str(c['name']), model=str(c['model']), params=dict(c.get('params') or {}), options=dict(c.get('options') or {}), note=str(c.get('note', ''))) for c in d['candidates']]
         s = Spec(name=str(d['name']), question=str(d['question']), role=str(d['role']), dataset=str(d['dataset']), metrics=list(d['metrics']), candidates=cands,
                  primary=str(dec.get('primary') or d['metrics'][0]), baseline=str(dec.get('baseline') or cands[0].name), min_effect=float(dec.get('min_effect', 0.0)),
-                 guards={k: float(v) for k, v in (dec.get('guards') or {}).items()}, judge=bool(d.get('judge', False)), similarity=str(d.get('similarity', '')), source=source)
+                 guards={k: float(v) for k, v in (dec.get('guards') or {}).items()}, judge=bool(d.get('judge', False)), similarity=str(d.get('similarity', '')), source=source, score=dict(d.get('score') or {}))
+        if s.score and not s.score.get('role'): raise ValueError('[score] names no role')
     except (KeyError, TypeError, ValueError, IndexError) as e: raise EvalError(f'{source or "spec"}: {e!r}')
     unknown = [m for m in s.metrics + [s.primary] + list(s.guards) if m not in M.METRICS]
     if unknown: raise EvalError(f'{s.name}: unknown metrics {unknown} (known: {", ".join(M.METRICS)})')
     from stratamodels.evals import similarity as SIM
     if s.similarity and s.similarity not in SIM.KINDS: raise EvalError(f'{s.name}: unknown similarity {s.similarity!r} (known: {", ".join(SIM.KINDS)})')
+    if s.primary == 'judged': s.judge = True                                        # decided by people: the Judge tab must be on
     if s.primary not in s.metrics: s.metrics.insert(0, s.primary)
     for g in s.guards:
         if g not in s.metrics: s.metrics.append(g)
@@ -306,7 +309,47 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
                            error=None if j['status'] == 'done' else (j.get('error') or j['status']), run_s=j.get('run_s'), load_s=j.get('load_s'), job_id=j.get('id')) for c, it, k, j in done]
         failed += sum(1 for *_, j in done if j['status'] != 'done'); save(engine, rows)
         log(f'  {min(i + batch, len(todo))} of {len(todo)} run')
-    return dict(ran=len(todo), cached=total - len(todo), failed=failed)
+    out = dict(ran=len(todo), cached=total - len(todo), failed=failed)
+    if spec.score: out['scored'] = score_outputs(spec, engine, executor, [result_key(spec, c, it) for c in cands for it in items], log, batch)
+    return out
+
+
+def score_key(spec): return _h(_canon(spec.score), 16)
+
+
+SCORED = [0]          # bumped each time the [score] pass writes readings: they change outputs in place (same rows, same ids), so the API's analysis memo watches this
+
+
+def readings(output):
+    """{score key: {result} or {error}} of an output: every [score] config's reading is kept apart (an output is shared by every experiment whose
+    candidate made it, and two experiments may read it with different transcribers). A reading from before they were kept apart counts under its key."""
+    out = dict((output or {}).get('scores') or {}); old = (output or {}).get('scored')
+    if isinstance(old, dict) and old.get('key') and old['key'] not in out: out[old['key']] = {k: v for k, v in old.items() if k != 'key'}
+    return out
+
+
+def score_outputs(spec, engine, executor, keys, log=print, batch=32):
+    """The [score] pass: every stored output with a file (`path`) and no reading by the current scoring config gets one: a job on the scoring
+    role with path = the output's file, whose result is kept in the output under `scores` = {score key: {result} or {error}}. Returns how many ran."""
+    sk = score_key(spec); rows = [r for r in cached(engine, keys).values() if r.output and isinstance(r.output.get('path'), str) and sk not in readings(r.output)]
+    if rows: log(f'{spec.name}: scoring {len(rows)} outputs with {spec.score["role"]}')
+    for i in range(0, len(rows), batch):
+        chunk = rows[i:i + batch]; ids = [executor.submit(spec.score['role'], {**(spec.score.get('params') or {}), 'path': r.output['path']}, spec.score.get('model'), None) for r in chunk]
+        done = {r.key: executor.wait(jid) for r, jid in zip(chunk, ids)}
+        with session(engine) as s:
+            for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(list(done)))):
+                j = done[r.key]; reading = dict(result=j.get('result')) if j['status'] == 'done' else dict(error=j.get('error') or j['status'])
+                r.output = {**{k: v for k, v in r.output.items() if k != 'scored'}, 'scores': {**readings(r.output), sk: reading}}
+            s.commit()
+        SCORED[0] += 1
+        log(f'  {min(i + batch, len(rows))} of {len(rows)} scored')
+    return len(rows)
+
+
+def scored_view(spec, output):
+    """The output as the metrics see it for this spec: `scored` is the reading by this spec's [score] config (None when not read yet)."""
+    if not spec.score or not isinstance(output, dict): return output
+    return {**output, 'scored': readings(output).get(score_key(spec))}
 
 
 def save(engine, rows):
@@ -356,7 +399,7 @@ def outputs_for(spec, engine, dataset=None):
     ds = dataset or load_dataset(spec.dataset, engine=engine); out, runs = {}, {}
     for c in spec.candidates:
         keys = [result_key(spec, c, it) for it in ds.items]; have = cached(engine, keys)
-        out[c.name] = [(have[k].output, have[k].error) if k in have else None for k in keys]
+        out[c.name] = [(scored_view(spec, have[k].output), have[k].error) if k in have else None for k in keys]
         runs[c.name] = [dict(run_s=have[k].run_s, load_s=have[k].load_s) if k in have else None for k in keys]
     return ds, out, runs
 
@@ -379,22 +422,55 @@ def analyse(spec, engine, dataset=None, seed=None):
     res = dict(experiment=spec.to_json(), dataset=dict(ds.to_json(), compared=len(complete)), candidates={}, comparisons={}, metrics={m: M.METRICS[m].to_json() for m in spec.metrics})
     for n in names:
         done = sum(o is not None for o in outs[n]); loads = [r['load_s'] for r in runs[n] if r and r.get('load_s')]
-        res['candidates'][n] = dict(done=done, failed=sum(1 for o in outs[n] if o and o[1]), load_s=max(loads) if loads else None, metrics={m: M.summarise(m, its(n), oo(n), seed) for m in spec.metrics} if complete else {})
+        res['candidates'][n] = dict(done=done, failed=sum(1 for o in outs[n] if o and o[1]), load_s=max(loads) if loads else None, metrics={m: M.summarise(m, its(n), oo(n), seed) for m in spec.metrics if m != 'judged'} if complete else {})
+    current = {(c.name, it['id']): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
+    j = judgments(engine, spec.name, current)
+    jcomp = {n: judged_vs(j, n, spec.baseline) for n in names if n != spec.baseline}
+    if 'judged' in spec.metrics:
+        for n in names: res['candidates'][n]['metrics']['judged'] = judged_share(j, n)
     base = spec.baseline; pvals = []
     for n in names:
         if n == base or not complete: continue
-        res['comparisons'][n] = {m: M.compare(m, items, oo(base), oo(n), seed) for m in spec.metrics if m != 'latency_s'}       # latency: each side's own run time, below
+        res['comparisons'][n] = {m: M.compare(m, items, oo(base), oo(n), seed) for m in spec.metrics if m not in ('latency_s', 'judged')}       # latency: each side's own run time, below
         if 'latency_s' in spec.metrics:
             a = [M.METRICS['latency_s'].score(it, *o) for it, o in zip(its(base), oo(base))]; b = [M.METRICS['latency_s'].score(it, *o) for it, o in zip(its(n), oo(n))]
             r = S.paired_diff([x if x is not None else float('nan') for x in a], [y if y is not None else float('nan') for y in b], seed=seed)
             r['improves'] = None if r['n'] == 0 else (True if r['high'] < 0 else False if r['low'] > 0 else None); res['comparisons'][n]['latency_s'] = r
+        if 'judged' in spec.metrics: res['comparisons'][n]['judged'] = jcomp.get(n) or judged_vs([], n, base)
         pvals.append((n, res['comparisons'][n][spec.primary]['p']))
     for (n, _), adj in zip(pvals, S.holm([p for _, p in pvals])): res['comparisons'][n][spec.primary]['p_holm'] = adj
     res['decision'] = decide(spec, res, items, oo, base)
-    current = {(c.name, it['id']): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
-    j = judgments(engine, spec.name, current)
     if j: res['judgments'] = dict(n=len(j), strength={k: list(v) for k, v in S.bradley_terry_ci(j, names, b=500, seed=seed).items()})
     return res
+
+
+def _tally(j, n, against=None):
+    """(wins, losses, ties) of candidate n in judgments j, against one other candidate or any."""
+    w = l = t = 0
+    for a, b, win in j:
+        if n not in (a, b) or a == b or (against is not None and against not in (a, b)): continue
+        if win == n: w += 1
+        elif win == 'tie': t += 1
+        else: l += 1
+    return w, l, t
+
+
+def judged_share(j, n):
+    """Share of all its judged pairs a candidate won (ties half), with its Wilson interval."""
+    w, l, t = _tally(j, n); k = w + l + t
+    v, lo, hi = S.wilson(w + t / 2, k) if k else (float('nan'),) * 3
+    return dict(value=v, low=lo, high=hi, n=k)
+
+
+def judged_vs(j, n, base):
+    """Head to head with the baseline: the share of their pairs n won (ties half) minus one half, its Wilson interval, a two-sided sign test on
+    the decided pairs; improves when the whole interval is above one half."""
+    import math
+    w, l, t = _tally(j, n, base); k = w + l + t
+    if not k: return dict(n=0, wins=0, losses=0, ties=0, diff=float('nan'), low=float('nan'), high=float('nan'), p=1.0, improves=None)
+    v, lo, hi = S.wilson(w + t / 2, k); d = w + l
+    p = min(1.0, 2 * sum(math.comb(d, i) for i in range(0, min(w, l) + 1)) / 2 ** d) if d else 1.0
+    return dict(n=k, wins=w, losses=l, ties=t, mean_a=1 - v, mean_b=v, diff=v - 0.5, low=lo - 0.5, high=hi - 0.5, p=p, improves=True if lo > 0.5 else False if hi < 0.5 else None)
 
 
 def decide(spec, res, items, oo, base):
@@ -416,10 +492,12 @@ def decide(spec, res, items, oo, base):
         elif c['improves'] is False: verdict, why = 'reject', f'{spec.primary} worse by {_fmt(m, -gain)}'
         else:
             need = None
-            if m.shape != 'dataset' and spec.min_effect:
+            if m.shape == 'judged' and spec.min_effect: need = math.ceil((0.98 / spec.min_effect) ** 2)       # pairs with the baseline for a 95 % interval of +-min_effect
+            elif m.shape != 'dataset' and spec.min_effect:
                 d = [(lambda x, y: None if x is None or y is None else (y[0] / max(y[1], 1) - x[0] / max(x[1], 1)) if m.shape == 'ratio' else float(y) - float(x))(m.score(it, *a), m.score(it, *b)) for it, a, b in zip(items, oo(base), oo(n))]
                 need = S.items_needed(d, spec.min_effect)
-            verdict, why = 'unclear', f'difference {_fmt(m, gain)}, interval includes no change' + (f'; about {need} items would show a {_fmt(m, spec.min_effect)} difference' if need else '')
+            unit = 'judged pairs with the baseline' if m.shape == 'judged' else 'items'
+            verdict, why = 'unclear', f'difference {_fmt(m, gain)}, interval includes no change' + (f'; about {need} {unit} would show a {_fmt(m, spec.min_effect)} difference' if need else '')
         out[n] = dict(verdict=verdict, why=why, gain=gain)
     best = max((n for n, v in out.items() if v['verdict'] == 'adopt'), key=lambda n: out[n]['gain'], default=None)
     return dict(per_candidate=out, recommendation=best or base, change=best is not None)

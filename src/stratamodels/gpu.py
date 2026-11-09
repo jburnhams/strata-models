@@ -21,8 +21,15 @@ def command_of(pid):
     parts[0] = os.path.basename(parts[0]); return ' '.join(parts)[:300]
 
 
-def query(run=subprocess.run, own_pid=None):
-    """The card's state now, or None without an NVIDIA GPU."""
+def parent_of(pid):
+    """The parent pid of a process, or None (on Linux, from /proc; elsewhere unknown)."""
+    try:
+        with open(f'/proc/{int(pid)}/stat') as f: return int(f.read().rsplit(')', 1)[1].split()[1])
+    except (OSError, ValueError, IndexError): return None
+
+
+def query(run=subprocess.run, own_pid=None, parent=parent_of):
+    """The card's state now, or None without an NVIDIA GPU. A process is `ours` when it is this service or one of its children (model workers)."""
     try:
         g = run(['nvidia-smi', '--query-gpu=' + ','.join(GPU_FIELDS), '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=10)
         p = run(['nvidia-smi', '--query-compute-apps=pid,used_memory', '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=10)
@@ -33,7 +40,7 @@ def query(run=subprocess.run, own_pid=None):
     own = os.getpid() if own_pid is None else own_pid; procs = []
     for line in (p.stdout or '').strip().splitlines() if p.returncode == 0 else []:
         a = [s.strip() for s in line.split(',')]
-        if len(a) >= 2 and a[0].isdigit(): procs.append(dict(pid=int(a[0]), used_mb=_num(a[1]) or 0.0, command=command_of(a[0]), ours=int(a[0]) == own))
+        if len(a) >= 2 and a[0].isdigit(): procs.append(dict(pid=int(a[0]), used_mb=_num(a[1]) or 0.0, command=command_of(a[0]), ours=int(a[0]) == own or parent(a[0]) == own))      # a model's worker process (venv-worker) is ours too
     total, used = _num(v[1]) or 0.0, _num(v[2]) or 0.0
     return dict(name=v[0], total_mb=total, used_mb=used, free_mb=max(total - used, 0.0), util_pct=_num(v[3]), temp_c=_num(v[4]), power_w=_num(v[5]), power_limit_w=_num(v[6]), processes=procs)
 

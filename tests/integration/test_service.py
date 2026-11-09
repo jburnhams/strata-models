@@ -19,6 +19,8 @@ def test_run_submit_wait_and_failures(service):
     with pytest.raises(sm.JobFailed, match='no role'): sm.run('nope', {}, app='it')
     with pytest.raises(sm.JobFailed, match="does not serve"): sm.faces('/x.jpg', app='it', model='echo-small')
     with pytest.raises(sm.JobFailed, match="does not serve"): sm.transcribe('/a.wav', app='it', model='buffalo_l', clip=(0, 1))
+    with pytest.raises(sm.JobFailed, match="does not serve"): sm.speak('hello', app='it', model='buffalo_l', voice=__file__)
+    assert sm.role_model('echo') == 'echo-small' and sm.role_model('nope') is None
     hist = get(service, '/api/jobs?app=it')['items']
     assert [x['status'] for x in hist[:2]] == ['failed', 'done']
     assert get(service, '/api/status')['resident'][0]['model'] == 'echo-small'

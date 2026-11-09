@@ -13,3 +13,14 @@
 
 ## 2026-11-09: faces `pad` view
 A view can now pad the picture (`{pad: 2}`: centred on a mid-grey canvas twice its size, after any crop, before any turn). buffalo_l at det_size 640 misses faces that fill the frame: on strata-stills' pictures 1 in 5 faces over 20 % of the frame went unfound. On 37 pictures where a vision model saw a medium or large face and the detector did not, a pad 2 look found one in 59 % (a plain second look 16 %), with nothing lost on 60 that were already found. Geometry tests: `tests/unit/test_faces_views.py`.
+
+## 2026-11-09: text to speech (role `speak`)
+- strata-360 spoke its voice-over with Kokoro-82M v1.0 (kokoro-onnx, CPU), voice bm_lewis at speed 1.0 (Legends' saved choice); it also had an
+  ElevenLabs path, switched off. Those are the baseline of eval `speak-narration`.
+- Chatterbox (`chatterbox-tts` 0.1.7) pins torch 2.6 and Qwen3-TTS (`qwen-tts` 0.1.1) brings torch 2.15 (CUDA 13.2): neither can share the
+  service's venv (torch 2.11, onnxruntime-gpu pinned for CUDA 12). New runtime `venv-worker`: a long-lived worker process per model in its own
+  venv (`scripts/setup_worker_venv.sh`), JSON lines over stdin/stdout. The worker's GPU memory counts as the service's own (gpu.query treats
+  child processes as ours).
+- Chatterbox Turbo refuses a reference recording under 5 s. Qwen3-TTS clones closer with the reference's words (`voice_text`).
+- The runner's voice for cloning is cut from Legends' race audio (wearer segments, `audio_clean.flac`): about 21 s, wind and breathing
+  included. A clean 20-30 s recording read indoors would be a better reference.

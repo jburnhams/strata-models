@@ -201,6 +201,72 @@ licence = "MIT (weights: LAION)"
 source = "https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 used_by = ["strata-stills"]
 
+[roles.speak]
+description = "Text to speech: narration from a script line, in a preset, described or cloned voice"
+model = "kokoro-v1"                          # strata-360's voice-over today (bm_lewis); eval speak-narration decides
+
+# Text to speech runs in venvs of its own (runtime venv-worker, worker script stratamodels/workers/tts.py): Chatterbox pins torch 2.6 and
+# Qwen3-TTS a transformers the service does not share. Make a venv with scripts/setup_worker_venv.sh NAME.
+[models.kokoro-v1]
+runtime = "venv-worker"
+name = "Kokoro-82M v1.0 (ONNX)"
+roles = ["speak"]
+vram_gb = 0.0                                # runs on the CPU (onnxruntime), as it did in strata-360
+licence = "Apache-2.0"
+source = "https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0"
+used_by = ["strata-360"]
+options = { worker = "tts", venv = "kokoro", engine = "kokoro" }
+
+[models.chatterbox]
+runtime = "venv-worker"
+name = "ResembleAI/chatterbox"
+roles = ["speak"]
+vram_gb = 4.0
+licence = "MIT"
+source = "https://huggingface.co/ResembleAI/chatterbox"
+used_by = []
+options = { worker = "tts", venv = "chatterbox", engine = "chatterbox" }
+
+[models.chatterbox-turbo]
+runtime = "venv-worker"
+name = "ResembleAI/chatterbox-turbo"
+roles = ["speak"]
+vram_gb = 3.0
+licence = "MIT"
+source = "https://huggingface.co/ResembleAI/chatterbox-turbo"
+used_by = []
+options = { worker = "tts", venv = "chatterbox", engine = "chatterbox-turbo" }
+
+[models.qwen3-tts-custom]
+runtime = "venv-worker"
+name = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+roles = ["speak"]
+vram_gb = 6.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+used_by = []
+options = { worker = "tts", venv = "qwen3-tts", engine = "qwen3-custom" }
+
+[models.qwen3-tts-design]
+runtime = "venv-worker"
+name = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+roles = ["speak"]
+vram_gb = 6.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+used_by = []
+options = { worker = "tts", venv = "qwen3-tts", engine = "qwen3-design" }
+
+[models.qwen3-tts-clone]
+runtime = "venv-worker"
+name = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+roles = ["speak"]
+vram_gb = 6.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+used_by = []
+options = { worker = "tts", venv = "qwen3-tts", engine = "qwen3-clone" }
+
 [roles.face-kind]
 description = "Is a detected face a real person, or a statue, picture, toy or animal (before judging skin colour or matching people)"
 model = "face-kind-clip-b32"
