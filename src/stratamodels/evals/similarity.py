@@ -22,7 +22,7 @@ import numpy as np
 
 from stratamodels.evals import metrics as M
 
-VOLATILE = ('seconds', 'peak_vram_mb', 'path')       # never a difference in themselves (for images the picture behind `path` is compared)
+VOLATILE = ('seconds', 'peak_vram_mb', 'path', 'scores', 'scored')       # never a difference in themselves (for images the picture behind `path` is compared; the [score] pass's readings are not the output)
 IMAGE_EXT = re.compile(r'\.(png|jpe?g|webp)$', re.I)
 
 

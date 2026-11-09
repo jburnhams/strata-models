@@ -63,7 +63,11 @@ def test_score_pass_reads_outputs_once_and_judgments_decide(tts, scheduler):
     try:
         r = C.run(tts, engine, C.SchedulerExecutor(scheduler), log=log.append); assert r == dict(ran=90, cached=0, failed=0, scored=90) and any('scoring 90' in m for m in log)
         assert C.run(tts, engine, C.SchedulerExecutor(scheduler), log=log.append)['scored'] == 0                    # read once per scoring config
+        first = C.analyse(tts, engine)['candidates']['base']['metrics']['tts_wer']['value']
         tts.score = dict(tts.score, params=dict(drop=3)); assert C.run(tts, engine, C.SchedulerExecutor(scheduler), log=log.append)['scored'] == 90
+        tts.score = dict(tts.score, params=dict(drop=0)); assert C.run(tts, engine, C.SchedulerExecutor(scheduler), log=log.append)['scored'] == 0     # both readings kept apart
+        assert C.analyse(tts, engine)['candidates']['base']['metrics']['tts_wer']['value'] == first                                                 # each config sees its own
+        tts.score = dict(tts.score, params=dict(drop=3))
         res = C.analyse(tts, engine)
         assert res['candidates']['base']['metrics']['tts_wer']['value'] == pytest.approx(10 / 30 * 2 / 2, abs=0.1) and res['candidates']['base']['metrics']['rtf']['value'] > 0
         assert res['decision']['per_candidate']['liked']['verdict'] == 'unclear' and 'judged pairs with the baseline' in res['decision']['per_candidate']['liked']['why']
@@ -80,6 +84,8 @@ def test_tts_metrics_score_failures_and_unread_outputs():
     it = dict(input=dict(text='one two three'))
     assert M.METRICS['tts_wer'].score(it, None, 'boom') == (3, 3) and M.METRICS['tts_wer'].score(it, dict(path='/x.wav'), None) is None
     assert M.METRICS['tts_wer'].score(it, dict(scored=dict(error='x')), None) == (3, 3)
+    assert C.readings(dict(scored=dict(key='k1', error='x'), scores=dict(k2=dict(result=1)))) == dict(k1=dict(error='x'), k2=dict(result=1)) and C.readings(None) == {}
+    assert C.scored_view(C.parse_spec(dict(name='x', question='q', role='r', dataset='d', metrics=['wer'], candidates=[dict(name='a', model='m')])), dict(a=1)) == dict(a=1)
     assert M.METRICS['tts_wer'].score(it, dict(scored=dict(result=dict(segments=[dict(text='One, two tree.')]))), None) == (1, 3)
     assert M.METRICS['tts_wer'].score(dict(input={}), {}, None) is None
     assert M.METRICS['rtf'].score(it, dict(duration_s=2.0, seconds=1.0), None) == 0.5 and M.METRICS['rtf'].score(it, dict(seconds=1.0), None) is None and M.METRICS['rtf'].score(it, None, 'x') is None

@@ -61,7 +61,7 @@ def mount(app, scheduler):
         from stratamodels.db.models import EvalJudgment as J, EvalResult as Rr
         with C.session(engine()) as ses:
             sig = (C._canon(s.to_json()), ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)), ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
-                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset).version)
+                   ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)), C.load_dataset(s.dataset).version, C.SCORED[0])
         hit = memo.get(s.name)
         if hit and hit[0] == sig: return hit[1]
         res = C.analyse(s, engine()); memo[s.name] = (sig, res); return res

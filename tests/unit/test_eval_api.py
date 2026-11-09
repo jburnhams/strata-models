@@ -139,3 +139,12 @@ def test_judging_skips_only_judgments_of_current_outputs_and_rescores_new_output
     s = C.load_spec('fake-asr'); C.forget(s, scheduler.store.engine, 'same')
     client.post('/api/evals/fake-asr/run'); wait_run(client, 'fake-asr')
     assert client.get('/api/evals/fake-asr/pair').json()['pair'] is not None
+
+
+def test_the_analysis_is_redone_after_a_score_pass_changes_outputs_in_place(client, monkeypatch):
+    from stratamodels.evals import core as C
+    calls = []; real = C.analyse
+    monkeypatch.setattr(C, 'analyse', lambda *a, **k: calls.append(1) or real(*a, **k))
+    client.get('/api/evals/fake-asr'); client.get('/api/evals/fake-asr'); assert len(calls) == 1          # memoised
+    monkeypatch.setattr(C, 'SCORED', [C.SCORED[0] + 1])                                            # a score batch was written: same rows, new readings
+    client.get('/api/evals/fake-asr'); assert len(calls) == 2

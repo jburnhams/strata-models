@@ -231,20 +231,39 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
 def score_key(spec): return _h(_canon(spec.score), 16)
 
 
+SCORED = [0]          # bumped each time the [score] pass writes readings: they change outputs in place (same rows, same ids), so the API's analysis memo watches this
+
+
+def readings(output):
+    """{score key: {result} or {error}} of an output: every [score] config's reading is kept apart (an output is shared by every experiment whose
+    candidate made it, and two experiments may read it with different transcribers). A reading from before they were kept apart counts under its key."""
+    out = dict((output or {}).get('scores') or {}); old = (output or {}).get('scored')
+    if isinstance(old, dict) and old.get('key') and old['key'] not in out: out[old['key']] = {k: v for k, v in old.items() if k != 'key'}
+    return out
+
+
 def score_outputs(spec, engine, executor, keys, log=print, batch=32):
     """The [score] pass: every stored output with a file (`path`) and no reading by the current scoring config gets one: a job on the scoring
-    role with path = the output's file, whose result is kept in the output as `scored` = {key, result} (or {key, error}). Returns how many ran."""
-    sk = score_key(spec); rows = [r for r in cached(engine, keys).values() if r.output and isinstance(r.output.get('path'), str) and (r.output.get('scored') or {}).get('key') != sk]
+    role with path = the output's file, whose result is kept in the output under `scores` = {score key: {result} or {error}}. Returns how many ran."""
+    sk = score_key(spec); rows = [r for r in cached(engine, keys).values() if r.output and isinstance(r.output.get('path'), str) and sk not in readings(r.output)]
     if rows: log(f'{spec.name}: scoring {len(rows)} outputs with {spec.score["role"]}')
     for i in range(0, len(rows), batch):
         chunk = rows[i:i + batch]; ids = [executor.submit(spec.score['role'], {**(spec.score.get('params') or {}), 'path': r.output['path']}, spec.score.get('model'), None) for r in chunk]
         done = {r.key: executor.wait(jid) for r, jid in zip(chunk, ids)}
         with session(engine) as s:
             for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(list(done)))):
-                j = done[r.key]; r.output = {**r.output, 'scored': dict(key=sk, result=j.get('result')) if j['status'] == 'done' else dict(key=sk, error=j.get('error') or j['status'])}
+                j = done[r.key]; reading = dict(result=j.get('result')) if j['status'] == 'done' else dict(error=j.get('error') or j['status'])
+                r.output = {**{k: v for k, v in r.output.items() if k != 'scored'}, 'scores': {**readings(r.output), sk: reading}}
             s.commit()
+        SCORED[0] += 1
         log(f'  {min(i + batch, len(rows))} of {len(rows)} scored')
     return len(rows)
+
+
+def scored_view(spec, output):
+    """The output as the metrics see it for this spec: `scored` is the reading by this spec's [score] config (None when not read yet)."""
+    if not spec.score or not isinstance(output, dict): return output
+    return {**output, 'scored': readings(output).get(score_key(spec))}
 
 
 def save(engine, rows):
@@ -294,7 +313,7 @@ def outputs_for(spec, engine, dataset=None):
     ds = dataset or load_dataset(spec.dataset); out, runs = {}, {}
     for c in spec.candidates:
         keys = [result_key(spec, c, it) for it in ds.items]; have = cached(engine, keys)
-        out[c.name] = [(have[k].output, have[k].error) if k in have else None for k in keys]
+        out[c.name] = [(scored_view(spec, have[k].output), have[k].error) if k in have else None for k in keys]
         runs[c.name] = [dict(run_s=have[k].run_s, load_s=have[k].load_s) if k in have else None for k in keys]
     return ds, out, runs
 
