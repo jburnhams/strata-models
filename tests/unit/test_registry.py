@@ -9,7 +9,7 @@ def test_the_builtin_registry_names_a_model_for_every_role():
     r = Registry.load()
     assert r.resolve('faces').key == 'buffalo_l' and r.resolve('transcribe').key == 'whisper-large-v3-turbo'
     assert r.resolve('transcribe-fast', 'whisper-large-v3-turbo').runtime == 'faster-whisper'
-    assert not r.models['qwen3.5-9b-vl'].served and 'strata-360' in r.models['qwen3.5-9b-vl'].used_by
+    assert r.models['qwen3.5-9b-vl'].served and not r.models['yolo11s-pose'].served and 'strata-360' in r.models['yolo11s-pose'].used_by
     d = r.to_json(); assert {x['key'] for x in d['roles']} >= {'faces', 'transcribe'} and all('served' in m for m in d['models'])
 
 

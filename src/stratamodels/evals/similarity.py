@@ -139,13 +139,23 @@ def kind_of(x, y):
     return 'json'
 
 
+def as_text(o):
+    """The words of an output: a transcription's segments, a description's caption, a chat answer's text, or the output itself."""
+    if not isinstance(o, dict): return '' if o is None else str(o)
+    if 'segments' in o: return M.transcript(o)
+    d = o.get('json') if isinstance(o.get('json'), dict) else o
+    for k in ('caption', 'text'):
+        if isinstance(d.get(k), str): return d[k]
+    return o['text'] if isinstance(o.get('text'), str) else ''
+
+
 def _strip(o): return {k: v for k, v in o.items() if k not in VOLATILE} if isinstance(o, dict) else o
 
 
 def similarity(x, y, kind=None):
     """How alike two outputs are, 0 to 1."""
     kind = kind or kind_of(x, y)
-    if kind == 'text': return text_similarity(M.transcript(x) if isinstance(x, dict) else str(x), M.transcript(y) if isinstance(y, dict) else str(y))
+    if kind == 'text': return text_similarity(as_text(x), as_text(y))
     if kind == 'image':
         pa, pb = image_path(x), image_path(y)
         return image_similarity(pa, pb) if pa and pb else 0.0

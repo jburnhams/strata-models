@@ -93,12 +93,55 @@ options = { compute_type = "float16" }
 
 [models."qwen3.5-9b-vl"]
 runtime = "llama-server"
-name = "unsloth/Qwen3.5-9B-GGUF:Q4_K_M"
+name = "Qwen3.5-9B Q4_K_M"
 roles = ["vision-language"]
-vram_gb = 7.0
+vram_gb = 7.5
 licence = "Apache-2.0"
 source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
 used_by = ["strata-360"]
+options = { model = "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", mmproj = "unsloth/Qwen3.5-9B-GGUF:mmproj-F16.gguf", ctx = 16384 }
+
+[models."gemma-4-12b-vl"]
+runtime = "llama-server"
+name = "Gemma 4 12B QAT UD-Q4_K_XL"
+roles = ["vision-language"]
+vram_gb = 9.0
+licence = "Gemma Terms of Use"
+source = "https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF"
+used_by = []
+options = { model = "unsloth/gemma-4-12B-it-qat-GGUF:gemma-4-12B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-12B-it-qat-GGUF:mmproj-F16.gguf", ctx = 16384 }
+
+[models."gemma-4-26b-a4b-vl"]
+runtime = "llama-server"
+name = "Gemma 4 26B-A4B QAT UD-Q4_K_XL (MoE, experts partly on the CPU)"
+roles = ["vision-language"]
+vram_gb = 11.0
+licence = "Gemma Terms of Use"
+source = "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+used_by = []
+# 14 GB of weights: --fit puts as many expert layers on the card as fit and the rest in RAM (active parameters are 4B, so this stays usable).
+options = { model = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-26B-A4B-it-qat-GGUF:mmproj-F16.gguf", ctx = 16384, args = ["--fit", "on"] }
+
+[models."qwen3.8-27b-vl"]
+runtime = "llama-server"
+name = "Qwen3.8-27B UD-IQ3_XXS (layers partly on the CPU)"
+roles = ["vision-language"]
+vram_gb = 11.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF"
+used_by = []
+options = { model = "unsloth/Qwen3.8-27B-GGUF:Qwen3.8-27B-UD-IQ3_XXS.gguf", mmproj = "unsloth/Qwen3.8-27B-GGUF:mmproj-F16.gguf", ctx = 16384, args = ["--fit", "on"] }
+
+[models."sonnet-photos-v1"]
+runtime = "recorded"
+name = "Claude Sonnet sub-agents, schema-v1 (strata-stills vision_tags)"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from the Claude API"
+source = "strata-stills photos.analysis kind vision_tags"
+used_by = ["strata-stills"]
+# Not a model this service runs: the descriptions strata-stills got from Sonnet, replayed by picture so they stand beside local models in evals.
+options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 
 [models.ast-audioset]
 runtime = "transformers"

@@ -63,3 +63,9 @@ def test_audio_similarity_hears_voice_colour_and_length(tmp_path):
     tiny = _wav(tmp_path / 'e.wav', [200], 0.01); assert S.audio_similarity(tiny, low) == pytest.approx(0.01, abs=1e-3)
     (tmp_path / 'bad.wav').write_bytes(b'nope'); assert S.audio_similarity(str(tmp_path / 'bad.wav'), low) == 0.0
     assert S.similarity(dict(path=low), dict(path='x.png'), 'audio') == 0.0 and 'audio' in S.KINDS
+
+
+def test_text_similarity_reads_answers_and_captions_not_only_transcripts():
+    assert S.similarity(dict(text='a dog', model='m'), dict(text='a cat', model='m'), 'text') < 1             # chat answers: their text
+    assert S.similarity(dict(text='{}', json=dict(caption='a dog on a beach')), dict(caption='a dog on a beach', tags=['dog']), 'text') == 1.0
+    assert S.as_text(None) == '' and S.as_text('hi') == 'hi' and S.as_text(dict(a=1)) == '' and S.as_text(tx('hello')) == 'hello'

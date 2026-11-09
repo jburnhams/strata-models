@@ -157,6 +157,84 @@ def verification(items, outputs, far=0.01):
     return dict(auc=float(auc), tar=tar, threshold=thr, pairs=int(s.size))
 
 
+# ---- picture descriptions (structured, against a reference description) -------------------------------------------------------------------
+def description_of(output):
+    """The parsed description of a vision-language output (its `json`), or a recorded one given whole."""
+    if not isinstance(output, dict): return None
+    d = output.get('json', output if 'caption' in output else None)
+    return d if isinstance(d, dict) else None
+
+
+def _g(d, path):
+    for k in path.split('.'):
+        d = d.get(k) if isinstance(d, dict) else None
+    return d
+
+
+def _bucket(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool): return None
+    return 0 if n <= 0 else 1 if n == 1 else 2 if n == 2 else '3-5' if n <= 5 else '6+'
+
+
+def _main_light(d):
+    src = [s for s in (_g(d, 'lighting.sources') or []) if isinstance(s, dict)]
+    return max(src, key=lambda s: s.get('share') if isinstance(s.get('share'), (int, float)) else 0).get('type') if src else None
+
+
+# The fields an app filters or sorts on, each read the same way from both descriptions. Free text (caption, place, event) is judged blind instead.
+DESCRIPTION_FIELDS = {
+    'indoor_outdoor': lambda d: _g(d, 'setting.indoor_outdoor'),
+    'time_of_day': lambda d: _g(d, 'setting.time_of_day'),
+    'weather': lambda d: _g(d, 'setting.weather'),
+    'people': lambda d: _bucket(_g(d, 'people.count')),
+    'children': lambda d: None if not isinstance(_g(d, 'people.children'), int) else _g(d, 'people.children') > 0,
+    'person_subject': lambda d: _g(d, 'people.main_subject_is_person'),
+    'main_light': _main_light,
+    'light_level': lambda d: _g(d, 'lighting.level'),
+    'sharpness': lambda d: _g(d, 'exposure.sharpness'),
+    'skin_visible': lambda d: _g(d, 'colour.skin_visible'),
+    'has_text': lambda d: None if not isinstance(_g(d, 'text_visible'), list) else len(_g(d, 'text_visible')) > 0,
+}
+
+
+def _ref_desc(item): return description_of((item.get('reference') or {}).get('description'))
+
+
+def field_agreement(ref, got):
+    """{field: True/False} for the fields the reference fills (a missing answer is a disagreement)."""
+    out = {}
+    for f, read in DESCRIPTION_FIELDS.items():
+        want = read(ref)
+        if want is None: continue
+        have = read(got) if got else None
+        out[f] = have is not None and str(have).lower() == str(want).lower()
+    return out
+
+
+def _desc_fields(item, output, error):
+    ref = _ref_desc(item)
+    if ref is None: return None
+    a = field_agreement(ref, None if error else description_of(output))
+    return sum(a.values()) / len(a) if a else None
+
+
+def _tagset(d): return {' '.join(str(t).lower().split()) for t in (d or {}).get('tags') or [] if str(t).strip()}
+
+
+def _tag_f1(item, output, error):
+    ref = _ref_desc(item)
+    if ref is None: return None
+    r = _tagset(ref); g = set() if error else _tagset(description_of(output))
+    if not r: return None
+    tp = len(r & g); return 0.0 if not tp else 2 * tp / (len(r) + len(g))
+
+
+def _desc_valid(item, output, error):
+    if error: return False
+    d = description_of(output)
+    return bool(d and isinstance(d.get('caption'), str) and d['caption'].strip() and isinstance(d.get('tags'), list) and d['tags'])
+
+
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error): return None if error else item.get('_run_s')
 
@@ -192,6 +270,9 @@ METRICS = {m.name: m for m in [
     Metric('face_found', 'binary', 'higher', 'The labelled face was detected (IoU 0.5)', '%', _face_found),
     Metric('verification_auc', 'dataset', 'higher', 'ROC AUC of same-person against different-person pairs of the labelled faces', '', None, lambda it, out: verification(it, out)['auc']),
     Metric('tar_at_far1', 'dataset', 'higher', 'Same-person pairs accepted when 1 % of different-person pairs are', '%', None, lambda it, out: verification(it, out)['tar']),
+    Metric('desc_fields', 'mean', 'higher', 'Share of the reference description\'s structured fields (indoor/outdoor, time of day, weather, people, children, person subject, main light, light level, sharpness, skin, text) given the same answer', '%', _desc_fields),
+    Metric('tag_f1', 'mean', 'higher', 'F1 of the search tags against the reference description\'s tags (lower case, exact words)', '%', _tag_f1),
+    Metric('desc_valid', 'binary', 'higher', 'The output is a description with a caption and tags', '%', _desc_valid),
     Metric('exact_match', 'binary', 'higher', 'The answer equals the reference answer after normalise()', '%', _exact),
     Metric('parsed', 'binary', 'higher', 'The output is valid JSON', '%', _parsed),
     Metric('failed', 'binary', 'lower', 'The job failed', '%', _failed),
