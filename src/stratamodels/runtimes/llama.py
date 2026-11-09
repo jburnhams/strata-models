@@ -18,12 +18,13 @@ params:
   schema       a JSON schema the answer must follow (grammar-constrained); a preset brings its own. Off with schema=false.
   system, max_tokens (default 2048), temperature (default 0.2), seed (default 0), think (default false: thinking models answer directly)
 Result: {text, json (when a schema was used and the answer parses), tokens_in, tokens_out, seconds, peak_vram_mb, model}."""
-import base64, glob, json, mimetypes, os, socket, subprocess, threading, time, urllib.error, urllib.request
+import atexit, base64, glob, json, mimetypes, os, socket, subprocess, threading, time, urllib.error, urllib.request
 
 from stratamodels import gpu, settings
 from stratamodels.runtimes import RunError
 
 PRESETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presets')
+LIVE = set()          # running llama-server processes: stopped at exit, so a restarted service never finds the card held by an orphan
 PARAMS = {'image', 'images', 'prompt', 'preset', 'context', 'schema', 'system', 'max_tokens', 'temperature', 'seed', 'think'}
 
 
@@ -74,15 +75,15 @@ def load(model, models_dir, popen=subprocess.Popen, wait_s=600):
     port = _free_port(); cmd = command(exe, files, port, int(o.get('ctx', 8192)), o.get('args') or [])
     env = dict(os.environ, LD_LIBRARY_PATH=os.pathsep.join(library_path(exe) + [os.environ.get('LD_LIBRARY_PATH', '')]))
     log = open(os.path.join(settings.data_dir(), f'llama-{model.key}.log'), 'w')
-    p = popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env); url = f'http://127.0.0.1:{port}'; t0 = time.time()
+    p = popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env); LIVE.add(p); url = f'http://127.0.0.1:{port}'; t0 = time.time()
     while True:
         if p.poll() is not None:
-            log.close(); tail = open(log.name).read()[-800:]
+            LIVE.discard(p); log.close(); tail = open(log.name).read()[-800:]
             raise RunError(f'llama-server exited while loading (exit {p.returncode}): {tail}')
         try:
             if _get(url + '/health')[0] == 200: break
         except (OSError, urllib.error.URLError): pass
-        if time.time() - t0 > wait_s: p.kill(); log.close(); raise RunError(f'llama-server did not answer within {wait_s} s')
+        if time.time() - t0 > wait_s: _stop(p); log.close(); raise RunError(f'llama-server did not answer within {wait_s} s')
         time.sleep(0.5)
     return dict(key=model.key, proc=p, url=url, log=log, vision=bool(files.get('mmproj')))
 
@@ -152,11 +153,24 @@ def _post(url, body, timeout=1800):
     except urllib.error.HTTPError as e: raise RunError(f'llama-server refused the request ({e.code}): {e.read().decode(errors="replace")[:500]}')
 
 
+def _stop(p, wait_s=30):
+    if p.poll() is None:
+        p.terminate()
+        try: p.wait(wait_s)
+        except subprocess.TimeoutExpired: p.kill(); p.wait()
+    LIVE.discard(p)
+
+
 def unload(handle):
     p = handle.get('proc')
-    if p is not None and p.poll() is None:
-        p.terminate()
-        try: p.wait(30)
-        except subprocess.TimeoutExpired: p.kill(); p.wait()
+    if p is not None: _stop(p)
     if handle.get('log'): handle['log'].close()
     handle.clear()
+
+
+@atexit.register
+def stop_all():
+    """Stop every llama-server still running (the service exiting, also on SIGTERM: uvicorn shuts down and Python runs its exit hooks)."""
+    for p in list(LIVE):
+        try: _stop(p, 10)
+        except Exception: pass

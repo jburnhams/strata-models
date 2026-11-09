@@ -1,6 +1,6 @@
 """The llama.cpp runtime (stratamodels.runtimes.llama) without the binary: files, presets, the request, a run against a fake server, start-up
 failures; and the recorded runtime that replays outputs made elsewhere."""
-import json, os, sys, types
+import json, os, subprocess, sys, types
 
 import pytest
 
@@ -24,6 +24,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, 'huggingface_hub', hub)
     monkeypatch.setattr(llama, '_get', lambda url, timeout=5: (200, b'{}'))
     img = tmp_path / 'a.jpg'; img.write_bytes(b'\xff\xd8jpeg')
+    monkeypatch.setattr(llama, 'LIVE', set())
     return tmp_path, img
 
 
@@ -37,6 +38,20 @@ def test_load_starts_the_server_with_its_files_and_libraries(setup):
     assert cmd[0].endswith('llama-b1/llama-server') and cmd[cmd.index('-m') + 1].endswith('llama/org--m-GGUF/m.gguf') and '--mmproj' in cmd and cmd[-2:] == ['--fit', 'on'] and cmd[cmd.index('-c') + 1] == '8192'
     assert 'cudart-x' in procs[0].env['LD_LIBRARY_PATH'] and h['vision'] and h['url'].startswith('http://127.0.0.1:')
     llama.unload(h); assert h == {}
+
+
+def test_servers_still_running_are_stopped_at_exit(setup):
+    tmp, _ = setup; procs = []
+
+    class Stubborn(FakeProc):
+        def wait(self, t=None):
+            if not getattr(self, 'killed', False): raise subprocess.TimeoutExpired(self.cmd, t)
+        def kill(self): self.killed = True
+    a = llama.load(model(), str(tmp), popen=lambda cmd, **kw: procs.append(FakeProc(cmd, **kw)) or procs[-1])
+    llama.load(model(), str(tmp), popen=lambda cmd, **kw: procs.append(Stubborn(cmd, **kw)) or procs[-1])
+    assert llama.LIVE == set(procs)
+    llama.unload(a); assert llama.LIVE == {procs[1]}                    # an unloaded server is no longer tracked
+    llama.stop_all(); assert llama.LIVE == set() and procs[1].killed      # one that ignores terminate is killed
 
 
 def test_load_refuses_what_is_missing(setup, monkeypatch):

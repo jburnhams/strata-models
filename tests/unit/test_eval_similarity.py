@@ -46,3 +46,9 @@ def test_json_and_kinds():
     assert S.similarity(dict(a=1, seconds=2.0), dict(a=1, seconds=9.0)) == 1.0 and 0 < S.similarity(dict(a=1), dict(a=2)) < 1
     assert S.kind_of(tx('a'), tx('b')) == 'text' and S.kind_of('a', 'b') == 'text' and S.kind_of(dict(a=1), [1]) == 'json'
     with pytest.raises(ValueError, match='no similarity'): S.similarity('a', 'b', 'audio')
+
+
+def test_text_similarity_reads_answers_and_captions_not_only_transcripts():
+    assert S.similarity(dict(text='a dog', model='m'), dict(text='a cat', model='m'), 'text') < 1             # chat answers: their text
+    assert S.similarity(dict(text='{}', json=dict(caption='a dog on a beach')), dict(caption='a dog on a beach', tags=['dog']), 'text') == 1.0
+    assert S.as_text(None) == '' and S.as_text('hi') == 'hi' and S.as_text(dict(a=1)) == '' and S.as_text(tx('hello')) == 'hello'
