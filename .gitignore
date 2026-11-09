@@ -1,0 +1,16 @@
+.venv/
+.DS_Store
+__pycache__/
+*.pyc
+.cache/
+secrets.env
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+web/node_modules/
+src/app/server/static/
+web/coverage/
+data/
+out/

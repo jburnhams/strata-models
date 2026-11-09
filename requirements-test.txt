@@ -1,0 +1,15 @@
+# Dependencies for the unit and integration suites. The CI workflows install exactly this.
+fastapi
+uvicorn
+pydantic
+httpx
+pytest>=8
+pytest-cov>=5
+ruff
+# Test tooling
+hypothesis
+pytest-randomly
+pytest-timeout
+pytest-xdist
+diff-cover
+tzdata                         # IANA timezone database, needed on Windows for zoneinfo

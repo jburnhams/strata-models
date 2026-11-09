@@ -1,0 +1,4 @@
+# Main runtime environment (Python 3.11+; tested on 3.11-3.13 across Linux, macOS and Windows).
+fastapi
+uvicorn
+pydantic

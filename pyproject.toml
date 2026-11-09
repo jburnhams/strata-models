@@ -1,0 +1,27 @@
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests/utils"]
+testpaths = ["tests/unit"]
+addopts = "-ra --timeout=300"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]       # TestClient noise from the installed starlette; remove when the dependency moves on
+markers = [
+    "integration: runs the CLI and HTTP server end-to-end (tests/integration)",
+    "slow: slow tests; run manually or on a schedule",
+]
+
+[tool.coverage.run]
+source = ["src/app"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = false
+# Measured from the unit suite only (tests/unit). Ratchet this up as coverage improves.
+fail_under = 95
+
+[tool.ruff]
+line-length = 400            # long, dense lines on purpose, as in strata-360 and strata-stills
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

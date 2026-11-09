@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>python-app-template</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1c1c1e;--mut:#6b6b70;--line:#d8d8dc;--acc:#2a6df4}
+@media(prefers-color-scheme:dark){:root{--bg:#161618;--fg:#ececee;--mut:#9a9aa2;--line:#33333a;--acc:#6f9bff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:32px 16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:24px 0 8px}.mut{color:var(--mut)}
+.card{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+form{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}input{flex:1;min-width:180px;padding:8px;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit}
+button{padding:8px 14px;border:0;border-radius:6px;background:var(--acc);color:#fff;cursor:pointer}
+#err{color:#d33}
+</style></head><body><main>
+<h1>python-app-template</h1><div class="mut" id="dir"></div>
+<form id="greet"><input id="name" placeholder="Your name (default: World)"><button>Say hello</button></form><div id="err"></div>
+<h2>Messages</h2><div id="list"></div>
+</main><script>
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function j(u,o){const r=await fetch(u,o);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||r.statusText);return d}
+async function load(){const s=await j('/api/settings');$('dir').textContent='Data folder: '+s.data_dir;const ms=await j('/api/messages');
+ $('list').innerHTML=ms.length?ms.map(m=>`<div class="card"><b>${esc(m.message)}</b> <span class="mut">${esc(m.created)}</span></div>`).join(''):'<p class="mut">No messages yet.</p>'}
+$('greet').onsubmit=async e=>{e.preventDefault();$('err').textContent='';try{await j('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('name').value||'World'})});$('name').value='';await load()}catch(x){$('err').textContent=x.message}};
+load();
+</script></body></html>

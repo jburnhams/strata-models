@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+:root { color-scheme: light dark; }
+body { @apply bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100; font-family: system-ui, sans-serif; }

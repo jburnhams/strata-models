@@ -1,0 +1,64 @@
+name: Unit tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.11', '3.12', '3.13']
+        include:
+          - os: macos-latest
+            python-version: '3.13'
+          - os: windows-latest
+            python-version: '3.13'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+      - run: pip install -r requirements-test.txt
+      - name: Lint (syntax errors and undefined names)
+        run: ruff check src tests
+      - name: Unit tests with coverage (unit suite only)
+        run: pytest tests/unit --cov --cov-report=term --cov-report=xml
+      - name: Upload coverage
+        if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: coverage.xml
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.x
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Unit tests with coverage (unit project only)
+        run: npm run test:coverage
+      - name: Coverage gate (unit + jsdom component tests together, floors in web/coverage-floor.json)
+        run: npm run test:coverage:gate -- --coverage.reporter=text --coverage.reporter=json-summary
+      - name: Build
+        run: npm run build
