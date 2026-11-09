@@ -17,3 +17,5 @@ pytest-timeout
 pytest-xdist
 diff-cover
 tzdata                         # IANA timezone database, needed on Windows for zoneinfo
+numpy                          # the faces runtime's view geometry tests (tests/unit/test_faces_views.py)
+opencv-python-headless
