@@ -4,7 +4,7 @@ import { fetchJson } from 'strata-react'
 export interface Health { ok: boolean; version: string; gpu: boolean }
 export interface GpuProcess { pid: number; used_mb: number; command: string; ours: boolean }
 export interface Gpu { name: string; total_mb: number; used_mb: number; free_mb: number; util_pct: number | null; temp_c: number | null; power_w: number | null; power_limit_w: number | null; processes: GpuProcess[] }
-export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; free_for_models_mb: number }
+export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; reserved_mb?: number; free_for_models_mb: number }
 export interface Resident { model: string; runtime: string; roles: string[]; vram_mb: number; load_s: number; loaded_at: number; last_used: number; jobs: number }
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'expired'
 export interface Job {
@@ -13,7 +13,7 @@ export interface Job {
   vram_gb: number | null; ttl_s: number | null; started_at: number | null; finished_at: number | null; heartbeat_at: number | null; load_s: number | null; run_s: number | null; wait_s?: number
 }
 export interface ServiceEvent { at: number; text: string }
-export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; lease: Job | null; queued: Job[]; events: ServiceEvent[] }
+export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; lease: Job | null; leases?: Job[]; queued: Job[]; events: ServiceEvent[] }
 export interface Sample { at: number; util_pct: number | null; used_mb: number; own_mb: number }
 export interface History { every_s: number | null; samples: Sample[] }
 export interface Role { key: string; description: string; model: string }

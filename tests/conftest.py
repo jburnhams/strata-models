@@ -80,14 +80,15 @@ def registry():
 class FakeGpu:
     """A 12 GB card whose memory follows the fake models loaded by this process (their registry vram_gb), plus `other_mb` held by other processes."""
     def __init__(self, registry, total_mb=12288.0, other_mb=500.0, pid=4242):
-        self.registry, self.total_mb, self.other_mb, self.pid, self.present = registry, total_mb, other_mb, pid, True
+        self.registry, self.total_mb, self.other_mb, self.pid, self.present, self.extra = registry, total_mb, other_mb, pid, True, []     # extra: [(pid, MB)] of lease holders
     def __call__(self):
         if not self.present: return None
         from stratamodels.runtimes import fake
         own = sum(self.registry.models[h['model']].vram_gb * 1024 for h in fake.LOADED)
         procs = [dict(pid=self.pid, used_mb=own, command='python -m stratamodels serve', ours=True)] if own else []
         procs.append(dict(pid=1, used_mb=self.other_mb, command='build_arena.py', ours=False))
-        used = own + self.other_mb
+        procs += [dict(pid=p, used_mb=mb, command='lease holder', ours=False) for p, mb in self.extra]
+        used = own + self.other_mb + sum(mb for _, mb in self.extra)
         return dict(name='Fake RTX', total_mb=self.total_mb, used_mb=used, free_mb=self.total_mb - used, util_pct=10.0, temp_c=50.0, power_w=40.0, power_limit_w=170.0, processes=procs)
 
 

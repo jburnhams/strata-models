@@ -207,3 +207,36 @@ def test_a_sized_lease_waits_for_room_and_one_that_never_fits_fails(scheduler):
     scheduler.release(lease['id'])
     huge = scheduler.lease('stills', vram_gb=20); scheduler.step()                    # the echo job goes first (submitted before)
     r = scheduler.step(); assert r['id'] == huge['id'] and r['status'] == 'failed' and 'never fit' in r['error']
+
+
+def test_a_sized_lease_shares_the_card_with_jobs_that_fit(scheduler):
+    lease = scheduler.lease('strata-stills', vram_gb=6, pid=777, note='arena build'); assert lease['params'] == dict(pid=777)
+    assert scheduler.step()['status'] == 'running'                                  # granted: 12 - 0.5 - 1 = 10.5 GB free
+    st = scheduler.status(); assert st['budget']['reserved_mb'] == 6 * 1024 and st['leases'][0]['id'] == lease['id'] and st['lease']['id'] == lease['id']
+    small = scheduler.submit('echo', {}, 'bh')                                       # 2 GB: fits in the 4.5 GB left
+    assert scheduler.step()['id'] == small['id'] and 'small' in scheduler.resident
+    big = scheduler.submit('echo', {}, 'x', model='big')                             # 6 GB: does not fit beside the 6 GB reservation
+    other = scheduler.submit('other', {}, 'y')                                       # 2 GB: does
+    assert scheduler.step()['id'] == other['id'] and scheduler.store.get(big['id'])['status'] == 'queued'
+    assert scheduler.step() is None                                                  # only the big one is left, and it waits
+    scheduler.probe.extra = [(777, 6 * 1024)]                                        # the app now uses its 6 GB: nothing outstanding, but the card is just as full
+    assert scheduler.status()['budget']['reserved_mb'] == 0 and scheduler.step() is None
+    scheduler.release(lease['id']); scheduler.probe.extra = []
+    assert scheduler.step()['id'] == big['id']
+
+
+def test_an_exclusive_lease_waits_for_sized_ones_and_blocks_everything(scheduler):
+    a = scheduler.lease('a', vram_gb=2); b = scheduler.lease('b', vram_gb=2)
+    assert scheduler.step()['id'] == a['id'] and scheduler.step()['id'] == b['id']     # two sized leases held together
+    whole = scheduler.lease('c'); job = scheduler.submit('echo', {}, 'x')
+    assert scheduler.step() is None and scheduler.step() is None and any('waits for the whole GPU' in e['text'] for e in scheduler.events)
+    assert scheduler.store.get(job['id'])['status'] == 'queued'                      # nothing passes the waiting lease
+    scheduler.release(a['id']); scheduler.release(b['id'])
+    assert scheduler.step()['id'] == whole['id'] and scheduler.step() is None and scheduler.store.get(job['id'])['status'] == 'queued'
+    scheduler.release(whole['id']); assert scheduler.step()['id'] == job['id']
+
+
+def test_fits_without_a_gpu_or_for_an_unknown_model(scheduler):
+    scheduler.lease('a', vram_gb=2); scheduler.step()
+    j = scheduler.submit('echo', {}, 'x'); j['model'] = 'gone'; assert scheduler._fits(j)
+    scheduler.probe.present = False; assert scheduler._fits(dict(j, model='big'))

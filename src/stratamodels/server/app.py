@@ -13,7 +13,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/jobs?status=&role=&app=&kind=&before=&limit=   history, newest first, cursor `before` = the last id shown
   GET  /api/jobs/{id}?wait=              one job with its result; waits up to `wait` seconds for it to finish
   DELETE /api/jobs/{id}                  withdraw a queued job or give back a lease
-  POST /api/leases                       {app, vram_gb?, ttl_s?, priority?, note?} ask for the whole GPU
+  POST /api/leases                       {app, vram_gb?, ttl_s?, priority?, note?, pid?} ask for vram_gb of the GPU (shared), or all of it (exclusive)
   GET  /api/leases/{id}?wait=            the lease, once granted (or as it stands after `wait`)
   POST /api/leases/{id}/heartbeat        keep a held lease alive (it expires `ttl_s` after the last one)
   DELETE /api/leases/{id}                give it back
@@ -60,6 +60,7 @@ class RunIn(BaseModel):
 class LeaseIn(BaseModel):
     app: str
     vram_gb: float | None = None
+    pid: int | None = None
     ttl_s: float = 120.0
     priority: str = 'batch'
     note: str | None = None
@@ -137,7 +138,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     def delete_job(job_id: int): return s.cancel(job_id)
 
     @app.post('/api/leases', status_code=201)
-    def post_lease(b: LeaseIn): return s.lease(b.app, b.vram_gb, b.ttl_s, b.priority, b.note)
+    def post_lease(b: LeaseIn): return s.lease(b.app, b.vram_gb, b.ttl_s, b.priority, b.note, b.pid)
 
     @app.get('/api/leases/{job_id}')
     def get_lease(job_id: int, wait: float = 0.0):

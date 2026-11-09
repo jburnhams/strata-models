@@ -41,6 +41,9 @@ describe('the VRAM breakdown and the finding', () => {
     expect(finding({ ...s, current: null })).toBe('2 waiting for the GPU.')
     expect(finding({ ...s, lease: { ...s.queued[1], status: 'running' }, queued: [] })).toBe('The GPU is lent to strata-stills (arena build).')
     expect(finding({ ...s, lease: { ...s.queued[1], note: null }, current: null, queued: [] })).toBe('The GPU is lent to strata-stills.')
+    const sized = { ...s.queued[1], vram_gb: 6 }
+    expect(finding({ ...s, lease: sized, leases: [sized], current: null, queued: [] })).toBe('Lent 6\u00a0GB to strata-stills; the rest is free for other work.')
+    expect(finding({ ...s, lease: sized, leases: [sized], queued: [] })).toBe('Running transcribe for strata-360.')
     expect(finding({ ...s, current: null, queued: [] })).toBe('Idle, with 2 models loaded and 5.1 GB free for more.')
     expect(finding({ ...s, current: null, queued: [], resident: s.resident.slice(1) })).toBe('Idle, with buffalo_l loaded and 5.1 GB free for more.')
     expect(finding({ ...s, current: null, queued: [], resident: [] })).toBe('Idle, nothing loaded: 5.1 GB free for models.')

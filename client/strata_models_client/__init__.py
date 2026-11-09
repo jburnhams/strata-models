@@ -103,7 +103,7 @@ class Lease:
 
 def acquire(app, vram_gb=None, ttl_s=120, priority='batch', note=None, timeout=None):
     """Ask for the GPU and wait until it is granted; returns a Lease (call `.release()`), TimeoutError after `timeout` (the request is withdrawn)."""
-    j = _call('POST', '/api/leases', dict(app=app, vram_gb=vram_gb, ttl_s=ttl_s, priority=priority, note=note))
+    j = _call('POST', '/api/leases', dict(app=app, vram_gb=vram_gb, ttl_s=ttl_s, priority=priority, note=note, pid=os.getpid()))
     end = None if timeout is None else time.monotonic() + timeout; last_beat = time.monotonic()
     while j['status'] == 'queued':
         if end is not None and time.monotonic() >= end:
@@ -118,7 +118,8 @@ def acquire(app, vram_gb=None, ttl_s=120, priority='batch', note=None, timeout=N
 
 @contextlib.contextmanager
 def gpu_lease(app, vram_gb=None, ttl_s=120, priority='batch', note=None, timeout=None, required=False):
-    """`with gpu_lease('strata-stills', vram_gb=4):` the GPU is this app's for the block. Without the service: yields None and runs the block anyway,
+    """`with gpu_lease('strata-stills', vram_gb=4):` 4 GB of the GPU are this app's for the block, and other work goes on in the rest (give the
+    most this block will use); with vram_gb=None the whole GPU, and nothing else runs. Without the service: yields None and runs the block anyway,
     with a warning (or raises Unavailable when `required`)."""
     try: lease = acquire(app, vram_gb, ttl_s, priority, note, timeout)
     except Unavailable:

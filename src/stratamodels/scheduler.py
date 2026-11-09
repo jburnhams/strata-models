@@ -1,10 +1,15 @@
 """The GPU's one owner: a single worker that takes jobs from the queue in the database, keeps models loaded within a VRAM budget, and lends the
-whole GPU to an app that holds a lease.
+GPU, or part of it, to an app that holds a lease.
 
 Order: interactive before batch; within a priority, a job for a model that is already loaded goes first (batches of one kind run together instead
-of reloading weights), but never ahead of a lease, and not when the oldest job has waited longer than `max_skip_s`, which then goes next whatever it needs. A lease is exclusive:
-the worker frees the VRAM the app asked for (all of it when it gave no figure), marks the lease granted, and runs nothing else until the app
-releases it or stops sending heartbeats for `ttl_s`. That is what keeps two GPU users from corrupting each other's work.
+of reloading weights), but never ahead of a lease, and not when the oldest job has waited longer than `max_skip_s`, which then goes next whatever it needs.
+
+Leases: an app that runs its own CUDA code asks for a lease. With a size (vram_gb) the lease RESERVES that much: the worker frees room for it,
+and keeps running other jobs in what is left (models that fit; a job whose model does not fit waits), and other sized leases can be held at the
+same time. The reservation counts until the app's own process (the pid it sent) is seen using that memory, so a model is never loaded into room
+the app is about to take. Without a size the lease is EXCLUSIVE: every model is freed and nothing else runs until it is given back. Either way
+a lease ends when released or when the app stops sending heartbeats for `ttl_s`. Not sharing memory is what keeps two GPU users from
+corrupting each other's work; sharing the card's time just makes both a little slower.
 
 Loading, running and unloading happen only on the worker thread; the API threads queue requests and wait on a condition variable."""
 import collections, threading, time
@@ -33,7 +38,7 @@ class Scheduler:
         self.store, self.registry, self.models_dir, self.probe = store, registry, models_dir, probe
         self.reserve_mb, self.clock, self.get_runtime, self.max_skip_s = reserve_gb * MB, clock, get_runtime, max_skip_s
         self.resident = collections.OrderedDict()            # model key -> Resident, least recently used first
-        self.cv = threading.Condition(); self.control = collections.deque(); self.current = None; self.events = collections.deque(maxlen=200); self._waiting = None
+        self.cv = threading.Condition(); self.control = collections.deque(); self.current = None; self.events = collections.deque(maxlen=200); self._waiting = None; self.held = []
 
     # ---- requests (any thread) -------------------------------------------------------------------------------------------------------
     def _priority(self, p):
@@ -50,11 +55,12 @@ class Scheduler:
         if options: m = self.registry.variant(m.key, options)
         j = self.store.add(kind='run', role=role, model=m.key, app=str(app or 'unknown')[:64], priority=self._priority(priority), params=dict(params or {})); self._notify(); return j
 
-    def lease(self, app, vram_gb=None, ttl_s=120.0, priority='batch', note=None):
-        """Queue a request for the whole GPU; returns its row (status queued, then running once granted)."""
+    def lease(self, app, vram_gb=None, ttl_s=120.0, priority='batch', note=None, pid=None):
+        """Queue a request for `vram_gb` of the GPU (None: all of it, exclusively); returns its row (status queued, then running once granted).
+        `pid` is the app's process, whose memory on the card then counts against its reservation."""
         if vram_gb is not None and not 0 <= float(vram_gb) <= 1024: raise QueueError('vram_gb must be a number of GB')
         ttl = min(max(float(ttl_s or 120.0), 5.0), 3600.0)
-        j = self.store.add(kind='lease', app=str(app or 'unknown')[:64], priority=self._priority(priority), vram_gb=None if vram_gb is None else float(vram_gb), ttl_s=ttl, note=(note or None) and str(note)[:300], heartbeat_at=self.clock()); self._notify(); return j
+        j = self.store.add(kind='lease', app=str(app or 'unknown')[:64], priority=self._priority(priority), vram_gb=None if vram_gb is None else float(vram_gb), ttl_s=ttl, note=(note or None) and str(note)[:300], heartbeat_at=self.clock(), params=dict(pid=int(pid)) if pid else None); self._notify(); return j
 
     def _lease_row(self, job_id):
         j = self.store.get(job_id, result=False)
@@ -107,14 +113,23 @@ class Scheduler:
     def status(self, state=None):
         state = self.probe() if state is None else state
         with self.cv: res = [r.to_json() for r in self.resident.values()]; cur = self.current
-        q = self.store.queued(); budget = None; lease = next((j for j in self.store.running() if j['kind'] == 'lease'), None)
+        q = self.store.queued(); budget = None; leases = [j for j in self.store.running() if j['kind'] == 'lease']
         if state:
-            own = gpu.own_used_mb(state); budget = dict(total_mb=state['total_mb'], used_mb=state['used_mb'], own_mb=own, other_mb=max(state['used_mb'] - own, 0.0), reserve_mb=self.reserve_mb, free_for_models_mb=max(self.free_mb(state), 0.0))
-        return dict(gpu=state, budget=budget, resident=res, current=cur, lease=lease, queued=q, events=list(self.events)[-30:])
+            own = gpu.own_used_mb(state); budget = dict(total_mb=state['total_mb'], used_mb=state['used_mb'], own_mb=own, other_mb=max(state['used_mb'] - own, 0.0), reserve_mb=self.reserve_mb,
+                                                        reserved_mb=self.outstanding_mb(state, leases), free_for_models_mb=max(self.free_mb(state, leases), 0.0))
+        exclusive = next((j for j in leases if j['vram_gb'] is None), None)
+        return dict(gpu=state, budget=budget, resident=res, current=cur, lease=exclusive or (leases[0] if leases else None), leases=leases, queued=q, events=list(self.events)[-30:])
 
-    def free_mb(self, state):
-        """MB the service may still fill: the card's free memory less the reserve kept for the desktop and other processes."""
-        return state['total_mb'] - state['used_mb'] - self.reserve_mb
+    @staticmethod
+    def outstanding_mb(state, leases):
+        """MB promised to sized leases that their processes have not taken yet (a reservation counts until the app's pid is seen using it)."""
+        used = {p['pid']: p['used_mb'] for p in (state or {}).get('processes', [])}
+        return sum(max(l['vram_gb'] * MB - used.get((l.get('params') or {}).get('pid'), 0.0), 0.0) for l in leases if l['vram_gb'] is not None)
+
+    def free_mb(self, state, leases=None):
+        """MB the service may still fill: the card's free memory less the reserve kept for the desktop and what sized leases have reserved."""
+        leases = self.held if leases is None else leases
+        return state['total_mb'] - state['used_mb'] - self.reserve_mb - self.outstanding_mb(state, leases)
 
     # ---- the worker -------------------------------------------------------------------------------------------------------------------
     def _unload(self, key, why):
@@ -168,19 +183,33 @@ class Scheduler:
             ahead.append(j)
         return next((j for j in ahead if j['model'] in self.resident), cands[0])
 
-    def _held_lease(self):
-        """The lease that holds the GPU now, after expiring one whose app went quiet."""
+    def _held_leases(self):
+        """The leases held now, after expiring those whose app went quiet."""
+        held = []
         for j in self.store.running():
             if j['kind'] != 'lease': continue
             if self.clock() - (j['heartbeat_at'] or j['started_at'] or 0) > (j['ttl_s'] or 120.0):
                 self.store.update(j['id'], status='expired', finished_at=self.clock(), error='no heartbeat within its ttl'); self._event(f'lease {j["id"]} ({j["app"]}) expired'); self._notify(); continue
-            return j
-        return None
+            held.append(j)
+        self.held = held; return held
+
+    def _fits(self, j):
+        """Whether a model job can run beside the sized leases held now: its model is loaded, or would fit once every other model is freed."""
+        if not self.held: return True
+        m = self.registry.models.get(j['model'])
+        if m is None or m.key in self.resident: return True
+        state = self.probe()
+        if not state: return True
+        return self.free_mb(state) + sum(r.vram_mb for r in self.resident.values()) >= m.vram_gb * MB
 
     def _grant(self, j):
-        """Free what the lease asked for and grant it. A sized lease waits (stays queued, and nothing passes it) while other programs hold so much
-        that the room is not there even with every model freed; one that could never fit on this card fails at once."""
+        """Free what the lease asked for and grant it. A sized lease waits (stays queued, and nothing passes it) while other programs and leases
+        hold so much that the room is not there even with every model freed; one that could never fit on this card fails at once. An exclusive
+        lease waits until the sized ones held now are given back."""
         need = None if j['vram_gb'] is None else j['vram_gb'] * MB
+        if need is None and self.held:
+            if self._waiting != j['id']: self._waiting = j['id']; self._event(f'lease {j["id"]} ({j["app"]}) waits for the whole GPU: {len(self.held)} lease(s) hold part of it')
+            return None
         self._make_room(need)
         state = self.probe() if need is not None else None
         if state and need > state['total_mb'] - self.reserve_mb:
@@ -212,12 +241,17 @@ class Scheduler:
         self._notify(); return j
 
     def step(self):
-        """Do one thing, unless a lease holds the GPU: pending load/unload requests, then the next job. Returns the job it handled, or None."""
-        if self._held_lease(): return None                          # load requests wait too: the lease holder has the card to itself
+        """Do one thing, unless an exclusive lease holds the GPU: pending load/unload requests, then the next job that can run beside the sized
+        leases held. Returns the job it handled, or None."""
+        if any(l['vram_gb'] is None for l in self._held_leases()): return None          # load requests wait too: the holder has the card to itself
         self._do_control()
-        j = self._next(self.store.queued())
+        queued = self.store.queued(); j = self._next(queued)
         if j is None: return None
-        return self._grant(j) if j['kind'] == 'lease' else self._run(j)
+        if j['kind'] == 'lease': return self._grant(j)
+        if not self._fits(j):                                                            # does not fit beside the leases: something smaller may
+            j = next((q for q in queued if q['kind'] == 'run' and q['priority'] == j['priority'] and self._fits(q)), None)
+            if j is None: return None
+        return self._run(j)
 
     def start(self):
         """Run the worker on a daemon thread; returns the event that stops it."""

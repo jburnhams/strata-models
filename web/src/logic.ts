@@ -43,7 +43,9 @@ export function vramParts(gpu: Gpu, budget: Budget, resident: Resident[]): Part[
 export function finding(s: Status): string {
   if (!s.gpu) return 'No NVIDIA GPU found: models run on the CPU.'
   const waiting = s.queued.length ? `, ${s.queued.length} waiting` : ''
-  if (s.lease) return `The GPU is lent to ${s.lease.app}${s.lease.note ? ` (${s.lease.note})` : ''}${waiting}.`
+  if (s.lease && s.lease.vram_gb === null) return `The GPU is lent to ${s.lease.app}${s.lease.note ? ` (${s.lease.note})` : ''}${waiting}.`
+  const shared = (s.leases ?? []).filter(l => l.vram_gb !== null).map(l => `${l.vram_gb}\u00a0GB to ${l.app}`).join(', ')
+  if (shared && !s.current) return `Lent ${shared}; the rest is free for other work${waiting}.`
   if (s.current) return `Running ${describeJob(s.current)}${waiting}.`
   if (s.queued.length) return `${s.queued.length} waiting for the GPU.`
   const free = s.budget ? gb(s.budget.free_for_models_mb) : 0
