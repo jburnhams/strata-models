@@ -163,6 +163,8 @@ class Scheduler:
     def _ensure(self, model):
         """The loaded handle for `model`, loading it (after making room) when needed; returns (Resident, seconds spent loading)."""
         r = self.resident.get(model.key)
+        if r is not None and (r.model.runtime, r.model.name, r.model.options) != (model.runtime, model.name, model.options):
+            self._unload(model.key, 'its runtime, file or options were edited'); r = None   # the old handle belongs to the old runtime and settings
         if r is not None: self.resident.move_to_end(model.key); return r, 0.0
         self._make_room(model.vram_gb * MB)
         before = gpu.own_used_mb(self.probe()); t0 = time.perf_counter()

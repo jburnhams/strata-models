@@ -101,3 +101,12 @@ def test_preferences_give_an_app_its_own_model_and_default_params(engine, tmp_pa
     with pytest.raises(RegistryError, match='does not serve'): reg.set_preference(engine, 'bh', 'echo', 'missing')
     with pytest.raises(RegistryError, match='object'): reg.set_preference(engine, 'bh', 'echo', params=[1])
     s.registry.variant('small', dict(z=1)); assert any('~' in k for k in s.reload_registry().models)        # variants survive a reload
+
+
+def test_a_seed_that_would_break_an_edited_role_is_refused_and_writes_nothing(engine, tmp_path, clock):
+    from stratamodels import registry as reg
+    none = str(tmp_path / 'none.toml'); reg.seed(engine, _toml(tmp_path, BASE), none, clock)
+    reg.set_role(engine, 'echo', model='big')                                         # edited here: echo on big
+    b = _toml(tmp_path, BASE.replace('[models.big]\nruntime = "fake"\nroles = ["echo"]', '[models.big]\nruntime = "fake"\nroles = []').replace('vram_gb = 6', 'vram_gb = 7'))
+    with pytest.raises(RegistryError, match='nothing written'): reg.seed(engine, b, none, clock)
+    r = Registry.from_db(engine); assert r.resolve('echo').key == 'big' and r.models['big'].vram_gb == 6 and 'echo' in r.models['big'].roles

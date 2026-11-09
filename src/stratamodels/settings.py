@@ -1,6 +1,6 @@
 """The service's settings: rows of the `settings` table once the service has its database (`bind(engine)`, done by Store.connect); before that,
 and for a run without the database (`serve --memory`, the CLI's offline commands, tests), one JSON file, `~/.strata-models/settings.json` (the
-folder can be moved with STRATAMODELS_HOME). The first bind copies that file's values into an empty table.
+folder can be moved with STRATAMODELS_HOME). The first bind copies that file's values into an empty table, once (a marker row records it).
 
   data_dir        where the service keeps its own files (registry override, logs). Default: `data/` in this repository (gitignored).
   models_dir      where model weights are downloaded and read from, shared by every runtime. Default: `~/models`.
@@ -24,6 +24,7 @@ def _path(): return os.path.join(home(), 'settings.json')
 
 
 _engine = None
+IMPORTED = '_imported'                                                  # a row (not a setting) marking that the file was copied in
 
 
 def bind(engine):
@@ -35,11 +36,12 @@ def bind(engine):
     from sqlalchemy.orm import Session
     from stratamodels.db.models import Setting
     with Session(engine) as s:
-        if not s.scalar(select(func.count()).select_from(Setting)):
+        if s.get(Setting, IMPORTED) is None:                       # the file is copied in once: settings reset to their defaults later stay reset
             import time
-            for k, v in _file().items():
-                if k in KNOWN: s.add(Setting(key=k, value=str(v), updated_at=time.time()))
-            s.commit()
+            if not s.scalar(select(func.count()).select_from(Setting)):     # a table with rows from before this marker was imported already
+                for k, v in _file().items():
+                    if k in KNOWN: s.add(Setting(key=k, value=str(v), updated_at=time.time()))
+            s.add(Setting(key=IMPORTED, value=_path(), updated_at=time.time())); s.commit()
     _engine = engine
 
 
@@ -47,7 +49,7 @@ def _db_rows():
     from sqlalchemy import select
     from sqlalchemy.orm import Session
     from stratamodels.db.models import Setting
-    with _lock(), Session(_engine) as s: return {r.key: r.value for r in s.scalars(select(Setting))}
+    with _lock(), Session(_engine) as s: return {r.key: r.value for r in s.scalars(select(Setting)) if r.key != IMPORTED}
 
 
 def _lock():

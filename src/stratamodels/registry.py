@@ -178,9 +178,10 @@ def seed(engine, builtin=BUILTIN, override=None, clock=time.time, log=None):
             elif row.seed_hash != h:
                 if row.edited: out['kept'].append(f'role {k}'); continue
                 row.model, row.description, row.seed_hash, row.updated_at = str(r['model']), str(r.get('description', '')), h, now; out['updated'].append(f'role {k}')
+        s.flush()
+        try: _check(s)                                                 # file and database each valid can still merge into a broken registry
+        except RegistryError as e: s.rollback(); raise RegistryError(f'models.toml not imported (nothing written): with the rows edited here it would leave the registry inconsistent: {e}')
         s.commit()
-    try: Registry.from_db(engine)
-    except RegistryError as e: raise RegistryError(f'after importing models.toml the registry is inconsistent: {e}')
     if log and (out['added'] or out['updated'] or out['kept']): log(f'registry seed: added {len(out["added"])}, updated {len(out["updated"])}, kept as edited here {out["kept"] or "none"}')
     return out
 
@@ -192,14 +193,20 @@ def _edit(engine, fn):
     with session(engine) as s:
         try: fn(s); s.flush()
         except IntegrityError as e: s.rollback(); raise RegistryError(f'refused: a role or preference would name a model that is not in the registry ({e.orig})')
-        from sqlalchemy import select
-        from stratamodels.db.models import ModelRole, ModelRow, RoleRow
-        models = {r.key for r in s.scalars(select(ModelRow))}; serves = {(m.model, m.role) for m in s.scalars(select(ModelRole))}
-        for r in s.scalars(select(RoleRow)):
-            if r.model not in models: s.rollback(); raise RegistryError(f'role {r.key!r} names model {r.model!r}, which is not in the registry')
-            if (r.model, r.key) not in serves: s.rollback(); raise RegistryError(f'role {r.key!r} names model {r.model!r}, which does not list that role')
+        try: _check(s)
+        except RegistryError: s.rollback(); raise
         s.commit()
     return Registry.from_db(engine)
+
+
+def _check(s):
+    """Raise RegistryError if the rows in this session leave a role on a model that is missing or does not serve it."""
+    from sqlalchemy import select
+    from stratamodels.db.models import ModelRole, ModelRow, RoleRow
+    models = {r.key for r in s.scalars(select(ModelRow))}; serves = {(m.model, m.role) for m in s.scalars(select(ModelRole))}
+    for r in s.scalars(select(RoleRow)):
+        if r.model not in models: raise RegistryError(f'role {r.key!r} names model {r.model!r}, which is not in the registry')
+        if (r.model, r.key) not in serves: raise RegistryError(f'role {r.key!r} names model {r.model!r}, which does not list that role')
 
 
 def set_role(engine, key, model=None, description=None, clock=time.time):

@@ -279,7 +279,8 @@ def build(memory=False, sample_every_s=5.0):
     from stratamodels import registry as reg
     store = memory_store() if memory else Store.connect()
     if not memory: settings.bind(store.engine)                          # the settings live in the database (a demo keeps the file)
-    reg.seed(store.engine, log=print)                                    # models.toml: new entries in, edited rows kept
+    try: reg.seed(store.engine, log=print)                               # models.toml: new entries in, edited rows kept
+    except reg.RegistryError as e: print(f'registry seed refused, serving the database as it is: {e}')
     history = gpu.History(gpu.query, every_s=sample_every_s); history.sample()
     sch = Scheduler(store, Registry.from_db(store.engine), settings.models_dir(), probe=gpu.query, reserve_gb=settings.vram_reserve_gb())
     sch.start(); history.start(); return create_app(sch, history)

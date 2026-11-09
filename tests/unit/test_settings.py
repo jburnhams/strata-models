@@ -40,3 +40,12 @@ def test_bound_settings_live_in_the_database_and_start_from_the_file():
     assert settings.save(dict(models_dir='/tmp/v'))['models_dir'] == '/tmp/v' and settings.load()['models_dir'] == '/tmp/v'
     settings.bind(None); assert settings.load() == dict(vram_reserve_gb='2.5')         # the file was left alone
     settings.bind(e); assert settings.load() == dict(models_dir='/tmp/v')               # a table with rows is not refilled from the file
+
+
+def test_the_file_is_imported_once_so_settings_reset_to_defaults_stay_reset():
+    from stratamodels.store import memory_store
+    settings.save(dict(vram_reserve_gb=2.5))
+    e = memory_store().engine; settings.bind(e); assert settings.load() == dict(vram_reserve_gb='2.5')
+    settings.save(dict(vram_reserve_gb=None)); assert settings.load() == {}
+    settings.bind(None); settings.bind(e); assert settings.load() == {} and settings.vram_reserve_gb() == 1.0
+    settings.bind(None)
