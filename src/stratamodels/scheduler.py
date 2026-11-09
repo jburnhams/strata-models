@@ -212,6 +212,10 @@ class Scheduler:
         if need is None and self.held:
             if self._waiting != j['id']: self._waiting = j['id']; self._event(f'lease {j["id"]} ({j["app"]}) waits for the whole GPU: {len(self.held)} lease(s) hold part of it')
             return None
+        state = self.probe() if need is not None else None
+        if state and need <= state['total_mb'] - self.reserve_mb and self.free_mb(state) + sum(r.vram_mb for r in self.resident.values()) < need:
+            if self._waiting != j['id']: self._waiting = j['id']; self._event(f'lease {j["id"]} ({j["app"]}) waits for {need / MB:.1f} GB: other programs or leases hold the card')
+            return None                                                                     # freeing our models would not be enough: keep them, and wait
         self._make_room(need)
         state = self.probe() if need is not None else None
         if state and need > state['total_mb'] - self.reserve_mb:
@@ -253,7 +257,13 @@ class Scheduler:
         self._do_control()
         queued = self.store.queued(); j = self._next(queued)
         if j is None: return None
-        if j['kind'] == 'lease': return self._grant(j)
+        if j['kind'] == 'lease':
+            got = self._grant(j)
+            if got is not None or not self.held: return got
+            # The lease waits for room that OTHER leases hold, which no job of ours can give it: meanwhile run a job whose model is already
+            # loaded (it takes no more memory, so it never delays the lease), so the card is not idle behind a lease that cannot start yet.
+            j = next((q for q in queued if q['kind'] == 'run' and q['model'] in self.resident), None)
+            return self._run(j) if j else None
         if not self._fits(j):                                                            # does not fit beside the leases: something smaller may
             j = next((q for q in queued if q['kind'] == 'run' and q['priority'] == j['priority'] and self._fits(q)), None)
             if j is None: return None

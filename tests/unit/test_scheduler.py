@@ -250,3 +250,14 @@ def test_a_queued_variant_job_survives_a_restart(scheduler):
     assert done['status'] == 'done' and done['result']['echo'] == dict(x=1) and j['model'] in scheduler.registry.models
     k = scheduler.submit('echo', {}, 'evals', model='small', options=dict(tweak=3)); del scheduler.registry.models[k['model']]
     del scheduler.registry.models['small']; assert 'no longer served' in scheduler.step()['error']
+
+
+def test_jobs_on_loaded_models_run_while_a_lease_waits_for_other_leases(scheduler):
+    scheduler.submit('echo', {}, 'a'); scheduler.step()                             # `small` loaded
+    held = scheduler.lease('vlm', vram_gb=8); assert scheduler.step()['id'] == held['id']
+    waiting = scheduler.lease('stills', vram_gb=4)                                   # 12 - 0.5 - 1 - 8 - 2 = 0.5 GB: cannot be granted while `vlm` holds 8
+    loaded = scheduler.submit('echo', {}, 'b'); cold = scheduler.submit('other', {}, 'c')
+    assert scheduler.step()['id'] == loaded['id']                                    # runs on the loaded model meanwhile
+    assert scheduler.step() is None and scheduler.store.get(cold['id'])['status'] == 'queued'     # a model that would need loading still waits
+    assert scheduler.store.get(waiting['id'])['status'] == 'queued'
+    scheduler.release(held['id']); assert scheduler.step()['id'] == waiting['id']
