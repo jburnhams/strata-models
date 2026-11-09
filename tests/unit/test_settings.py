@@ -16,7 +16,7 @@ def test_defaults_env_and_file(tmp_path, monkeypatch):
 def test_save_load_reset_and_refusals():
     assert settings.load() == {}
     assert settings.save(dict(vram_reserve_gb=1.5, models_dir='/tmp/w')) == dict(vram_reserve_gb='1.5', models_dir='/tmp/w')
-    assert settings.vram_reserve_gb() == 1.5 and settings.all_settings()['models_dir'] == '/tmp/w'
+    assert settings.vram_reserve_gb() == 1.5 and settings.all_settings()['models_dir'] == os.path.abspath('/tmp/w')
     assert 'models_dir' not in settings.save(dict(models_dir=None))
     with pytest.raises(KeyError, match='unknown setting'): settings.save(dict(greeting='x'))
     with pytest.raises(ValueError, match='number'): settings.save(dict(vram_reserve_gb='x'))
