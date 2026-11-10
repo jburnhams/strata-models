@@ -40,6 +40,14 @@ describe('An experiment', () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     expect(await screen.findByText('No outputs yet: run the experiment.')).toBeInTheDocument()
   })
+  it('marks a candidate that has not run yet', async () => {
+    const a = evalFixtures.analysis()
+    mock.analysis = { ...a, dataset: { ...a.dataset, not_run: ['turbo'] }, decision: { ...a.decision, per_candidate: {} } }
+    setup(<App />, { route: '/evals/transcribe-en' })
+    await screen.findByText(/Keep large-v3/)
+    expect(await screen.findByText('Not run yet')).toBeInTheDocument()
+    expect(screen.getByText(/turbo not yet/)).toBeInTheDocument()
+  })
   it('says when the results shown are being updated', async () => {
     mock.analysis = { ...evalFixtures.analysis(), summary: { computed_at: 1_700_000_000, seconds: 40, stale: true } }
     setup(<App />, { route: '/evals/transcribe-en' })

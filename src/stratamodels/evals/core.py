@@ -941,9 +941,12 @@ def analyse(spec, engine, dataset=None, seed=None):
     """Everything a report says, as data: per candidate the value and interval of every metric, the comparison with the baseline, the decision."""
     ds, outs, runs = outputs_for(spec, engine, dataset)
     names = [c.name for c in spec.candidates]
+    ran = [
+        n for n in names if n == spec.baseline or any(o is not None for o in outs[n])
+    ]  # a candidate with no output at all is not run yet: it waits, it does not hold the others' comparison at 0 items
     complete = [
-        i for i in range(len(ds.items)) if all(outs[n][i] is not None for n in names)
-    ]  # compare only on items every candidate has
+        i for i in range(len(ds.items)) if all(outs[n][i] is not None for n in ran)
+    ]  # compare only on items every candidate that has run has
     items = [ds.items[i] for i in complete]
 
     def its(n):
@@ -954,7 +957,7 @@ def analyse(spec, engine, dataset=None, seed=None):
 
     res = dict(
         experiment=spec.to_json(),
-        dataset=dict(ds.to_json(), compared=len(complete)),
+        dataset=dict(ds.to_json(), compared=len(complete), not_run=[n for n in names if n not in ran]),
         candidates={},
         comparisons={},
         metrics={m: M.METRICS[m].to_json() for m in spec.metrics},
@@ -966,7 +969,9 @@ def analyse(spec, engine, dataset=None, seed=None):
             done=done,
             failed=sum(1 for o in outs[n] if o and o[1]),
             load_s=max(loads) if loads else None,
-            metrics={m: M.summarise(m, its(n), oo(n), seed) for m in spec.metrics if m != "judged"} if complete else {},
+            metrics={m: M.summarise(m, its(n), oo(n), seed) for m in spec.metrics if m != "judged"}
+            if complete and n in ran
+            else {},
         )
     current = {(c.name, it["id"]): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
     j = judgments(engine, spec.name, current)
@@ -977,7 +982,7 @@ def analyse(spec, engine, dataset=None, seed=None):
     base = spec.baseline
     pvals = []
     for n in names:
-        if n == base or not complete:
+        if n == base or not complete or n not in ran:
             continue
         res["comparisons"][n] = {
             m: M.compare(m, items, oo(base), oo(n), seed) for m in spec.metrics if m not in ("latency_s", "judged")
