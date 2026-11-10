@@ -14,6 +14,7 @@ Jonathan found the evals page slow to the point of timing out. faces-bh took 81 
 - `src/stratamodels/evals/similarity.py`: `phonetic` no longer crashes on a word its rules empty ("gh"), which made the describe-photos Judge tab answer 500.
 - `web/`: the experiment page says when its results are being updated and checks every 3 s until they are.
 - `src/stratamodels/evals/core.py` `analyse`: a candidate with no output at all is "not run yet" (`dataset.not_run`) and no longer holds every comparison at 0 items. describe-photos showed "No outputs yet" with 7 of 9 candidates done because the two qwen3.8-27b candidates had not run; now it compares the 7 on 60 items. The page marks such a candidate "Not run yet".
+- `web/` Judge tab: after a vote the buttons no longer stay disabled while the results tab's analysis reloads (it refreshes behind), and a picture can be clicked to choose it.
 
 ## 2026-11-09
 

@@ -138,7 +138,7 @@ function LastPair({ name, last }: { name: string; last: { item_id: string; x: st
 function Judge({ name }: { name: string }) {
   const qc = useQueryClient(); const [n, setN] = useState(0); const [last, setLast] = useState<{ item_id: string; x: string; y: string; winner: string } | null>(null)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
-  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
+  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); void qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 }) // the results refresh behind: the next pair must not wait for them
   return (
     <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
       {({ pair }) => (
@@ -153,7 +153,9 @@ function Judge({ name }: { name: string }) {
             {(['x', 'y'] as const).map(k => (
               <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid gap-2 rounded-surface border border-border p-3">
                 <h3 className="type-label">Output {k.toUpperCase()}</h3>
-                <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />
+                {imagePath(pair![k])
+                  ? <button type="button" className="cursor-pointer rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait" onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'} aria-label={`Choose output ${k.toUpperCase()}`} title={`Click to choose ${k.toUpperCase()}`}><Output o={pair![k]} label={`Output ${k.toUpperCase()}`} /></button>
+                  : <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />}
                 <Button onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'}>{`${k.toUpperCase()} is better`}</Button>
               </section>
             ))}
