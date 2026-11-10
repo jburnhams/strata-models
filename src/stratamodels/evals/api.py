@@ -2,8 +2,10 @@
 
 GET  /api/evals                              experiments (spec, how many outputs are in) and datasets
 PUT  /api/evals/{name}/spec                  {spec as JSON, the TOML's fields} add or change an experiment in the database (its file no longer overwrites it)
-GET  /api/evals/{name}                       the analysis: every metric with its interval, comparisons with the baseline, the decision
+GET  /api/evals/{name}                       the analysis: every metric with its interval, comparisons with the baseline, the decision; kept in
+                                             the database and worked out in the background (summary: computed_at, seconds, stale)
 POST /api/evals/{name}/run                   run what is missing, in the background, through the queue (batch); progress in GET .../status
+POST /api/evals/{name}/refresh                work the kept analysis out again (outputs changed from outside the service)
 GET  /api/evals/{name}/status
 GET  /api/evals/{name}/report                the standard write-up, as Markdown
 GET  /api/evals/{name}/pair                  a blind pair to judge: one item, two candidates' outputs as X and Y (a token says which is which);
@@ -32,6 +34,7 @@ from stratamodels.db.models import EvalJudgment
 from stratamodels.evals import core as C
 from stratamodels.evals import metrics as M
 from stratamodels.evals import report as R
+from stratamodels.evals.summaries import Summaries, finite
 
 SECRET = secrets.token_bytes(
     16
@@ -55,17 +58,6 @@ def _unsign(tok):
     if not raw or not hmac.compare_digest(sig, hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()[:24]):
         raise HTTPException(400, "this pair has expired: load a new one")
     return json.loads(base64.urlsafe_b64decode(raw))
-
-
-def finite(x):
-    """The analysis with NaN and infinities as null: JSON has no NaN, and a metric with no observations (every job failed) has no value."""
-    if isinstance(x, float):
-        return x if x == x and x not in (float("inf"), float("-inf")) else None
-    if isinstance(x, dict):
-        return {k: finite(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
-        return [finite(v) for v in x]
-    return x
 
 
 def same(x, y, kind=None):
@@ -93,31 +85,12 @@ CONTEXT_S = 2.0  # seconds either side of a phrase in a ?cut=1 answer
 def mount(app, scheduler):
     runs = {}
     engine = lambda: scheduler.store.engine
-    memo = {}
     sims = {}  # sims: (result key, result key) -> similarity, outputs never change under a key
+    summaries = app.state.eval_summaries = Summaries(engine)
 
     def analysis(s):
-        """The analysis, recomputed only when the spec, the outputs or the judgments changed: the bootstraps take seconds to a minute."""
-        from sqlalchemy import func, select
-
-        from stratamodels.db.models import EvalJudgment as J
-        from stratamodels.db.models import EvalResult as Rr
-
-        with C.session(engine()) as ses:
-            sig = (
-                C._canon(s.to_json()),
-                ses.scalar(select(func.count()).select_from(Rr).where(Rr.dataset == s.dataset)),
-                ses.scalar(select(func.max(Rr.id)).where(Rr.dataset == s.dataset)),
-                ses.scalar(select(func.count()).select_from(J).where(J.experiment == s.name)),
-                C.load_dataset(s.dataset, engine=engine()).version,
-                C.SCORED[0],
-            )
-        hit = memo.get(s.name)
-        if hit and hit[0] == sig:
-            return hit[1]
-        res = C.analyse(s, engine())
-        memo[s.name] = (sig, res)
-        return res
+        """The analysis as kept in the database, worked out in the background when what it reads changes (evals.summaries)."""
+        return summaries.get(s)
 
     def spec_or_404(name):
         try:
@@ -149,9 +122,11 @@ def mount(app, scheduler):
     def put_spec(name: str, d: dict):
         d = {**d, "name": name}
         try:
-            return C.save_spec(engine(), d).to_json()
+            out = C.save_spec(engine(), d).to_json()
         except C.EvalError as e:
             raise HTTPException(400, str(e))
+        summaries.refresh(name)
+        return out
 
     @app.get("/api/evals/{name}")
     def get_eval(name: str):
@@ -170,22 +145,36 @@ def mount(app, scheduler):
 
         def go():
             try:
-                st["result"] = C.run(
-                    s,
-                    engine(),
-                    C.SchedulerExecutor(scheduler),
-                    candidates=[candidate] if candidate else None,
-                    limit=limit,
-                    log=lambda m: st["log"].append(m),
+                res, state = (
+                    C.run(
+                        s,
+                        engine(),
+                        C.SchedulerExecutor(scheduler),
+                        candidates=[candidate] if candidate else None,
+                        limit=limit,
+                        log=lambda m: st["log"].append(m),
+                    ),
+                    "done",
                 )
-                st["state"] = "done"
             except Exception as e:
-                st["state"] = "failed"
+                res, state = None, "failed"
                 st["error"] = f"{type(e).__name__}: {e}"
+            # queued before the state says finished, so whoever waits on the run finds the refresh queued; forced: a [score] pass changes
+            # outputs in place, which the signature does not see
+            summaries.refresh(name, force=True)
+            if res is not None:
+                st["result"] = res
             st["finished_at"] = time.time()
+            st["state"] = state
 
         threading.Thread(target=go, name=f"eval-{name}", daemon=True).start()
         return st
+
+    @app.post("/api/evals/{name}/refresh", status_code=202)
+    def post_refresh(name: str):
+        spec_or_404(name)
+        summaries.refresh(name, force=True)
+        return dict(ok=True)
 
     @app.get("/api/evals/{name}/status")
     def get_run_status(name: str):
@@ -298,6 +287,7 @@ def mount(app, scheduler):
                 )
             )
             ses.commit()
+        summaries.refresh(name)
         return dict(ok=True, item_id=d["i"], x=d["x"], y=d["y"], winner=win)
 
     @app.get("/api/evals/{name}/outputs")

@@ -11,6 +11,10 @@ def tx(t):
     return dict(segments=[dict(text=t)])
 
 
+def test_phonetic_keeps_a_word_its_rules_would_empty():
+    assert S.phonetic("gh") == "gh" and S.phonetic("wh") == "wh" and S.text_similarity("gh wh", "gh wh") == 1.0
+
+
 def test_phonetic_keys_match_words_that_sound_alike():
     assert (
         S.phonetic("there") == S.phonetic("their")

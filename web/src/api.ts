@@ -88,6 +88,7 @@ export interface Analysis {
   metrics: Record<string, MetricInfo>
   decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }
   judgments?: { n: number; strength: Record<string, [number, number, number]> }
+  summary?: { computed_at: number; seconds: number; stale: boolean } // worked out ahead and kept; stale: a fresh one is on its way
 }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }

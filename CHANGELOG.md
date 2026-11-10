@@ -2,6 +2,18 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-10
+
+**Evals page: analyses worked out ahead and kept in the database (branch `evals-precompute`)**
+Jonathan found the evals page slow to the point of timing out. faces-bh took 81 to 97 s per analysis: the face-verification bootstrap re-read every embedding for each of its 2,800 samples. The analysis was memoised in memory only, so every restart, new output or judgment made the page wait again.
+
+- `src/stratamodels/evals/metrics.py`: a `dataset` metric may have `prepare`/`on`: verification reads embeddings and works out the similarity matrix once, a bootstrap sample only picks rows and columns. faces-bh 97 s -> 11 s, every value and interval the same as before.
+- `src/stratamodels/evals/summaries.py`: **new**. Each experiment's analysis kept in `eval_summaries` with the signature of what it read (spec, dataset version, outputs count and newest id, judgments, the analysis code). Worked out in the background when a run finishes, a judgment comes in, a spec is saved, and at the service's start. The page gets the kept one; when it is out of date and took over 1.5 s it gets it marked `summary.stale` while a fresh one is worked out (one worker, requests coalesce).
+- `src/stratamodels/evals/api.py`: uses it; `POST /api/evals/{name}/refresh` for outputs changed from outside the service.
+- `src/stratamodels/db/models.py`, `migrations/20261110_5c1d2e7f9a30_eval_summaries.py`: table `eval_summaries`.
+- `src/stratamodels/evals/similarity.py`: `phonetic` no longer crashes on a word its rules empty ("gh"), which made the describe-photos Judge tab answer 500.
+- `web/`: the experiment page says when its results are being updated and checks every 3 s until they are.
+
 ## 2026-11-09
 
 **One CUDA per venv: Whisper as a venv-worker, the service's venv on CUDA 13 (branch `whisper-worker`)**

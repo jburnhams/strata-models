@@ -88,6 +88,18 @@ class EvalJudgment(Base):
     )  # while they are still the candidates' outputs
 
 
+class EvalSummary(Base):
+    """An experiment's analysis (evals.core.analyse, NaN as null), worked out in the background when its outputs, judgments or spec change, so the
+    page reads it instead of waiting for the bootstraps. `signature` is what it was worked out from (evals.summaries.signature)."""
+
+    __tablename__ = "eval_summaries"
+    experiment: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    signature: Mapped[str] = mapped_column(sa.String(64))
+    result: Mapped[dict] = mapped_column(sa.JSON)
+    computed_at: Mapped[float]
+    seconds: Mapped[float]
+
+
 class JobResult(Base):
     """A run's output (JSON: embeddings, transcripts, the path of a generated picture). Kept apart from the job row so the history stays small:
     results go after a week (Store.prune), the job rows stay."""

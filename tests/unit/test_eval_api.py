@@ -252,15 +252,81 @@ def test_judging_skips_only_judgments_of_current_outputs_and_rescores_new_output
     assert client.get("/api/evals/fake-asr/pair").json()["pair"] is not None
 
 
-def test_the_analysis_is_redone_after_a_score_pass_changes_outputs_in_place(client, monkeypatch):
+def wait_idle(client):
+    pool = client.app.state.eval_summaries
+    pool.pool.submit(lambda: None).result(timeout=60)  # the one worker has done what was queued before
+
+
+def test_the_analysis_is_kept_and_redone_only_when_asked_or_changed(client, monkeypatch):
     from stratamodels.evals import core as C
 
     calls = []
     real = C.analyse
     monkeypatch.setattr(C, "analyse", lambda *a, **k: calls.append(1) or real(*a, **k))
+    a = client.get("/api/evals/fake-asr").json()
     client.get("/api/evals/fake-asr")
+    assert len(calls) == 1 and a["summary"]["stale"] is False  # kept
+    client.app.state.eval_summaries.memo.clear()  # a restarted service reads it back from the database
     client.get("/api/evals/fake-asr")
-    assert len(calls) == 1  # memoised
-    monkeypatch.setattr(C, "SCORED", [C.SCORED[0] + 1])  # a score batch was written: same rows, new readings
-    client.get("/api/evals/fake-asr")
+    assert len(calls) == 1
+    assert (
+        client.post("/api/evals/fake-asr/refresh").status_code == 202
+    )  # a score pass changes outputs in place: asked for
+    wait_idle(client)
     assert len(calls) == 2
+    client.post("/api/evals/fake-asr/run", params=dict(limit=5))
+    wait_run(client, "fake-asr")
+    wait_idle(client)
+    assert len(calls) == 3  # a finished run works it out again
+    assert client.get("/api/evals/fake-asr").json()["dataset"]["compared"] == 5 and len(calls) == 3
+
+
+def test_a_slow_analysis_is_served_stale_while_redone_in_the_background(client, monkeypatch):
+    import threading
+
+    from stratamodels.evals import summaries as SU
+
+    sm = client.app.state.eval_summaries
+    first = client.get("/api/evals/fake-asr").json()
+    assert first["dataset"]["compared"] == 0
+    monkeypatch.setattr(SU, "QUICK_S", -1.0)  # every analysis counts as slow
+    gate = threading.Event()
+    from stratamodels.evals import core as C
+
+    real = C.analyse
+    monkeypatch.setattr(C, "analyse", lambda *a, **k: gate.wait(30) and real(*a, **k))
+    client.post("/api/evals/fake-asr/run", params=dict(limit=4))
+    wait_run(client, "fake-asr")
+    a = client.get("/api/evals/fake-asr").json()
+    assert a["summary"]["stale"] is True and a["dataset"]["compared"] == 0  # the old one at once, not a wait
+    gate.set()
+    wait_idle(client)
+    b = client.get("/api/evals/fake-asr").json()
+    assert b["summary"]["stale"] is False and b["dataset"]["compared"] == 4
+    assert sm.pending == set()
+
+
+def test_a_judgment_refreshes_the_kept_analysis(client):
+    client.post("/api/evals/fake-asr/run", params=dict(limit=10))
+    wait_run(client, "fake-asr")
+    wait_idle(client)
+    p = client.get("/api/evals/fake-asr/pair").json()["pair"]
+    assert client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="x")).status_code == 201
+    wait_idle(client)
+    from stratamodels.evals import core as C
+
+    sig = client.app.state.eval_summaries.memo["fake-asr"][0]
+    from stratamodels.evals.summaries import signature
+
+    assert sig == signature(C.load_spec("fake-asr"), client.app.state.eval_summaries.engine())
+
+
+def test_warm_works_out_every_experiment(client):
+    from stratamodels.db.models import EvalSummary
+    from stratamodels.evals import core as C
+
+    sm = client.app.state.eval_summaries
+    sm.warm()
+    wait_idle(client)
+    with C.session(sm.engine()) as s:
+        assert {r.experiment for r in s.scalars(C.select(EvalSummary))} >= {"fake-asr"}

@@ -29,6 +29,19 @@ class Metric:
     unit: str = ""
     score: object = None  # (item, output, error) -> value (mean/binary), (num, den) (ratio), or what `dataset` reads
     dataset: object = None  # (items, outputs) -> value, for shape 'dataset'
+    prepare: object = (
+        None  # optional, shape 'dataset': (items, outputs) -> state read once, so a bootstrap sample is only `on`
+    )
+    on: object = (
+        None  # (state, indices) -> the value on that sample of the items (with repeats), the same as `dataset` on it
+    )
+
+    def sampler(self, items, outputs):
+        """A function of item indices (a bootstrap sample) -> the metric's value on those items."""
+        if self.prepare is not None:
+            st = self.prepare(items, outputs)
+            return lambda idx: self.on(st, idx)
+        return lambda idx: self.dataset([items[i] for i in idx], [outputs[i] for i in idx])
 
     def to_json(self):
         return dict(name=self.name, shape=self.shape, better=self.better, description=self.description, unit=self.unit)
@@ -165,29 +178,43 @@ def _avg_ranks(x):
     return ((ends - counts + 1 + ends) / 2.0)[inv]
 
 
-def verification(items, outputs, far=0.01):
-    """Face verification from the embeddings of the reference faces: every pair of items is same-person or not (reference.person). Returns
-    dict(auc, tar, threshold, pairs): ROC AUC, and the share of same-person pairs accepted at the threshold that lets `far` of different-person
-    pairs through. Items whose face was not found count as rejected (distance 2)."""
+def verification_prepare(items, outputs):
+    """What verification reads from each item, once: the reference face's embedding (None when not found), the person, and the similarity of
+    every two items' embeddings. A bootstrap sample then only picks rows and columns."""
     emb, who = [], []
     for it, out in zip(items, outputs):
         p = (it.get("reference") or {}).get("person")
-        if p is None:
-            continue
-        f = best_face(it, out[0]) if out[1] is None else None
+        f = best_face(it, out[0]) if p is not None and out[1] is None else None
         emb.append(np.asarray(f["embedding"], np.float32) if f and "embedding" in f else None)
         who.append(p)
-    n = len(emb)
+    dim = next((len(e) for e in emb if e is not None), 512)
+    E = (
+        np.stack([e if e is not None else np.zeros(dim, np.float32) for e in emb])
+        if emb
+        else np.zeros((0, dim), np.float32)
+    )
+    ok = np.array([e is not None for e in emb], bool)
+    labelled = np.array([w is not None for w in who], bool)
+    _, codes = (
+        np.unique(np.array([str(w) for w in who], dtype=object), return_inverse=True)
+        if who
+        else (None, np.zeros(0, int))
+    )
+    return dict(sim=E @ E.T, ok=ok, labelled=labelled, who=np.asarray(codes))
+
+
+def verification_on(st, idx=None, far=0.01):
+    """verification() on items idx (with repeats) of a prepared set, all of them when idx is None."""
+    idx = np.arange(len(st["ok"])) if idx is None else np.asarray(idx)
+    idx = idx[st["labelled"][idx]]
+    n = len(idx)
     if n < 2:
         return dict(auc=float("nan"), tar=float("nan"), threshold=float("nan"), pairs=0)
-    dim = next((len(e) for e in emb if e is not None), 512)
-    E = np.stack([e if e is not None else np.zeros(dim, np.float32) for e in emb])
-    ok = np.array([e is not None for e in emb])
-    sim = E @ E.T
     iu = np.triu_indices(n, 1)
-    s = sim[iu]
-    s[~(ok[iu[0]] & ok[iu[1]])] = -1.0
-    same = np.array(who)[iu[0]] == np.array(who)[iu[1]]
+    a, b = idx[iu[0]], idx[iu[1]]
+    s = st["sim"][a, b].astype(np.float32)
+    s[~(st["ok"][a] & st["ok"][b])] = -1.0
+    same = st["who"][a] == st["who"][b]
     pos, neg = s[same], s[~same]
     if pos.size == 0 or neg.size == 0:
         return dict(auc=float("nan"), tar=float("nan"), threshold=float("nan"), pairs=int(s.size))
@@ -196,6 +223,13 @@ def verification(items, outputs, far=0.01):
     thr = float(np.quantile(neg, 1 - far))
     tar = float((pos > thr).mean())
     return dict(auc=float(auc), tar=tar, threshold=thr, pairs=int(s.size))
+
+
+def verification(items, outputs, far=0.01):
+    """Face verification from the embeddings of the reference faces: every pair of items is same-person or not (reference.person). Returns
+    dict(auc, tar, threshold, pairs): ROC AUC, and the share of same-person pairs accepted at the threshold that lets `far` of different-person
+    pairs through. Items whose face was not found count as rejected (distance 2)."""
+    return verification_on(verification_prepare(items, outputs), None, far)
 
 
 # ---- picture descriptions (structured, against a reference description) -------------------------------------------------------------------
@@ -363,6 +397,8 @@ METRICS = {
             "",
             None,
             lambda it, out: verification(it, out)["auc"],
+            verification_prepare,
+            lambda st, idx: verification_on(st, idx)["auc"],
         ),
         Metric(
             "tar_at_far1",
@@ -372,6 +408,8 @@ METRICS = {
             "%",
             None,
             lambda it, out: verification(it, out)["tar"],
+            verification_prepare,
+            lambda st, idx: verification_on(st, idx)["tar"],
         ),
         Metric(
             "desc_fields",
@@ -444,13 +482,14 @@ def summarise(metric, items, outputs, seed=None):
     """One candidate's value of `metric` with its 95 % interval: dict(value, low, high, n). outputs[i] is (output, error), items carry _run_s."""
     m = METRICS[metric]
     if m.shape == "dataset":
-        val = m.dataset(items, outputs)
-        rng = np.random.default_rng(S.SEED if seed is None else seed)
+        on = m.sampler(items, outputs)
         n = len(items)
+        val = on(np.arange(n))
+        rng = np.random.default_rng(S.SEED if seed is None else seed)
         boots = []
         for _ in range(200):
             idx = rng.integers(0, n, n)
-            v = m.dataset([items[i] for i in idx], [outputs[i] for i in idx])
+            v = on(idx)
             if not math.isnan(v):
                 boots.append(v)
         lo, hi = (
@@ -478,15 +517,14 @@ def compare(metric, items, base_outputs, cand_outputs, seed=None):
     interval lies wholly on the better side, False when wholly on the worse side, None when it straddles 0), and for binary the McNemar counts)."""
     m = METRICS[metric]
     if m.shape == "dataset":
-        a = m.dataset(items, base_outputs)
-        b = m.dataset(items, cand_outputs)
-        rng = np.random.default_rng(S.SEED if seed is None else seed)
+        on_a, on_b = m.sampler(items, base_outputs), m.sampler(items, cand_outputs)
         n = len(items)
+        a, b = on_a(np.arange(n)), on_b(np.arange(n))
+        rng = np.random.default_rng(S.SEED if seed is None else seed)
         d = []
         for _ in range(200):
             idx = rng.integers(0, n, n)
-            it = [items[i] for i in idx]
-            x, y = m.dataset(it, [base_outputs[i] for i in idx]), m.dataset(it, [cand_outputs[i] for i in idx])
+            x, y = on_a(idx), on_b(idx)
             if not (math.isnan(x) or math.isnan(y)):
                 d.append(y - x)
         lo, hi = (float(np.quantile(d, 0.025)), float(np.quantile(d, 0.975))) if d else (float("nan"), float("nan"))

@@ -40,6 +40,11 @@ describe('An experiment', () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     expect(await screen.findByText('No outputs yet: run the experiment.')).toBeInTheDocument()
   })
+  it('says when the results shown are being updated', async () => {
+    mock.analysis = { ...evalFixtures.analysis(), summary: { computed_at: 1_700_000_000, seconds: 40, stale: true } }
+    setup(<App />, { route: '/evals/transcribe-en' })
+    expect(await screen.findByText(/Updating: these results are from/)).toBeInTheDocument()
+  })
   it('runs the missing outputs and shows the progress', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en' })
     await user.click(await screen.findByRole('button', { name: 'Run missing outputs' }))
