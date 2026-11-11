@@ -82,12 +82,13 @@ export interface Comparison { n: number; mean_a: number; mean_b: number; diff: n
 export interface Verdict { verdict: 'adopt' | 'reject' | 'unclear'; why: string; gain: number }
 export interface Analysis {
   experiment: Experiment & { candidates: Candidate[]; metrics: string[]; primary: string; baseline: string }
-  dataset: DatasetInfo & { compared: number; n: number }
+  dataset: DatasetInfo & { compared: number; n: number; not_run?: string[] }
   candidates: Record<string, { done: number; failed: number; load_s: number | null; metrics: Record<string, Interval> }>
   comparisons: Record<string, Record<string, Comparison>>
   metrics: Record<string, MetricInfo>
   decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }
   judgments?: { n: number; strength: Record<string, [number, number, number]> }
+  summary?: { computed_at: number; seconds: number; stale: boolean } // worked out ahead and kept; stale: a fresh one is on its way
 }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }

@@ -80,6 +80,8 @@ def phonetic(word):
         return w
     for pat, rep in _RULES:
         w = re.sub(pat, rep, w)
+    if not w:  # every letter dropped by the rules ("gh", "wh"): the word as it is
+        return word.lower()
     w = w[0] + re.sub(r"[aeiouy]", "", w[1:])  # vowels only count at the start
     return re.sub(r"(.)\1+", r"\1", w)  # doubled letters sound once
 

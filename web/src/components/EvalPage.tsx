@@ -22,7 +22,7 @@ function Results({ a }: { a: Analysis }) {
   const columns: Column<Row>[] = [
     { key: 'name', header: 'Candidate', cell: r => <span className="grid"><span className="font-mono">{r.name}</span>{r.name === a.experiment.baseline && <span className="type-caption text-muted-foreground">baseline</span>}</span> },
     ...metrics.map(m => ({ key: m, header: m, numeric: true, cell: (r: Row) => { const v = a.candidates[r.name]?.metrics[m]; const info = a.metrics[m]; return v ? <span className="grid"><span>{value(info, v.value)}</span><span className="type-caption text-muted-foreground">{value(info, v.low)} to {value(info, v.high)}</span></span> : '–' } })),
-    { key: 'verdict', header: 'Decision', cell: r => { const v = a.decision.per_candidate[r.name]; return v ? <Status tone={VERDICT_TONE[v.verdict]}>{VERDICT_WORD[v.verdict]}</Status> : <span className="text-muted-foreground">Baseline</span> } },
+    { key: 'verdict', header: 'Decision', cell: r => { const v = a.decision.per_candidate[r.name]; return v ? <Status tone={VERDICT_TONE[v.verdict]}>{VERDICT_WORD[v.verdict]}</Status> : <span className="text-muted-foreground">{a.dataset.not_run?.includes(r.name) ? 'Not run yet' : 'Baseline'}</span> } },
   ]
   type CRow = { key: string; cand: string; metric: string }
   const crows: CRow[] = Object.entries(a.comparisons).flatMap(([cand, comp]) => Object.keys(comp).map(metric => ({ key: `${cand}/${metric}`, cand, metric })))
@@ -48,7 +48,7 @@ function Results({ a }: { a: Analysis }) {
           <ul className="grid gap-1 type-body">{Object.entries(a.judgments.strength).sort((x, y) => y[1][0] - x[1][0]).map(([n, s]) => <li key={n}><span className="font-mono">{n}</span>: {s[0].toFixed(2)} ({s[1].toFixed(2)} to {s[2].toFixed(2)})</li>)}</ul>
         </section>
       )}
-      <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: {a.dataset.compared} of {a.dataset.n} items have every candidate&apos;s output. Intervals are 95 %; the Write-up tab says how each is computed.</p>
+      <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: {a.dataset.compared} of {a.dataset.n} items have every candidate&apos;s output{a.dataset.not_run?.length ? ` (of those that have run: ${a.dataset.not_run.join(', ')} not yet)` : ''}. Intervals are 95 %; the Write-up tab says how each is computed.</p>
     </div>
   )
 }
@@ -138,7 +138,7 @@ function LastPair({ name, last }: { name: string; last: { item_id: string; x: st
 function Judge({ name }: { name: string }) {
   const qc = useQueryClient(); const [n, setN] = useState(0); const [last, setLast] = useState<{ item_id: string; x: string; y: string; winner: string } | null>(null)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
-  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
+  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); void qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 }) // the results refresh behind: the next pair must not wait for them
   return (
     <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
       {({ pair }) => (
@@ -153,7 +153,9 @@ function Judge({ name }: { name: string }) {
             {(['x', 'y'] as const).map(k => (
               <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid gap-2 rounded-surface border border-border p-3">
                 <h3 className="type-label">Output {k.toUpperCase()}</h3>
-                <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />
+                {imagePath(pair![k])
+                  ? <button type="button" className="cursor-pointer rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait" onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'} aria-label={`Choose output ${k.toUpperCase()}`} title={`Click to choose ${k.toUpperCase()}`}><Output o={pair![k]} label={`Output ${k.toUpperCase()}`} /></button>
+                  : <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />}
                 <Button onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'}>{`${k.toUpperCase()} is better`}</Button>
               </section>
             ))}
@@ -192,10 +194,11 @@ function RunButton({ name }: { name: string }) {
 
 export default function EvalPage() {
   const { name = '' } = useParams()
-  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: 60_000 })
+  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: q => (q.state.data?.summary?.stale ? 3000 : 60_000) })
   return (
     <div className="grid gap-6">
       <PageHeader title={name} scope={load.status === 'ready' ? load.data.experiment.question : undefined} actions={<RunButton name={name} />} finding={load.status === 'ready' ? { text: finding(load.data) } : undefined} />
+      {load.status === 'ready' && load.data.summary?.stale && <p className="type-caption text-muted-foreground">Updating: these results are from {new Date(load.data.summary.computed_at * 1000).toLocaleTimeString()}, new outputs or judgments are being added.</p>}
       <DataView state={load} isEmpty={() => false} skeleton={<TableSkeleton rows={4} columns={5} />} empty={null}>
         {a => (
           <Tabs param="tab" label="Experiment view" items={[{ value: 'results', label: 'Results' }, { value: 'judge', label: 'Judge' }, { value: 'outputs', label: 'Outputs' }, { value: 'writeup', label: 'Write-up' }]}>

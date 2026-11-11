@@ -380,7 +380,10 @@ def build(memory=False, sample_every_s=5.0):
     )
     sch.start()
     history.start()
-    return create_app(sch, history)
+    app = create_app(sch, history)
+    if not memory:
+        app.state.eval_summaries.warm()  # every experiment's analysis up to date in the background, before the page asks
+    return app
 
 
 def main(argv=None):

@@ -38,7 +38,7 @@ def test_datasets_are_versioned_and_checked(setup, tmp_path):
 
 def test_specs_are_parsed_and_refused_when_wrong(setup):
     s = C.load_spec("fake-asr")
-    assert s.baseline == "base" and s.guards == dict(latency_s=1e9) and s.judge and s.candidate("better").model == "big"
+    assert s.baseline == "base" and s.guards == {} and s.judge and s.candidate("better").model == "big"
     with pytest.raises(C.EvalError, match="no candidate"):
         s.candidate("x")
     with pytest.raises(C.EvalError, match="no experiment"):
@@ -390,3 +390,22 @@ def test_specs_and_datasets_live_in_the_database_once_seen(setup, engine, tmp_pa
         s.get(EvalExperiment, "db-only").spec = dict(name="db-only")
         s.commit()
     assert isinstance(C.list_specs(engine)["db-only"], C.EvalError)
+
+
+def test_a_candidate_not_run_yet_does_not_hold_the_others_at_zero_items(setup, scheduler, engine):
+    stop = scheduler.start()
+    try:
+        s = C.load_spec("fake-asr")
+        others = [c.name for c in s.candidates if c.name != s.candidates[-1].name]
+        C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=others, log=lambda m: None)
+        res = C.analyse(s, engine)
+        late = s.candidates[-1].name
+        assert res["dataset"]["compared"] == 40 and res["dataset"]["not_run"] == [late]
+        assert (
+            res["candidates"][late]["metrics"] == {}
+            and late not in res["comparisons"]
+            and late not in res["decision"]["per_candidate"]
+        )
+        assert all(res["candidates"][n]["metrics"] for n in others)
+    finally:
+        stop.set()

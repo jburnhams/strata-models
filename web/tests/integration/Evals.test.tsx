@@ -40,6 +40,19 @@ describe('An experiment', () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     expect(await screen.findByText('No outputs yet: run the experiment.')).toBeInTheDocument()
   })
+  it('marks a candidate that has not run yet', async () => {
+    const a = evalFixtures.analysis()
+    mock.analysis = { ...a, dataset: { ...a.dataset, not_run: ['turbo'] }, decision: { ...a.decision, per_candidate: {} } }
+    setup(<App />, { route: '/evals/transcribe-en' })
+    await screen.findByText(/Keep large-v3/)
+    expect(await screen.findByText('Not run yet')).toBeInTheDocument()
+    expect(screen.getByText(/turbo not yet/)).toBeInTheDocument()
+  })
+  it('says when the results shown are being updated', async () => {
+    mock.analysis = { ...evalFixtures.analysis(), summary: { computed_at: 1_700_000_000, seconds: 40, stale: true } }
+    setup(<App />, { route: '/evals/transcribe-en' })
+    expect(await screen.findByText(/Updating: these results are from/)).toBeInTheDocument()
+  })
   it('runs the missing outputs and shows the progress', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en' })
     await user.click(await screen.findByRole('button', { name: 'Run missing outputs' }))
@@ -71,6 +84,16 @@ describe('An experiment', () => {
     await user.click(screen.getByText('Pipeline: 2 steps'))
     expect(screen.getAllByText('a fluffy ginger cat asleep on a windowsill').length).toBeGreaterThan(0)
   })
+  it('chooses a picture by clicking it, without waiting for the results to refresh', async () => {
+    server.use(
+      http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { ...evalFixtures.pair(), has_media: false, x: { path: '/o/x.png' }, y: { path: '/o/y.png' } }, remaining: 3 })),
+      http.get('/api/evals/:name', async () => { await new Promise(r => setTimeout(r, 5000)); return HttpResponse.json(mock.analysis) }),
+    )
+    const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    await user.click(await screen.findByRole('button', { name: 'Choose output Y' }, { timeout: 7000 }))
+    await waitFor(() => expect(mock.calls).toContain('judge y'))
+    expect(await screen.findByRole('button', { name: 'Choose output X' })).toBeEnabled()
+  }, 15000)
   it('shows every output on the Outputs tab, each step of a pipeline, and failures', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=outputs' })
     expect(await screen.findByText('Prompt: a cat')).toBeInTheDocument()

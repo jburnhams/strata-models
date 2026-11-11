@@ -72,6 +72,33 @@ def test_verification_separates_people():
     assert math.isnan(M.verification([dict(id="x")], [(None, None)])["auc"])
 
 
+def test_verification_bootstrap_on_prepared_embeddings_matches_reading_every_sample():
+    import dataclasses
+    import random
+
+    rnd = random.Random(3)
+    items, outs = [], []
+    for k in range(40):
+        person = "abcde"[k % 5] if k % 7 else None  # some items unlabelled: left out as before
+        base = [1.0 if j == k % 5 else 0.0 for j in range(5)]
+        vec = [x + rnd.uniform(-0.6, 0.6) for x in base]
+        items.append(dict(id=str(k), reference=dict(person=person, box=[0, 0, 10, 10])))
+        outs.append((None, "failed") if k % 11 == 0 else (dict(faces=[dict(bbox=[0, 0, 10, 10], embedding=vec)]), None))
+    for name in ("verification_auc", "tar_at_far1"):
+        slow = dataclasses.replace(M.METRICS[name], prepare=None, on=None)
+        fast = M.METRICS[name]
+        try:
+            M.METRICS[name] = slow
+            want = M.summarise(name, items, outs, seed=1), M.compare(name, items, outs, outs[::-1], seed=1)
+        finally:
+            M.METRICS[name] = fast
+        got = M.summarise(name, items, outs, seed=1), M.compare(name, items, outs, outs[::-1], seed=1)
+        assert got[0] == pytest.approx(want[0]) and {
+            k: v for k, v in got[1].items() if k != "improves"
+        } == pytest.approx({k: v for k, v in want[1].items() if k != "improves"})
+    assert math.isnan(M.verification_on(M.verification_prepare([], []))["auc"])
+
+
 def test_generic_metrics():
     it = dict(id="1", reference=dict(answer="Yes."), _run_s=0.5)
     assert (
