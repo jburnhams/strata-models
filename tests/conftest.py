@@ -178,7 +178,7 @@ judge = true
 primary = "wer"
 baseline = "base"
 min_effect = 0.02
-guards = { latency_s = 1e9 }   # the fake runs in microseconds, so latency ratios are scheduler noise (a 1000x guard failed ~1 run in 7): this test is about the wer decision, guards have tests of their own
+guards = {}   # the fake runs in microseconds: a baseline timed at 0 s breaks any latency guard however large its limit (a zero baseline allows nothing, as it must for failures), ~1 run in 15; this test is about the wer decision, guards have tests of their own
 [[candidates]]
 name = "base"
 model = "small"

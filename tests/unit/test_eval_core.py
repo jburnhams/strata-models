@@ -38,7 +38,7 @@ def test_datasets_are_versioned_and_checked(setup, tmp_path):
 
 def test_specs_are_parsed_and_refused_when_wrong(setup):
     s = C.load_spec("fake-asr")
-    assert s.baseline == "base" and s.guards == dict(latency_s=1e9) and s.judge and s.candidate("better").model == "big"
+    assert s.baseline == "base" and s.guards == {} and s.judge and s.candidate("better").model == "big"
     with pytest.raises(C.EvalError, match="no candidate"):
         s.candidate("x")
     with pytest.raises(C.EvalError, match="no experiment"):

@@ -11,7 +11,11 @@ from stratamodels.server.app import create_app
 @pytest.fixture
 def client(scheduler, setup):
     stop = scheduler.start()
-    yield TestClient(create_app(scheduler))
+    app = create_app(scheduler)
+    yield TestClient(app)
+    app.state.eval_summaries.pool.shutdown(
+        wait=True
+    )  # a refresh still queued would call C.analyse after this test, inside the next one's monkeypatched count
     stop.set()
 
 
@@ -54,6 +58,9 @@ def test_blind_judging(client, scheduler):
     for _ in range(5):
         p = client.get("/api/evals/fake-asr/pair").json()["pair"]
         client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="tie"))
+    wait_idle(
+        client
+    )  # each judgment queues a refresh; on a slow runner the analysis takes over QUICK_S and a GET before it lands is served the kept one, marked stale
     assert client.get("/api/evals/fake-asr").json()["judgments"]["n"] == 6
     assert client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="z")).status_code == 400
     assert (
@@ -260,6 +267,9 @@ def wait_idle(client):
 def test_the_analysis_is_kept_and_redone_only_when_asked_or_changed(client, monkeypatch):
     from stratamodels.evals import core as C
 
+    wait_idle(
+        client
+    )  # the service's start-up warm() works the analysis out in the background: let it finish before counting
     calls = []
     real = C.analyse
     monkeypatch.setattr(C, "analyse", lambda *a, **k: calls.append(1) or real(*a, **k))
