@@ -71,7 +71,7 @@ class Summaries:
         self.memo = {}  # name -> (signature, summary): saves reading the row back on every request
         self.locks = {}
         self.guard = threading.Lock()
-        self.pending = set()
+        self.pending = {}  # name -> force, of refreshes queued and not started
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="eval-summaries")
 
     def _lock(self, name):
@@ -134,16 +134,25 @@ class Summaries:
         return {**old, "summary": {**(old.get("summary") or {}), "stale": True}}
 
     def refresh(self, name, force=False):
-        """Work out name's analysis in the background (once, however often asked before it starts)."""
+        """Work out name's analysis in the background (once, however often asked before it starts; forced if any of those asks was)."""
         with self.guard:
             if name in self.pending:
+                self.pending[name] = (
+                    self.pending[name] or force
+                )  # a forced ask joining a queued ordinary one keeps its force
                 return
-            self.pending.add(name)
-        self.pool.submit(self._run, name, force)
+            self.pending[name] = force
+        self.pool.submit(self._run, name)
 
-    def _run(self, name, force):
+    def refresh_dataset(self, dataset, force=False):
+        """Every experiment on `dataset`: outputs are shared by key across experiments, and a [score] pass rewrites them in place."""
+        for name, s in C.list_specs(self.engine()).items():
+            if not isinstance(s, C.EvalError) and s.dataset == dataset:
+                self.refresh(name, force)
+
+    def _run(self, name):
         with self.guard:
-            self.pending.discard(name)
+            force = self.pending.pop(name, False)
         try:
             self.compute(C.load_spec(name, self.engine()), force=force)
         except (

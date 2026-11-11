@@ -303,7 +303,7 @@ def test_a_slow_analysis_is_served_stale_while_redone_in_the_background(client, 
     wait_idle(client)
     b = client.get("/api/evals/fake-asr").json()
     assert b["summary"]["stale"] is False and b["dataset"]["compared"] == 4
-    assert sm.pending == set()
+    assert sm.pending == {}
 
 
 def test_a_judgment_refreshes_the_kept_analysis(client):
@@ -330,3 +330,41 @@ def test_warm_works_out_every_experiment(client):
     wait_idle(client)
     with C.session(sm.engine()) as s:
         assert {r.experiment for r in s.scalars(C.select(EvalSummary))} >= {"fake-asr"}
+
+
+def test_a_forced_refresh_joining_a_queued_one_keeps_its_force(client, monkeypatch):
+    import threading
+
+    from stratamodels.evals import core as C
+
+    sm = client.app.state.eval_summaries
+    client.get("/api/evals/fake-asr")  # kept, current
+    calls = []
+    real = C.analyse
+    monkeypatch.setattr(C, "analyse", lambda *a, **k: calls.append(1) or real(*a, **k))
+    gate = threading.Event()
+    sm.pool.submit(gate.wait, 30)  # the worker busy (warming another experiment)
+    sm.refresh("fake-asr")  # ordinary: would find the signature unchanged
+    sm.refresh("fake-asr", force=True)  # a score pass finished meanwhile
+    gate.set()
+    wait_idle(client)
+    assert len(calls) == 1
+
+
+def test_a_run_refreshes_every_experiment_sharing_its_dataset(client, monkeypatch):
+    from stratamodels.evals import core as C
+
+    spec = C.load_spec("fake-asr").to_json()
+    assert client.put("/api/evals/twin/spec", json=spec).status_code == 200
+    wait_idle(client)
+    client.get("/api/evals/twin")
+    names = []
+    real = C.analyse
+    monkeypatch.setattr(C, "analyse", lambda s, *a, **k: names.append(s.name) or real(s, *a, **k))
+    client.post("/api/evals/fake-asr/run", params=dict(limit=2))
+    wait_run(client, "fake-asr")
+    wait_idle(client)
+    assert sorted(names) == [
+        "fake-asr",
+        "twin",
+    ]  # twin's outputs may have been rescored in place: worked out again though unchanged

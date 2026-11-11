@@ -161,7 +161,9 @@ def mount(app, scheduler):
                 st["error"] = f"{type(e).__name__}: {e}"
             # queued before the state says finished, so whoever waits on the run finds the refresh queued; forced: a [score] pass changes
             # outputs in place, which the signature does not see
-            summaries.refresh(name, force=True)
+            summaries.refresh_dataset(
+                s.dataset, force=True
+            )  # this experiment and every other sharing these outputs (the same keys) read the new readings
             if res is not None:
                 st["result"] = res
             st["finished_at"] = time.time()
