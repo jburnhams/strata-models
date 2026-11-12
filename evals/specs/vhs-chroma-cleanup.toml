@@ -2,7 +2,7 @@ name = "vhs-chroma-cleanup"
 question = "Which cleanup of the tape's colour bleed and colour noise should run before any upscaler?"
 role = "video-enhance"
 dataset = "vhs-clips-8"
-metrics = ["judged", "latency_s", "peak_vram_gb", "failed"]
+metrics = ["judged", "latency_s", "peak_vram_gb", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
 judge = true                 # judged on the regions: colour on flat walls and skin (noise), colour edges (bleed), and that detail is kept
 similarity = "video"
 
@@ -51,3 +51,28 @@ name = "broadcast-to-studio"
 model = "video-lanczos-cleanup"
 params = { cleanup = { model = "1x-BroadcastToStudioLite.pth" } }
 note = "1x BroadcastToStudio Lite (saurusx, CC-BY-NC-SA-4.0): colour blur, dot crawl, rainbows; can make halos stand out"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+

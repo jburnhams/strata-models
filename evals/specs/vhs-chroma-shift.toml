@@ -2,7 +2,7 @@ name = "vhs-chroma-shift"
 question = "Is the tape's colour offset from its detail, and which shift puts it back?"
 role = "video-enhance"
 dataset = "vhs-clips-8"
-metrics = ["judged", "latency_s", "failed"]
+metrics = ["judged", "latency_s", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
 judge = true                 # judged on the regions: colour edges against detail (a red book, a jumper on a striped sofa, a face)
 similarity = "video"
 
@@ -43,3 +43,28 @@ name = "up-1"
 model = "video-lanczos"
 params = { cleanup = { chroma_shift = [0, -1, 0, -1] } }
 note = "1 line up: colour a line low is the other common offset"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y whose colour may have been shifted against the detail. Prefer the one whose colour sits on its objects: colour edges aligned with the outlines (a red book's red stops at the book's edge, skin colour fills the face), no coloured fringe on one side of edges."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y whose colour may have been shifted against the detail. Prefer the one whose colour sits on its objects: colour edges aligned with the outlines (a red book's red stops at the book's edge, skin colour fills the face), no coloured fringe on one side of edges."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y whose colour may have been shifted against the detail. Prefer the one whose colour sits on its objects: colour edges aligned with the outlines (a red book's red stops at the book's edge, skin colour fills the face), no coloured fringe on one side of edges."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+

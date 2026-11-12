@@ -2,7 +2,7 @@ name = "deinterlace-vhs"
 question = "Which deinterlacer should prepare digitised VHS (25i TFF) before any enhancement: bwdif or yadif, at 50p?"
 role = "video-enhance"
 dataset = "vhs-clips-8"
-metrics = ["judged", "latency_s", "failed"]
+metrics = ["judged", "latency_s", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
 judge = true                 # judged on the regions (combing on the stripes and faces of the fast clips shows first) and the whole frame
 similarity = "video"
 
@@ -25,3 +25,28 @@ name = "yadif"
 model = "video-lanczos"
 params = { deinterlace = "yadif" }
 note = "yadif send_field: 50p, the older ffmpeg default"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a deinterlaced VHS home video: the tape (when shown), then two deinterlaced versions X and Y. Prefer the one with clean edges: no combing (comb-like teeth on moving edges), no jagged staircases on diagonals or stripes, no flicker-like line doubling, while keeping the detail of still parts."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a deinterlaced VHS home video: the tape (when shown), then two deinterlaced versions X and Y. Prefer the one with clean edges: no combing (comb-like teeth on moving edges), no jagged staircases on diagonals or stripes, no flicker-like line doubling, while keeping the detail of still parts."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a deinterlaced VHS home video: the tape (when shown), then two deinterlaced versions X and Y. Prefer the one with clean edges: no combing (comb-like teeth on moving edges), no jagged staircases on diagonals or stripes, no flicker-like line doubling, while keeping the detail of still parts."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+

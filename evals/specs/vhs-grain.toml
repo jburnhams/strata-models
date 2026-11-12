@@ -2,7 +2,7 @@ name = "vhs-grain"
 question = "Which denoise of the tape's luma grain should run before any upscaler, without smearing detail?"
 role = "video-enhance"
 dataset = "vhs-clips-8"
-metrics = ["judged", "latency_s", "failed"]
+metrics = ["judged", "latency_s", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
 judge = true                 # judged on the regions: grain on flat areas and faces, against detail kept (text, stripes, hair) and smearing on motion
 similarity = "video"
 
@@ -44,3 +44,28 @@ name = "nlmeans"
 model = "video-lanczos"
 params = { cleanup = { filters = "nlmeans=s=2.5:p=7:r=11", planes = "luma" } }
 note = "ffmpeg non-local means, spatial"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its grain removed in different ways. Prefer the one with less grain on flat areas and skin while keeping fine detail (hair, text, fabric, stripes) sharp: a smeared, waxy or blurred picture is worse than a little grain. No smearing of moving parts."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its grain removed in different ways. Prefer the one with less grain on flat areas and skin while keeping fine detail (hair, text, fabric, stripes) sharp: a smeared, waxy or blurred picture is worse than a little grain. No smearing of moving parts."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its grain removed in different ways. Prefer the one with less grain on flat areas and skin while keeping fine detail (hair, text, fabric, stripes) sharp: a smeared, waxy or blurred picture is worse than a little grain. No smearing of moving parts."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+
