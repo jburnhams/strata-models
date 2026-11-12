@@ -284,8 +284,10 @@ def mount(app, scheduler):
                 if j.a_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key
             }
         unjudged = lambda p: (ds.items[p[0]]["id"], frozenset(p[1:])) not in judged
-        order = [p for p in todo if unjudged(p)] or todo  # pairs not judged yet first,
-        random.shuffle(order)
+        new = [p for p in todo if unjudged(p)]
+        random.shuffle(new)
+        old = [p for p in todo if not unjudged(p)]
+        random.shuffle(old)
 
         keys = {}
 
@@ -303,17 +305,20 @@ def mount(app, scheduler):
             return keys[(i, a, b)]
 
         fresh, later, start = [], [], time.monotonic()
-        for i, a, b in order:
-            oa, ob, key = key_of(i, a, b)
-            if key not in sims:
-                if fresh and time.monotonic() - start > PAIR_SCORE_S:
-                    later.append(
-                        (oa, ob, key)
-                    )  # thousands of long descriptions took minutes to score: the rest are scored in the background
-                    continue
-                sims[key] = SIM.similarity(oa, ob, s.similarity or None)
-            if sims[key] < 0.9999:
-                fresh.append((sims[key], i, a, b))  # identical outputs teach nothing: not shown
+        for order in (new, old):  # pairs not judged yet first; once every differing one is judged, judged ones again
+            for i, a, b in order:
+                oa, ob, key = key_of(i, a, b)
+                if key not in sims:
+                    if fresh and time.monotonic() - start > PAIR_SCORE_S:
+                        later.append(
+                            (oa, ob, key)
+                        )  # thousands of long descriptions took minutes to score: the rest are scored in the background
+                        continue
+                    sims[key] = SIM.similarity(oa, ob, s.similarity or None)
+                if sims[key] < 0.9999:
+                    fresh.append((sims[key], i, a, b))  # identical outputs teach nothing: not shown
+            if fresh:
+                break
         if later:
             score_later(name, later, s.similarity or None)
         if not fresh:
