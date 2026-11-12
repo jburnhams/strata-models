@@ -139,6 +139,10 @@ export const regionsOf = (input: Record<string, unknown>): Region[] => {
 
 /** A video output as one side of a blind `CompareVideo`, named by its label only. */
 /** The whole clip as a loop range (0 to the shorter output's last frame): a pair plays round and round until it is answered. */
+// The loop a judge sees: their own range while any end of it is set (a half-set range is an edit in progress, e.g. a new in-point that cleared an out-point before it, and must survive until the out-point is set), else the whole clip; `c` clears both ends and so goes back to the whole clip.
+export const judgeLoop = (set: VideoLoop | null, whole: VideoLoop | null): VideoLoop | undefined =>
+  (set && (set.start !== null || set.end !== null) ? set : whole) ?? undefined
+
 export const wholeLoop = (x: unknown, y: unknown, fps = 50): VideoLoop | null => {
   const d = [x, y].map(o => (o && typeof o === 'object' && typeof (o as { duration_s?: unknown }).duration_s === 'number' ? (o as { duration_s: number }).duration_s : null))
   if (d.some(v => v === null || v <= 0)) return null
@@ -327,7 +331,7 @@ function Judge({ name }: { name: string }) {
               ? <>
                   <div ref={videoBox}>
                     <CompareVideo key={p.token} label={`Item ${p.item_id}, two outputs`} a={vx} b={vy} blind missing="Video not found" mode={vmode} onModeChange={setVmode} regions={regionsOf(p.input)} pixelated="always" audio="none"
-                      loop={(loop?.item === p.item_id && loop.range.start !== null && loop.range.end !== null ? loop.range : null) ?? wholeLoop(p.x, p.y, vx.media.fps) ?? undefined} onLoopChange={range => setLoop({ item: p.item_id, range })} extraShortcuts={keys} footer={answers} maxHeight="viewport" />
+                      loop={judgeLoop(loop?.item === p.item_id ? loop.range : null, wholeLoop(p.x, p.y, vx.media.fps))} onLoopChange={range => setLoop({ item: p.item_id, range })} extraShortcuts={keys} footer={answers} maxHeight="viewport" />
                   </div>
                   <AutoPlay box={videoBox} id={p.token} />
                   {src && <Disclosure summary="The tape itself (the source, deinterlaced, enlarged nearest-neighbour)"><video controls muted playsInline preload="metadata" src={src.whole} aria-label="The source" className="h-auto max-w-full rounded-control" style={{ imageRendering: 'pixelated' }} /></Disclosure>}

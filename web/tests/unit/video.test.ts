@@ -55,3 +55,16 @@ describe('the whole clip as a loop', () => {
     expect(wholeLoop(null, { duration_s: 0 })).toBeNull()
   })
 })
+
+describe('the loop a judge sees', () => {
+  it('keeps a half-set range (a new in-point mid edit), and falls back to the whole clip when none or cleared', async () => {
+    const { judgeLoop } = await import('../../src/components/EvalPage')
+    const whole = { start: 0, end: 7.96 }
+    expect(judgeLoop({ start: 5, end: null }, whole)).toEqual({ start: 5, end: null })
+    expect(judgeLoop({ start: null, end: 6 }, whole)).toEqual({ start: null, end: 6 })
+    expect(judgeLoop({ start: 5, end: 6 }, whole)).toEqual({ start: 5, end: 6 })
+    expect(judgeLoop({ start: null, end: null }, whole)).toEqual(whole)
+    expect(judgeLoop(null, whole)).toEqual(whole)
+    expect(judgeLoop(null, null)).toBeUndefined()
+  })
+})
