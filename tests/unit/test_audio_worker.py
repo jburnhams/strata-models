@@ -228,13 +228,13 @@ def test_deepfilternet_caps_natively(ff, fake_torch, monkeypatch):
     assert calls[-1] is None  # 0 = no cap, overriding the model's own 18 dB
 
 
-def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch):
+def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch, tmp_path):
     _, src, out = ff
     cv = types.ModuleType("clearvoice")
 
     class ClearVoice:
         def __init__(self, task, model_names):
-            self.task, self.names = task, model_names
+            self.task, self.names, self.cwd = task, model_names, os.getcwd()
 
         def __call__(self, input_path, online_write):
             return sf.read(input_path, dtype="float32")[0] * 0.5
@@ -244,8 +244,10 @@ def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch):
 
     cv.ClearVoice = ClearVoice
     monkeypatch.setitem(sys.modules, "clearvoice", cv)
-    load("clearvoice")
+    cwd = os.getcwd()
+    A.load(dict(key="k-clearvoice", name="model-clearvoice", options=dict(engine="clearvoice")), str(tmp_path))
     assert A.E["m"].names == ["model-clearvoice"] and A.E["m"].task == "speech_enhancement"
+    assert A.E["m"].cwd == str(tmp_path / "audio" / "clearvoice") and os.getcwd() == cwd  # its ./checkpoints in the models folder
     r = A.run(dict(path=src, highpass=0, out_dir=out))
     assert r["removed_db"] == pytest.approx(6.02, abs=0.05)
 

@@ -186,7 +186,14 @@ def load(model, models_dir):
     if eng == "clearvoice":
         from clearvoice import ClearVoice
 
-        E["m"] = ClearVoice(task="speech_enhancement", model_names=[o.get("model") or model.get("name")])
+        # it downloads and reads its weights at ./checkpoints/<name>: from the models folder, not the service's working directory
+        home, cwd = os.path.join(models_dir, "audio", "clearvoice"), os.getcwd()
+        os.makedirs(home, exist_ok=True)
+        os.chdir(home)
+        try:
+            E["m"] = ClearVoice(task="speech_enhancement", model_names=[o.get("model") or model.get("name")])
+        finally:
+            os.chdir(cwd)
         return dict(device=dev)
     from pathlib import Path
 
