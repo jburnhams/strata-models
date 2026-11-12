@@ -4,7 +4,7 @@
 import { useParams } from 'react-router'
 import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
-import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useLoad, type Column } from 'strata-react'
+import { Alert, AsyncButton, Button, Compare, CompareGrid, DataTable, DataView, Disclosure, EmptyState, Field, KeysLegend, MediaPlayer, NativeSelect, PageHeader, SPEECH_RATES, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useHotkeys, useLoad, type Candidate, type Column, type CompareMode, type Shortcut } from 'strata-react'
 import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Share, type Step } from '../api'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
@@ -78,7 +78,7 @@ function ModelJudges({ judges }: { judges: Record<string, JudgeSummary> }) {
 }
 
 /** What the model judges said about the pair a person just judged (shown after, so they cannot sway the person). */
-function PairVerdicts({ name, last }: { name: string; last: { item_id: string; x: string; y: string } }) {
+function PairVerdicts({ name, last }: { name: string; last: Pick<Last, 'item_id' | 'x' | 'y'> }) {
   const load = useLoad({ queryKey: ['verdicts', name, last.item_id], queryFn: () => evalsApi.verdicts(name, last.item_id), refetchInterval: 4000 })
   if (load.status !== 'ready') return null
   const mine = load.data.judgments.filter(v => v.judge && v.current && [v.a, v.b].includes(last.x) && [v.a, v.b].includes(last.y))
@@ -92,10 +92,16 @@ export const imagePath = (o: unknown) => (o && typeof o === 'object' && typeof (
 /** The sound of a speech job's output (speak), if it is one. */
 export const audioPath = (o: unknown) => (o && typeof o === 'object' && typeof (o as { path?: unknown }).path === 'string' && /\.(wav|mp3|flac|ogg|m4a)$/i.test((o as { path: string }).path) ? (o as { path: string }).path : null)
 
+/** A picture's natural size when the job reported it, so the comparison frame has its shape and 1:1 is exact before it loads. */
+export const imageSize = (o: unknown): [number, number] | undefined => {
+  const r = o as { width?: unknown; height?: unknown } | null
+  return r && typeof r.width === 'number' && typeof r.height === 'number' ? [r.width, r.height] : undefined
+}
+
 function Output({ o, label }: { o: unknown; label: string }) {
   const img = imagePath(o); const snd = audioPath(o)
   if (img) return <img src={imagesApi.fileUrl(img)} alt={label} className="h-auto max-w-full rounded-control" />
-  if (snd) return <audio controls preload="none" src={imagesApi.fileUrl(snd)} aria-label={`${label}, spoken`} className="w-full" />
+  if (snd) return <MediaPlayer label={`${label}, spoken`} src={imagesApi.fileUrl(snd)} rates={SPEECH_RATES} shortcuts={false} /> // two players on one screen: neither binds Space
   return <p className="type-body whitespace-pre-wrap">{outputText(o)}</p>
 }
 
@@ -116,38 +122,60 @@ function Pipeline({ steps }: { steps: Step[] }) {
   )
 }
 
+const PipelineSteps = ({ steps }: { steps: Step[] }) => <Disclosure summary={`Pipeline: ${steps.length} steps`}><Pipeline steps={steps} /></Disclosure>
+
+type Out = { output: unknown; error: string | null; run_s?: number | null } | null
+
 /** One candidate's output for one item, with its pipeline's steps when it has them (shown only outside blind judging). */
-function FullOutput({ name, out }: { name: string; out: { output: unknown; error: string | null; run_s?: number | null } | null }) {
+function FullOutput({ name, out }: { name: string; out: Out }) {
   const steps = pipelineOf(out?.output)
   return (
     <section aria-label={name} className="grid content-start gap-2 rounded-surface border border-border p-3">
       <h3 className="type-label font-mono">{name}</h3>
       {out === null ? <p className="type-body-sm text-muted-foreground">Not run yet.</p> : out.error ? <p className="type-body-sm text-danger">{`Failed: ${out.error}`}</p> : <Output o={out.output} label={name} />}
       {typeof out?.run_s === 'number' && <span className="type-caption text-muted-foreground">{`${out.run_s.toFixed(1)} s in all`}</span>}
-      {steps && <details><summary className="type-body-sm cursor-pointer">{`Pipeline: ${steps.length} steps`}</summary><Pipeline steps={steps} /></details>}
+      {steps && <PipelineSteps steps={steps} />}
     </section>
   )
+}
+
+/** Candidates whose output is a picture, as the tiles of a comparison grid (one zoom and pan for all, full screen); the rest stay cards. */
+function candidatesOf(outputs: Record<string, Out>, names: string[]) {
+  const pictures: Candidate[] = []; const others: string[] = []
+  for (const n of names) {
+    const o = outputs[n]; const img = o && !o.error ? imagePath(o.output) : null
+    if (img) pictures.push({ id: n, label: n, note: typeof o!.run_s === 'number' ? `${o!.run_s.toFixed(1)} s in all` : undefined, media: { kind: 'image', src: imagesApi.fileUrl(img), alt: `${n}'s picture`, size: imageSize(o!.output) } })
+    else others.push(n)
+  }
+  return { pictures, others }
 }
 
 /** Every candidate's output for each item, a pipeline's every step included: the view after (not during) blind judging. */
 function Outputs({ name }: { name: string }) {
   const load = useLoad({ queryKey: ['outputs', name], queryFn: () => evalsApi.outputs(name) })
   const [item, setItem] = useState<string | null>(null)
+  const items = load.status === 'ready' ? load.data.items : []
+  const at = Math.max(0, items.findIndex(x => x.id === item))
+  const go = (k: number) => { if (items.length) setItem(items[(at + k + items.length) % items.length].id) }
+  const keys: Shortcut[] = [{ keys: ['j'], label: 'Next item', run: () => go(1), repeat: true }, { keys: ['k'], label: 'Previous item', run: () => go(-1), repeat: true }]
+  useHotkeys(keys, { enabled: items.length > 1 })
   return (
     <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-96 w-full" />} empty={<EmptyState title="No items" />}>
       {d => {
-        const it = d.items.find(x => x.id === item) ?? d.items[0]
+        const it = d.items[at] ?? d.items[0]
+        const { pictures, others } = candidatesOf(it.outputs, d.candidates.map(c => c.name))
         return (
           <div className="grid gap-4">
             <p className="type-body-sm text-muted-foreground">Every candidate&apos;s output, and for a pipeline what each step was sent and answered. The Judge tab shows only the end results, so look here after judging.</p>
-            <label className="grid gap-1 type-label">Item
-              <select className="rounded-control border border-border bg-background p-2 type-body" value={it.id} onChange={e => setItem(e.target.value)}>
-                {d.items.map(x => <option key={x.id} value={x.id}>{x.id}</option>)}
-              </select>
-            </label>
+            <div className="flex flex-wrap items-end gap-4">
+              <Field label="Item"><NativeSelect value={it.id} onChange={e => setItem(e.target.value)}>{d.items.map(x => <option key={x.id} value={x.id}>{x.id}</option>)}</NativeSelect></Field>
+              {d.items.length > 1 && <KeysLegend shortcuts={keys} label="Item keys" />}
+            </div>
             {typeof it.input.prompt === 'string' && <p className="type-body">Prompt: {it.input.prompt}</p>}
             {typeof it.input.text === 'string' && <p className="type-body">Text: {it.input.text}</p>}
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{d.candidates.map(c => <FullOutput key={c.name} name={c.name} out={it.outputs[c.name] ?? null} />)}</div>
+            {pictures.length > 0 && <CompareGrid key={it.id} label={`Item ${it.id}: ${format.count(pictures.length, 'picture')}`} items={pictures} blind={false} missing="Picture not found" columns={pictures.length >= 4 ? 4 : pictures.length >= 3 ? 3 : 2}
+              actions={c => { const steps = pipelineOf(it.outputs[c.id]?.output); return steps ? <PipelineSteps steps={steps} /> : null }} />}
+            {others.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{others.map(c => <FullOutput key={c} name={c} out={it.outputs[c] ?? null} />)}</div>}
           </div>
         )
       }}
@@ -155,50 +183,76 @@ function Outputs({ name }: { name: string }) {
   )
 }
 
-/** The pair just judged, unblinded: which candidate each side was, and its every step. */
-function LastPair({ name, last }: { name: string; last: { item_id: string; x: string; y: string; winner: string } }) {
+/** The pair just judged, unblinded: which candidate each side was, what the model judges said, and its every step (loaded when opened). */
+function LastPair({ name, last }: { name: string; last: Last }) {
+  return (
+    <Disclosure key={`${last.item_id}-${last.x}-${last.y}`} className="rounded-surface border border-border p-3" summary={`Last pair (${last.item_id}): X was ${last.x}, Y was ${last.y}; ${last.winner === 'tie' ? 'about the same' : `you chose ${last.winner}`}`}>
+      <LastPairBody name={name} last={last} />
+    </Disclosure>
+  )
+}
+
+function LastPairBody({ name, last }: { name: string; last: Last }) {
   const load = useLoad({ queryKey: ['outputs', name, last.item_id], queryFn: () => evalsApi.outputs(name, last.item_id) })
   return (
-    <details className="rounded-surface border border-border p-3">
-      <summary className="type-body-sm cursor-pointer">{`Last pair (${last.item_id}): X was ${last.x}, Y was ${last.y}; ${last.winner === 'tie' ? 'about the same' : `you chose ${last.winner}`}`}</summary>
+    <>
       <PairVerdicts name={name} last={last} />
       <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-24 w-full" />} empty={null}>
         {d => <div className="mt-2 grid gap-4 md:grid-cols-2">{[last.x, last.y].map(c => <FullOutput key={c} name={c} out={d.items[0].outputs[c] ?? null} />)}</div>}
       </DataView>
-    </details>
+    </>
   )
 }
 
+type Last = { item_id: string; x: string; y: string; winner: string }
+type Answer = 'x' | 'y' | 'tie'
+
+/** The judging keys. Not 1 to 5, x, f, + - 0 or the arrows: the picture comparison binds those for its views, zoom and full screen. */
+export const JUDGE_KEYS: Record<Answer, string[]> = { x: ['['], y: [']'], tie: ['t'] }
+const ANSWER_WORD: Record<Answer, string> = { x: 'X is better', y: 'Y is better', tie: 'About the same' }
+
 function Judge({ name }: { name: string }) {
-  const qc = useQueryClient(); const [n, setN] = useState(0); const [last, setLast] = useState<{ item_id: string; x: string; y: string; winner: string } | null>(null)
+  const qc = useQueryClient(); const [n, setN] = useState(0); const [last, setLast] = useState<Last | null>(null)
+  const [mode, setMode] = useState<CompareMode>('side')
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
-  const answer = useAsyncAction(async (p: Pair, w: 'x' | 'y' | 'tie') => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); void qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 }) // the results refresh behind: the next pair must not wait for them
+  const answer = useAsyncAction(async (p: Pair, w: Answer) => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); void qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 }) // the results refresh behind: the next pair must not wait for them
+  const pair = load.status === 'ready' ? load.data.pair : null
+  const busy = answer.phase === 'pending'
+  const choose = (w: Answer) => { if (pair && !busy) answer.run(pair, w) }
+  const keys: Shortcut[] = (['x', 'tie', 'y'] as const).map(w => ({ keys: JUDGE_KEYS[w], label: ANSWER_WORD[w], run: () => choose(w), disabled: busy }))
+  useHotkeys(keys, { enabled: pair !== null })
   return (
     <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
-      {({ pair }) => (
-        <div className="grid gap-4">
-          <p className="type-body">Which output is better for item <span className="font-mono">{pair!.item_id}</span>? The candidates are hidden until you answer.</p>
-          {pair!.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - pair!.similarity)} different`}{load.status === 'ready' && load.data.remaining !== undefined ? ` · ${format.count(load.data.remaining, 'pair')} not judged yet, most different first` : ''}</p>}
-          {pair!.has_media && !imagePath(pair!.x) && <PhrasePlayer key={pair!.item_id} src={evalsApi.mediaUrl(name, pair!.item_id)} clip={Array.isArray(pair!.input.clip) ? pair!.input.clip as [number, number] : undefined} />}
-          {typeof pair!.input.prompt === 'string' && <p className="type-body">Prompt: {pair!.input.prompt}</p>}
-          {typeof pair!.input.text === 'string' && <p className="type-body">Text: {pair!.input.text}</p>}
-          {pair!.reference && 'text' in pair!.reference && pair!.reference.text !== pair!.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(pair!.reference.text)}</p>}
-          <div className="grid gap-4 md:grid-cols-2">
-            {(['x', 'y'] as const).map(k => (
-              <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid gap-2 rounded-surface border border-border p-3">
-                <h3 className="type-label">Output {k.toUpperCase()}</h3>
-                {imagePath(pair![k])
-                  ? <button type="button" className="cursor-pointer rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait" onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'} aria-label={`Choose output ${k.toUpperCase()}`} title={`Click to choose ${k.toUpperCase()}`}><Output o={pair![k]} label={`Output ${k.toUpperCase()}`} /></button>
-                  : <Output o={pair![k]} label={`Output ${k.toUpperCase()}`} />}
-                <Button onClick={() => answer.run(pair!, k)} disabled={answer.phase === 'pending'}>{`${k.toUpperCase()} is better`}</Button>
-              </section>
-            ))}
+      {({ pair, remaining }) => {
+        const p = pair!; const pics = imagePath(p.x) && imagePath(p.y)
+        const side = (k: 'x' | 'y'): Candidate => ({ id: k, label: k.toUpperCase(), media: { kind: 'image', src: imagesApi.fileUrl(imagePath(p[k])!), alt: `Output ${k.toUpperCase()}`, size: imageSize(p[k]) } })
+        return (
+          <div className="grid gap-4">
+            <p className="type-body">Which output is better for item <span className="font-mono">{p.item_id}</span>? The candidates are hidden until you answer.</p>
+            {p.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - p.similarity)} different`}{remaining !== undefined ? ` · ${format.count(remaining, 'pair')} not judged yet, most different first` : ''}</p>}
+            {p.has_media && !imagePath(p.x) && <PhrasePlayer key={p.item_id} src={evalsApi.mediaUrl(name, p.item_id)} clip={Array.isArray(p.input.clip) ? p.input.clip as [number, number] : undefined} />}
+            {typeof p.input.prompt === 'string' && <p className="type-body">Prompt: {p.input.prompt}</p>}
+            {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
+            {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
+            {pics
+              ? <Compare key={p.token} label={`Item ${p.item_id}, two outputs`} a={side('x')} b={side('y')} blind missing="Picture not found" mode={mode} onModeChange={setMode} />
+              : <div className="grid gap-4 md:grid-cols-2">
+                  {(['x', 'y'] as const).map(k => (
+                    <section key={k} aria-label={`Output ${k.toUpperCase()}`} className="grid content-start gap-2 rounded-surface border border-border p-3">
+                      <h3 className="type-label">Output {k.toUpperCase()}</h3>
+                      <Output o={p[k]} label={`Output ${k.toUpperCase()}`} />
+                    </section>
+                  ))}
+                </div>}
+            <div className="flex flex-wrap items-center gap-3">
+              {(['x', 'tie', 'y'] as const).map(w => <Button key={w} onClick={() => choose(w)} disabled={busy}>{ANSWER_WORD[w]}</Button>)}
+              <KeysLegend shortcuts={keys} label="Judging keys" />
+            </div>
+            {answer.error && <Alert tone="danger" announce title="Not saved">{answer.error}</Alert>}
+            {last && <LastPair name={name} last={last} />}
           </div>
-          <div><Button onClick={() => answer.run(pair!, 'tie')} disabled={answer.phase === 'pending'}>About the same</Button></div>
-          {answer.error && <p role="alert" className="text-danger type-body-sm">{answer.error}</p>}
-          {last && <LastPair name={name} last={last} />}
-        </div>
-      )}
+        )
+      }}
     </DataView>
   )
 }

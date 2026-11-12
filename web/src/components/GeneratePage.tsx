@@ -3,7 +3,7 @@
 // pictures (for edits) are one optional button. Past pictures follow as a gallery, newest first.
 import { useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AsyncButton, Button, Disclosure, Field, Input, NativeSelect, PageHeader, Textarea, Thumbnail, DataView, EmptyState, Skeleton, format, useAsyncAction, useLoad } from 'strata-react'
+import { Alert, AsyncButton, FileButton, Button, Disclosure, Field, Input, NativeSelect, PageHeader, Textarea, Thumbnail, DataView, EmptyState, Skeleton, format, useAsyncAction, useLoad } from 'strata-react'
 import { api, imagesApi, type GeneratedImage, type Job } from '../api'
 
 export const SIZES = [
@@ -64,7 +64,7 @@ export default function GeneratePage() {
   const [prompt, setPrompt] = useState(''), [model, setModel] = useState(''), [size, setSize] = useState('1024x1024'), [seed, setSeed] = useState(''), [steps, setSteps] = useState(''), [guidance, setGuidance] = useState('')
   const [refs, setRefs] = useState<string[]>([]), [job, setJob] = useState<Job | null>(null), [n, setN] = useState(0)
   const gen = useAsyncAction(async () => { const j = await imagesApi.generate(model || undefined, paramsOf({ prompt, size, seed, steps, guidance, refs }) as never); setJob(j); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['images'] }) })
-  const upload = useAsyncAction(async (files: FileList) => { const out: string[] = []; for (const f of Array.from(files).slice(0, 10 - refs.length)) out.push((await imagesApi.upload(f)).path); setRefs(r => [...r, ...out]) })
+  const upload = useAsyncAction(async (files: File[]) => { const out: string[] = []; for (const f of files.slice(0, 10 - refs.length)) out.push((await imagesApi.upload(f)).path); setRefs(r => [...r, ...out]) })
   const onSubmit = (e: FormEvent) => { e.preventDefault(); if (prompt.trim()) gen.run() }
   const chosen = models.find(m => m.key === (model || role?.model))
   return (
@@ -74,14 +74,11 @@ export default function GeneratePage() {
         <Field label="What should the picture show?"><Textarea rows={3} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="A hare running through frosty grass at dawn, low sun, 35 mm photo" /></Field>
         <div className="flex flex-wrap items-center gap-3">
           <AsyncButton type="submit" variant="default" disabled={!prompt.trim()} phase={gen.phase} error={gen.error} labels={{ idle: 'Generate', pending: 'Generating…', done: 'Generated' }} />
-          <label className="inline-flex cursor-pointer items-center gap-2 type-body-sm text-muted-foreground">
-            <input type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only" onChange={e => e.target.files && upload.run(e.target.files)} />
-            <span className="underline">{refs.length ? `${refs.length} reference picture${refs.length > 1 ? 's' : ''} added` : 'Add a reference picture'}</span>
-          </label>
+          <FileButton accept={['image/png', 'image/jpeg', 'image/webp']} multiple disabled={refs.length >= 10} onFiles={f => upload.run(f)}>{refs.length ? `${format.count(refs.length, 'reference picture')} added` : 'Add a reference picture'}</FileButton>
           {refs.length > 0 && <Button size="sm" variant="ghost" type="button" onClick={() => setRefs([])}>Clear references</Button>}
         </div>
-        {gen.error && <p role="alert" className="text-danger type-body-sm">{gen.error}</p>}
-        {upload.error && <p role="alert" className="text-danger type-body-sm">{upload.error}</p>}
+        {gen.error && <Alert tone="danger" announce>{gen.error}</Alert>}
+        {upload.error && <Alert tone="danger" announce title="Reference not added">{upload.error}</Alert>}
         <Disclosure summary="Advanced">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Model" hint={chosen ? chosen.licence : undefined}><NativeSelect value={model} onChange={e => setModel(e.target.value)}><option value="">{role ? `Default (${role.model})` : 'Default'}</option>{models.map(m => <option key={m.key} value={m.key}>{m.name || m.key}</option>)}</NativeSelect></Field>

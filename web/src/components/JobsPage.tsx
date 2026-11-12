@@ -2,7 +2,7 @@
 // Filters live in the URL (a failure is a link to share). Pages arrive by cursor (older than the last job shown). A row opens in place to show its
 // params, result and error, read only when opened.
 import { useSearchParams } from 'react-router'
-import { Button, DataTable, DataView, EmptyState, Field, NativeSelect, PageHeader, RowAction, Skeleton, TableSkeleton, format, useAsyncAction, useExpanded, useInfiniteLoad, useLoad, type Column } from 'strata-react'
+import { Alert, Button, DataTable, DataView, EmptyState, Field, NativeSelect, PageHeader, RowAction, Skeleton, TableSkeleton, format, useAsyncAction, useExpanded, useInfiniteLoad, useLoad, type Column } from 'strata-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, type Job, type JobFilters, type JobPage } from '../api'
 import { describeJob, seconds } from '../logic'
@@ -66,7 +66,7 @@ export default function JobsPage() {
           <div className="grid gap-3">
             <DataTable caption="Jobs" columns={columns} rows={rows} rowKey={j => String(j.id)} expansion={{ expanded: expanded.expanded, onChange: expanded.onChange, rowLabel: j => `job #${j.id}`, detail: j => <Detail id={j.id} /> }} />
             {load.more.hasMore && <Button onClick={load.more.loadMore} disabled={load.more.loadingMore}>{load.more.loadingMore ? 'Loading older jobs…' : 'Show older jobs'}</Button>}
-            {load.more.error && <p role="alert" className="text-danger">{load.more.error}</p>}
+            {load.more.error && <Alert tone="danger" announce>{load.more.error}</Alert>}
           </div>
         )}
       </DataView>
