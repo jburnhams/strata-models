@@ -12,7 +12,8 @@ import math
 
 from stratamodels.evals import metrics as M
 
-METHOD = """- Every candidate ran on the same items; comparisons use only the items every candidate finished, so they are paired.
+METHOD = """- Each candidate is compared with the baseline on the items both finished, so comparisons are paired; a candidate run on a sample
+  (`items` in the spec) is compared on its sample only.
 - Intervals are 95 %. Shares use the Wilson score interval. Means and corpus rates (WER, CER, missed faces: all errors over all reference units)
   use a percentile bootstrap over items, with 4,000 resamples. Dataset-level metrics (verification AUC, TAR) use 200 resamples of items.
 - Differences are candidate minus baseline on the same items. Their intervals come from the bootstrap of the paired differences, and p comes
