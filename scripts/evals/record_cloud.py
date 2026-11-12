@@ -123,8 +123,7 @@ def call_codex(system, text, images, schema, model=None, effort=None, timeout=60
             sp = os.path.join(d, "schema.json")
             json.dump(schema, open(sp, "w"))
             cmd += ["--output-schema", sp]
-        for i in images:
-            cmd += ["-i", i]
+        cmd += [f"--image={i}" for i in images]  # one value per flag: -i takes several, and would swallow the "-" below
         cmd += ["-"]  # the prompt on stdin: no argv length limit
         p = run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=d, env=clean_env())
         _check(p, "codex exec")

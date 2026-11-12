@@ -50,12 +50,7 @@ def test_codex_attaches_pictures_passes_the_schema_and_never_an_api_key(tmp_path
     r = R.call_codex("SYS", "go", [str(img)], {"type": "object"}, model="gpt-x", effort="low", run=run)
     assert r["text"] == '{"caption": "c"}'
     c = seen["cmd"]
-    assert (
-        c[:2] == ["codex", "exec"]
-        and c[c.index("-i") + 1] == str(img)
-        and c[c.index("-m") + 1] == "gpt-x"
-        and c[-1] == "-"
-    )
+    assert c[:2] == ["codex", "exec"] and f"--image={img}" in c and c[c.index("-m") + 1] == "gpt-x" and c[-1] == "-"
     assert "--sandbox" in c and c[c.index("--sandbox") + 1] == "read-only"
     assert seen["schema"] == {"type": "object"} and "SYS" in seen["input"] and "OPENAI_API_KEY" not in seen["env"]
 

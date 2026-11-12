@@ -159,6 +159,38 @@ used_by = ["strata-stills"]
 # Not a model this service runs: the descriptions strata-stills got from Sonnet, replayed by picture so they stand beside local models in evals.
 options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 
+# Cloud models on Jonathan's subscriptions (no API credits), recorded through the vendors' own CLIs by scripts/evals/record_cloud.py with the
+# same preset and context as the local candidates (--like qwen3.5-9b). Not models this service runs: replayed by picture for the evals.
+[models."gemini-4-argon-photos-v1"]
+runtime = "recorded"
+name = "Gemini 4 Argon (medium) via Antigravity CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from Google AI Pro (agy -p --model gemini-4-argon-medium)"
+source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli agy"
+used_by = []
+options = { file = "evals/recorded/gemini-4-argon-medium-photo-describe-v1.jsonl", by = "image" }
+
+[models."gpt-6.1-terra-photos-v1"]
+runtime = "recorded"
+name = "GPT-6.1 Terra via Codex CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-terra)"
+source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6.1-terra-photo-describe-v1.jsonl", by = "image" }
+
+[models."gpt-6.1-sol-photos-v1"]
+runtime = "recorded"
+name = "GPT-6.1 Sol via Codex CLI, photo-describe-v1 (the 20 judged pictures: Sol's Plus allowance is small)"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-sol)"
+source = "scripts/evals/record_cloud.py describe-photos-slow --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6.1-sol-photo-describe-v1.jsonl", by = "image" }
+
 [models.ast-audioset]
 runtime = "transformers"
 name = "MIT/ast-finetuned-audioset-10-10-0.4593"
