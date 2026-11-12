@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Make the venv a venv-worker model runs in: <models>/venvs/NAME (models dir: STRATAMODELS_MODELS, default ~/models). Needs uv (and git, curl).
-#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|video|seedvr2|flashvsr-plus|vapoursynth
+#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|dfn|clearvoice|resemble|audio|audio-quality|video|seedvr2|flashvsr-plus|vapoursynth
 # Each pins what its model needs; they are kept apart from the service's venv on purpose (Chatterbox wants torch 2.6, for one).
 set -euo pipefail
-name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, video, seedvr2, flashvsr-plus or vapoursynth}
+name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, dfn, clearvoice, resemble, audio, audio-quality, video, seedvr2, flashvsr-plus or vapoursynth}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 TORCH_INDEX=https://download.pytorch.org/whl/cu128   # CUDA 12.8 wheels: they bring their own CUDA libraries, any recent driver runs them
 py=3.12
@@ -22,6 +22,12 @@ case $name in
   # and SMDegrain-style motion-compensated denoise (vsdenoise.mc_degrain, on mvutensils: vsjetpack 3 calls core.mvu) for workers/video.py's
   # VapourSynth stage, which runs its vspipe
   vapoursynth) py=3.13; pkgs="vapoursynth vsjetpack vapoursynth-mvtools vapoursynth-mvutensils vapoursynth-znedi3 vapoursynth-zsmooth vapoursynth-bestsource vapoursynth-bwdif vapoursynth-resize2 vapoursynth-akarin vapoursynth-vszip numpy" ;;
+  # Sound (workers/audio.py, audio_quality.py): numpy, scipy and soundfile in each. torch from PyTorch's CUDA 12.8 index (its own CUDA libraries).
+  dfn) pkgs="--index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch==2.8.* torchaudio==2.8.* numpy scipy soundfile deepfilterlib==0.5.6 loguru appdirs packaging requests" ;;
+  clearvoice) pkgs="clearvoice scipy soundfile" ;;       # pins numpy<2 and an old opencv: the reason it has a venv of its own
+  resemble) pkgs="resemble-enhance scipy soundfile"; py=3.11 ;;   # pins torch 2.1.1, so Python 3.11
+  audio) pkgs="numpy scipy soundfile noisereduce" ;;     # the CPU engines: none, afftdn (ffmpeg), noisereduce
+  audio-quality) pkgs="--index-strategy unsafe-best-match --extra-index-url https://download.pytorch.org/whl/cpu torch==2.8.* torchaudio==2.8.* onnxruntime pesq pystoi numpy scipy soundfile" ;;   # CPU only
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
 mkdir -p "$models/venvs"; uv venv -q -p $py "$venv"
@@ -59,6 +65,25 @@ case $name in
 esac
 # a pip VapourSynth finds its Python through ~/.config/vapoursynth/vapoursynth.toml, keyed by this venv's own libvsscript (a system install keeps its entry)
 if [ "$name" = vapoursynth ]; then "$venv/bin/vapoursynth" config; fi
+if [ "$name" = dfn ]; then
+  # deepfilternet 0.5.6 pins numpy<2 (it runs on 2) and imports torchaudio.backend.common, gone since torchaudio 2.1: install it without its
+  # pins and give it a stand-in for the one type it imports (strata-360's scripts/patch_deepfilternet.py, the same patch).
+  VIRTUAL_ENV=$venv uv pip install --no-deps deepfilternet==0.5.6
+  "$venv/bin/python" - <<'PY'
+import importlib.util, os
+p = os.path.join(importlib.util.find_spec("df").submodule_search_locations[0], "io.py")
+s = open(p).read()
+old = "from torchaudio.backend.common import AudioMetaData"
+if old in s and "stand-in" not in s:
+    s = s.replace(old, "try:\n    from torchaudio.backend.common import AudioMetaData\nexcept Exception:  # stand-in (strata-models setup): df's own file loaders are not used\n    from dataclasses import dataclass\n    @dataclass\n    class AudioMetaData:\n        sample_rate: int = 0\n        num_frames: int = 0\n        num_channels: int = 0\n        bits_per_sample: int = 0\n        encoding: str = ''")
+    open(p, "w").write(s)
+    print("patched", p)
+PY
+fi
+if [ "$name" = audio-quality ]; then   # DNSMOS P.835 (Microsoft DNS Challenge); SQUIM's weights come through torchaudio on first use
+  mkdir -p "$models/audio-quality"; f=$models/audio-quality/sig_bak_ovr.onnx
+  [ -f "$f" ] || { curl -fsSL -o "$f.part" https://github.com/microsoft/DNS-Challenge/raw/master/DNSMOS/DNSMOS/sig_bak_ovr.onnx && mv "$f.part" "$f"; }
+fi
 if [ "$name" = kokoro ]; then
   mkdir -p "$models/tts/kokoro"; cd "$models/tts/kokoro"
   for f in kokoro-v1.0.onnx voices-v1.0.bin; do [ -f $f ] || { curl -sSL -o $f.part https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f && mv $f.part $f; }; done

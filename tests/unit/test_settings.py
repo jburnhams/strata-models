@@ -35,6 +35,10 @@ def test_save_load_reset_and_refusals():
         settings.save(dict(vram_reserve_gb="x"))
     with pytest.raises(ValueError, match="between"):
         settings.save(dict(vram_reserve_gb=100))
+    assert settings.whole_card_gb() == 10.0 and settings.save(dict(whole_card_gb=9))["whole_card_gb"] == "9"
+    assert settings.all_settings()["whole_card_gb"] == 9.0
+    with pytest.raises(ValueError, match="whole_card_gb must be a number"):
+        settings.save(dict(whole_card_gb="big"))
 
 
 def test_job_slots_default_validate_and_come_from_the_environment(monkeypatch):

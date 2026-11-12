@@ -45,6 +45,32 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
   nearest. A pitch-keeping stretch (0.75 to 1.35x) then closes the rest, and `fit` says when it could not.
 - Eval speak-pace (primary pace_spread, baseline unpaced kokoro-lewis) asks whether 160 wpm evens the lines without hurting them.
 
+## 2026-11-12: noise reduction from strata-360 (role `denoise-audio`)
+- What strata-360 does today (`audio/dsp.py clean_for_playback`, stage `audio_clean`): high-pass 80 Hz, DeepFilterNet3 with
+  `atten_lim_db=18` (it takes out at most 18 dB, so the crowd and the place stay and artefacts stay small), EQ -2 dB at 250 Hz and +2 dB at
+  3 kHz, ffmpeg speechnorm, then -14 LUFS with alimiter. Recognition uses the raw audio: enhancement raised Whisper's word error rate there
+  (0.16 to 0.19-0.22 with small), so this role is for listening, not for transcribing. On Windows DeepFilterNet needed a Rust build and
+  MossFormer2_SE_48K stood in with the same cap.
+- strata-360's own comparison on the Windows GPU (76 English segments, DNSMOS overall): original 2.10, its capped DeepFilterNet 2.47,
+  MossFormer2 2.94, MossFormerGAN 3.04, FRCRN 3.02; but the others are uncapped and remove the place's sound, which DNSMOS rewards (bak).
+  That is why `denoise-audio` is decided by people with the original heard first, and DNSMOS's speech score (sig) is only a guard.
+- Other options looked at (2026-11): DPDFNet (streaming DeepFilterNet with a dual-path RNN, Dec 2025), GTCRN (tiny), MP-SENet, MaTSE,
+  DriftSE: no head-to-head on real recordings found; worth adding as candidates when one is packaged. Generative restorers (Resemble
+  Enhance's enhance mode) can change a voice: in the eval, but judged with that in mind.
+- Model judges that listen: llama.cpp hears through the mmproj of Qwen3-Omni-30B-A3B (ggml-org GGUF, 18.6 GB Q4_K_M, experts partly on the
+  CPU with `--fit`) and Gemma 4 E4B; Gemini through agy. All of them hear 16 kHz, so tape hiss above 8 kHz is for people.
+- Measured on omarchy (10 s of Legends speech with white noise at 0 dB, under a lease): taken out / first run / VRAM: DeepFilterNet3 8.8 dB,
+  4.7 s, 0.15 GB; MossFormerGAN 9.3 dB, 3.5 s, 0.13 GB; FRCRN 8.6 dB, 4.8 s, 0.17 GB; MossFormer2 7.0 dB, 1.8 s, 0.33 GB (26 s first load);
+  Resemble Enhance (denoise) 5.0 dB, 2.3 s, 1.5 GB; noisereduce 8.6 dB, 0.7 s, CPU; afftdn 0.1 dB (barely anything, at any setting tried).
+  Resemble Enhance fetches its weights with git-lfs (not installed): the worker downloads them with huggingface_hub into
+  <models>/audio/resemble-enhance; ClearVoice wrote its checkpoints into the working folder: now <models>/audio/clearvoice.
+- Audio judges on llama.cpp b12224 (audio input logged as experimental) fail a clear-cut pair (clean against the same with noise at -5 dB):
+  Gemma 4 E4B answers X in both orders (1.5 s a verdict, 4.8 GB); Qwen3-Omni-30B-A3B says X and Y are both the input (12 s). Asked to rate
+  one recording's noise 1-5, neither tells clean from noisy. The denoise-audio spec keeps Gemini (agy) as its only model judge; DNSMOS,
+  SQUIM and people carry the rest. Retry the local ones on a newer llama.cpp.
+- huggingface_hub is now a declared dependency: the llama-server and sd-cpp runtimes fetch weights with it, and the live venv only had it
+  because it was installed by hand (a plain `uv sync` would have removed it).
+
 ## 2026-11-12: video enhancement for digitised VHS
 - The tape (H.264 10 Mb/s in MP4) is PAL 720x576 at 25 fps, SAR 787:720 (4:3 from the 702-pixel active line), coded
   interlaced; ffmpeg idet on 3 x 1000 frames: 100 % TFF. The file's own field order says nothing, so the worker forces it. Active picture: about

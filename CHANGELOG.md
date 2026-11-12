@@ -4,6 +4,23 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Scheduler: models and leases above 10 GB get the whole card (branch `claude/project-thread-ecj9cv`)**
+Jonathan: "above 10gb any model can run as long as it gets whole card reservation", so bigger models can be tried at their own risk instead of waiting forever or being refused.
+
+- `scheduler.py`: a model job, a load from the Models page or a sized lease that needs more than `whole_card_gb`, or more than the card less the reserve, waits until no GPU job runs and no lease is held (nothing on the GPU passes it), frees every idle GPU model, ignores the reserve, and holds the card alone until it ends (the CPU lane carries on). An event says it runs on the whole GPU at its own risk. Only a lease bigger than the card itself fails; before, a lease above the card less the reserve failed and one that fit that but not beside other programs waited forever.
+- `settings.py`, `PUT /api/settings`, `strata-models set`, Settings page: `whole_card_gb` (default 10, env `STRATAMODELS_WHOLE_CARD_GB`), applied at once.
+
+**Sound: noise reduction moved here from strata-360, with evals scored by people, models and measures (branch `claude/project-thread-ecj9cv`)**
+Jonathan asked to move strata-360's audio noise reduction into this service, look at other denoisers, and build evals on real audio (race speech from strata-360, a digitised tape's soundtrack), judged by programmatic measures and model judges as well as people.
+
+- `src/stratamodels/workers/audio.py`: **new** venv-worker for role `denoise-audio`. strata-360's `dsp.clean_for_playback` (high-pass 80 Hz, DeepFilterNet3 capped at 18 dB, speech EQ and speechnorm, -14 LUFS with a limiter; its BS.1770 loudness) as one chain every engine runs, so candidates differ only in the denoiser: `none`, `afftdn`, `noisereduce`, `dfn3`, `clearvoice` (MossFormer2_SE_48K, MossFormerGAN_SE_16K, FRCRN_SE_16K) and `resemble` (Resemble Enhance, denoise or enhance). The cap (`atten_lim_db`) mixes back a share of what was taken out for engines without one of their own, as strata-360's MossFormer2 stand-in did. Every output is levelled to the same loudness, so no candidate wins by being louder.
+- `src/stratamodels/workers/audio_quality.py`: **new** venv-worker for role `audio-quality` (CPU): DNSMOS P.835 (sig, bak, ovrl) and SQUIM objective estimates without a reference; SI-SDR, PESQ (wide band) and extended STOI against one, aligned first.
+- `models.toml`: roles `denoise-audio` (deepfilternet3 with strata-360's settings as `options.defaults`), `audio-quality` (dnsmos-squim) and `judge-audio` (qwen3-omni-30b-a3b; gemma-4-e4b to trial); one venv per model family: `scripts/setup_worker_venv.sh dfn | clearvoice | resemble | audio | audio-quality` (dfn installs deepfilternet without its numpy pin and patches its torchaudio import, as strata-360 did).
+- `evals/judges.py`: judge kind `audio`: the item's recording, then X's and Y's, as 16 kHz WAV; local through `runtimes/llama.py` (new `audio`/`audios` params, sent as `input_audio`), or Gemini through agy (`cloud.prompt_of` tells it to open the recordings with its file viewer; codex refused).
+- `evals/core.py`: `[score] with = {param = "item.field"}` passes fields of the item to the scoring job (the clean reference of a mix). `evals/metrics.py`: `dnsmos_ovrl`, `dnsmos_sig`, `dnsmos_bak`, `squim_stoi`, `squim_pesq`, `squim_si_sdr`, `si_sdr`, `pesq`, `estoi`, `removed_db`.
+- `evals/specs/denoise-audio.toml` (real recordings, judged by people against strata-360's chain; model judges Qwen3-Omni, Gemma 4 E4B and Gemini Flash; DNSMOS/SQUIM as context and a guard) and `denoise-audio-mix.toml` (clean speech mixed into real noise, decided by PESQ). `scripts/evals/denoise_audio.py` builds both datasets (private: they stay in the data folder).
+- Dev dependencies: scipy and soundfile (the workers' loudness and file writing, tested without the model libraries).
+
 **Video quality readings never fail a job (branch `claude/video-quality-optional`)**
 A worker venv without numpy (or a reading ffmpeg cannot take) failed the whole job at its last step, after the video was made.
 

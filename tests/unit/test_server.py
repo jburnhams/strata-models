@@ -143,6 +143,10 @@ def test_settings_roundtrip_and_main(client, scheduler, tmp_path, monkeypatch):
     )
     assert client.get("/api/settings").json() == r
     assert client.put("/api/settings", json=dict(gpu_jobs=40)).status_code == 400
+    assert (
+        client.put("/api/settings", json=dict(whole_card_gb=8.5)).json()["whole_card_gb"] == 8.5
+        and scheduler.whole_card_mb == 8.5 * 1024
+    )
     r = client.put("/api/settings", json=dict(gpu_jobs=3, cpu_jobs=6)).json()
     assert (r["gpu_jobs"], r["cpu_jobs"]) == (3, 6) and (scheduler.gpu_jobs, scheduler.cpu_jobs) == (3, 6)
     runs = []

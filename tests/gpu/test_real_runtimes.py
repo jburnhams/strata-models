@@ -257,7 +257,7 @@ def test_text_role_expands_an_image_prompt_on_the_gpu(model):
     assert len(out["text"].split()) > 40 and "five" in out["text"].lower() and out["finish"] == "stop"
 
 
-def _judge(role, spec_q, item, right, wrong):
+def _judge(role, spec_q, item, right, wrong, key=None):
     """Both orders of one clear-cut pair: the real model must accept the verdict schema and pick the right answer whichever side it is on."""
     from stratamodels.evals import core as C
     from stratamodels.evals import judges as J
@@ -268,7 +268,7 @@ def _judge(role, spec_q, item, right, wrong):
         )
     )
     j = J.parse_judge(dict(name="g", kind=role.removeprefix("judge-")))
-    m = Registry.load().resolve(role)
+    m = Registry.load().models[key] if key else Registry.load().resolve(role)
     rt = runtimes.get(m.runtime)
     h = rt.load(m, MODELS)
     try:
@@ -280,7 +280,7 @@ def _judge(role, spec_q, item, right, wrong):
                 system=system,
                 prompt=text,
                 schema=J.SCHEMA,
-                **({"images": images} if images else {}),
+                **({("audios" if j["kind"] == "audio" else "images"): images} if images else {}),
             )
             out = rt.run(h, p)
             said, why = J.verdict(out)
@@ -332,6 +332,105 @@ def test_judge_vision_on_the_gpu(tmp_path):
         dict(id="g", input=dict(image=pic("ref.png", "red", "square"))),
         dict(path=red),
         dict(path=pic("blue.png", "blue", "circle")),
+    )
+
+
+# ---- recorded sound -------------------------------------------------------------------------------------------------------------------------
+DENOISERS = [
+    "deepfilternet3",
+    "mossformer2-se-48k",
+    "mossformergan-se-16k",
+    "frcrn-se-16k",
+    "resemble-enhance",
+    "audio-passthrough",
+    "afftdn",
+    "noisereduce",
+]
+
+
+def _noisy(tmp_path, snr_db=0.0):
+    """STRATAMODELS_TEST_AUDIO as 48 kHz mono with white noise at snr_db (WAV), and the clean version."""
+    import subprocess
+
+    import soundfile as sf
+
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", AUDIO, "-t", "10", "-f", "f32le", "-ac", "1", "-ar", "48000", "-"],
+        capture_output=True,
+        check=True,
+    ).stdout
+    x = np.frombuffer(raw, np.float32)
+    n = (
+        np.random.default_rng(0).standard_normal(len(x)).astype(np.float32)
+        * float(np.sqrt(np.mean(x**2)))
+        * 10 ** (-snr_db / 20)
+    )
+    clean, noisy = str(tmp_path / "clean.wav"), str(tmp_path / "noisy.wav")
+    sf.write(clean, x, 48000)
+    sf.write(noisy, np.clip(x + n, -1, 1), 48000)
+    return clean, noisy
+
+
+@pytest.mark.skipif(not AUDIO, reason="needs STRATAMODELS_TEST_AUDIO (speech)")
+@pytest.mark.parametrize("key", DENOISERS)
+def test_denoise_audio_on_the_gpu(key, tmp_path):
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().models[key]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip(f"no venv for {key}: scripts/setup_worker_venv.sh {m.options.get('venv')}")
+    _, noisy = _noisy(tmp_path)
+    out, _ = measure(m, dict(path=noisy, highpass=80, lufs=-14))
+    print(f"{key}: removed {out['removed_db']} dB, {out['seconds']} s, LUFS {out['lufs_in']} -> {out['lufs_out']}")
+    assert os.path.isfile(out["path"]) and out["sample_rate"] == 48000 and abs(out["lufs_out"] + 14) < 1.0
+    assert (
+        key in ("audio-passthrough", "afftdn") or out["removed_db"] > 3
+    )  # white noise at 0 dB: every learned denoiser takes a good part out (afftdn barely does: measured 0.1 dB, a weak classical baseline)
+
+
+@pytest.mark.skipif(not AUDIO, reason="needs STRATAMODELS_TEST_AUDIO (speech)")
+def test_audio_quality_scores_clean_above_noisy(tmp_path):
+    """The intrusive measures are taken at 16 kHz: resampling drops two thirds of 48 kHz white noise, so a 0 dB mix reads about +4.77 dB."""
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().resolve("audio-quality")
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip("no venv: scripts/setup_worker_venv.sh audio-quality")
+    clean, noisy = _noisy(tmp_path)
+    rt = runtimes.get(m.runtime)
+    h = rt.load(m, MODELS)
+    try:
+        c, n = rt.run(h, dict(path=clean, reference=clean)), rt.run(h, dict(path=noisy, reference=clean))
+    finally:
+        rt.unload(h)
+    print(f"\nclean {c}\nnoisy {n}")
+    assert (
+        c["dnsmos"]["ovrl"] > n["dnsmos"]["ovrl"]
+        and c["dnsmos"]["bak"] > n["dnsmos"]["bak"]
+        and c["squim"]["stoi"] > n["squim"]["stoi"]
+    )
+    assert (
+        c["intrusive"]["si_sdr"] > 30
+        and abs(n["intrusive"]["si_sdr"] - 4.77) < 1.5
+        and c["intrusive"]["pesq"] > n["intrusive"]["pesq"]
+    )
+
+
+@pytest.mark.skipif(
+    not AUDIO or bool(runtimes.available()["llama-server"]),
+    reason="needs STRATAMODELS_TEST_AUDIO and the llama-server binary",
+)
+@pytest.mark.parametrize("key", ["qwen3-omni-30b-a3b", "gemma-4-e4b"])
+def test_judge_audio_on_the_gpu(key, tmp_path):
+    """Role judge-audio: the clean recording against the same with loud noise, both orders, the noisy one heard first as the input."""
+    clean, noisy = _noisy(tmp_path, -5.0)
+    _judge(
+        "judge-audio",
+        "Which cleaned recording sounds better: clear speech, little noise?",
+        dict(id="a", input=dict(path=noisy)),
+        dict(path=clean),
+        dict(path=noisy),
+        key=key,
     )
 
 

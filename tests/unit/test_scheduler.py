@@ -627,3 +627,88 @@ def test_a_model_reloaded_with_edited_options_reserves_its_estimate_while_it_loa
     assert scheduler.loading == {"small": 2048}
     scheduler.execute(t)
     assert scheduler.loading == {} and scheduler.resident["small"].model.options == dict(ctx=4096)
+
+
+# ---- the whole card: models and leases too big to share it ------------------------------------------------------------------------------
+def test_a_job_above_the_whole_card_size_waits_for_an_empty_card_and_runs_alone(scheduler):
+    _cloud(scheduler)
+    scheduler.whole_card_mb = 5 * 1024  # `big` (6 GB) now takes the whole card
+    ts = scheduler.dispatch() if scheduler.submit("echo", {}, "a") else None
+    big = scheduler.submit("echo", {}, "b", model="big")
+    after = scheduler.submit("other", {}, "c")  # fits beside `small`, but must not pass the big job
+    assert scheduler.dispatch() is None and scheduler.dispatch() is None
+    assert (
+        sum(
+            "waits for the whole GPU (6 GB): the jobs running on it finish first" in e["text"] for e in scheduler.events
+        )
+        == 1
+    )
+    scheduler.execute(ts)
+    tb = scheduler.dispatch()
+    assert tb["job"]["id"] == big["id"] and scheduler.resident == {} and scheduler.alone == {"big"}
+    assert any("on the whole GPU (6 GB, nothing else on it, at its own risk)" in e["text"] for e in scheduler.events)
+    c = scheduler.submit("echo", {}, "d", model="cloud")
+    scheduler.request("load", "small")
+    tc = scheduler.dispatch()
+    assert (
+        tc["job"]["id"] == c["id"] and scheduler.dispatch() is None
+    )  # the CPU lane carries on; the GPU waits, loads too
+    assert scheduler.store.get(after["id"])["status"] == "queued" and list(scheduler.control) == [("load", "small")]
+    scheduler.execute(tc)
+    assert scheduler.execute(tb)["status"] == "done" and scheduler.alone == set()
+    assert scheduler.step() is None and "small" in scheduler.resident  # the load, then the job
+    assert scheduler.step()["id"] == after["id"]
+
+
+def test_a_whole_card_job_waits_for_the_sized_leases_held(scheduler):
+    scheduler.whole_card_mb = 5 * 1024
+    lease = scheduler.lease("stills", vram_gb=4)
+    assert (
+        scheduler.step()["id"] == lease["id"]
+    )  # 4 GB: shares the card; 6.5 GB are left, enough for `big` if it shared
+    big = scheduler.submit("echo", {}, "b", model="big")
+    assert scheduler.step() is None and any("1 lease(s) hold part of it" in e["text"] for e in scheduler.events)
+    scheduler.release(lease["id"])
+    assert scheduler.step()["id"] == big["id"]
+
+
+def test_a_whole_card_load_from_the_models_page_waits_then_frees_the_card(scheduler):
+    scheduler.whole_card_mb = 5 * 1024
+    scheduler.submit("other", {}, "a")
+    scheduler.step()
+    t = scheduler.dispatch() if scheduler.submit("echo", {}, "a") else None
+    scheduler.request("load", "big")
+    assert scheduler.dispatch() is None and list(scheduler.control) == [("load", "big")]
+    scheduler.execute(t)
+    tl = scheduler.dispatch()
+    assert tl["key"] == "big" and scheduler.resident == {} and scheduler.alone == {"big"}
+    scheduler.execute(tl)
+    assert "big" in scheduler.resident and scheduler.alone == set()
+
+
+def test_a_lease_above_the_whole_card_size_gets_the_card_and_only_one_bigger_than_the_card_fails(scheduler):
+    scheduler.probe.other_mb = 1500  # the budget is 12 - 1.5 - 1 = 9.5 GB: 11 GB would never fit beside it
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    t = scheduler.dispatch() if scheduler.submit("other", {}, "a") else None
+    lease = scheduler.lease("stills", vram_gb=11)
+    job = scheduler.submit("echo", {}, "b")
+    assert scheduler.dispatch() is None and any(
+        "waits for the whole GPU (11.0 GB)" in e["text"] for e in scheduler.events
+    )
+    scheduler.execute(t)
+    r = scheduler.step()
+    assert r["id"] == lease["id"] and r["status"] == "running" and scheduler.resident == {}
+    assert any("with the whole GPU (11.0 GB" in e["text"] for e in scheduler.events)
+    assert scheduler.step() is None and scheduler.store.get(job["id"])["status"] == "queued"  # it holds the card
+    scheduler.release(lease["id"])
+    assert scheduler.step()["id"] == job["id"]
+    scheduler.whole_card_mb = 64 * 1024  # no size limit: a lease the budget could never hold still gets the whole card
+    l2 = scheduler.lease("stills", vram_gb=11.5)
+    assert scheduler.step()["status"] == "running"
+    scheduler.release(l2["id"])
+    huge = scheduler.lease("stills", vram_gb=13)
+    r = scheduler.step()
+    assert (
+        r["id"] == huge["id"] and r["status"] == "failed" and r["error"] == "13 GB will never fit: the card has 12.0 GB"
+    )

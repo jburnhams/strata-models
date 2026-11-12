@@ -27,7 +27,7 @@ export interface Registry { roles: Role[]; models: Model[] }
 export interface JobPage { items: Job[]; next: number | null }
 export interface UsageRow { app: string; kind: 'run' | 'lease'; role: string | null; jobs: number; failed: number; gpu_s: number }
 export interface Usage { hours: number; rows: UsageRow[] }
-export interface Settings { data_dir: string; models_dir: string; vram_reserve_gb: number; gpu_jobs: number; cpu_jobs: number }
+export interface Settings { data_dir: string; models_dir: string; vram_reserve_gb: number; gpu_jobs: number; cpu_jobs: number; whole_card_gb: number }
 export interface JobFilters { status?: string; app?: string; role?: string; kind?: string }
 
 // Where the app is served from: '' at the server's own root, '/subpath' behind a reverse proxy at that path. From the page's own URL (vite base './'), so one build works in both places.

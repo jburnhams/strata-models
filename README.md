@@ -6,6 +6,7 @@ One service on the machine with the GPU (omarchy, RTX 3060 12 GB) that every app
 - **One queue for the GPU.** Every job goes through one dispatcher: interactive before batch, jobs for an already loaded model first (but never ahead of a lease or past one that has waited two minutes). Jobs run on threads of their own: up to `gpu_jobs` (2) GPU jobs at once on different models when they fit in the VRAM budget together, and up to `cpu_jobs` (4) zero-VRAM jobs (recorded outputs, CPU models, cloud CLIs) beside them, which never wait for the card. Jobs and their history are in the shared Postgres (schema `stratamodels`).
 - **A VRAM budget.** Models stay loaded until the room is needed, then the least recently used one is freed. A reserve (1 GB by default) is never filled, so the desktop keeps working.
 - **GPU leases.** An app that runs its own CUDA code (strata-stills' develop) asks for a lease: the worker frees the memory, runs nothing else until the lease is given back, and expires it if the app stops sending heartbeats.
+- **The whole card for big models.** A model or lease that needs more than `whole_card_gb` (10 GB), or more than the budget could ever give, does not share: it waits until the card is empty, every idle model is freed, the VRAM reserve is ignored and nothing else on the GPU starts until it ends (cloud and CPU jobs carry on). A way to try models too big to budget for, at their own risk; only a lease bigger than the card is refused.
 - **A web app** (strata-react): what the GPU is doing now and where its memory is, every model and role, every job with its params, result and error, and GPU time per app.
 
 ## Use it from an app
@@ -41,6 +42,8 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `faces` | insightface `buffalo_l` (SCRFD, ArcFace, 3D landmarks) | 0.6 GB, 0.05 s a photo once loaded |
 | `transcribe` | Whisper large-v3-turbo (faster-whisper, float16, in its own CUDA 12 worker venv) | 2.0 GB, 0.4 s for 11 s of speech |
 | `transcribe-fast` | Whisper small | 0.6 GB, 0.3 s for 11 s |
+| `denoise-audio` | DeepFilterNet3 capped at 18 dB with strata-360's speech finish and -14 LUFS (its `audio_clean`), in its own worker venv; MossFormer2, MossFormerGAN, FRCRN, Resemble Enhance, noisereduce and afftdn as eval candidates | not yet measured here |
+| `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
 The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.
 

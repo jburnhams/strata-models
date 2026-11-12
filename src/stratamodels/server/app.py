@@ -102,6 +102,7 @@ class SettingsIn(BaseModel):
     vram_reserve_gb: float | None = None
     gpu_jobs: int | None = None
     cpu_jobs: int | None = None
+    whole_card_gb: float | None = None
 
 
 def create_app(scheduler: Scheduler, history: gpu.History | None = None):
@@ -283,7 +284,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
                 if not os.path.isabs(os.path.expanduser(v)):
                     raise HTTPException(400, f"{k} must be an absolute path")
                 changes[k] = v
-        for k in ("vram_reserve_gb", "gpu_jobs", "cpu_jobs"):
+        for k in ("vram_reserve_gb", "gpu_jobs", "cpu_jobs", "whole_card_gb"):
             if getattr(b, k) is not None:
                 changes[k] = getattr(b, k)
         try:
@@ -292,6 +293,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             raise HTTPException(400, str(e))
         if "vram_reserve_gb" in changes:
             s.reserve_mb = settings.vram_reserve_gb() * 1024.0
+        if "whole_card_gb" in changes:
+            s.whole_card_mb = settings.whole_card_gb() * 1024.0
+            s._notify()
         if "models_dir" in changes:
             s.models_dir = settings.models_dir()
         if "gpu_jobs" in changes or "cpu_jobs" in changes:  # takes effect at the next dispatch; jobs running now finish
@@ -385,6 +389,7 @@ def build(memory=False, sample_every_s=5.0):
         reserve_gb=settings.vram_reserve_gb(),
         gpu_jobs=settings.jobs("gpu_jobs"),
         cpu_jobs=settings.jobs("cpu_jobs"),
+        whole_card_gb=settings.whole_card_gb(),
     )
     sch.start()
     history.start()

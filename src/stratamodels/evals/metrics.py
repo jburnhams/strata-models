@@ -382,6 +382,75 @@ def _desc_valid(item, output, error):
     )
 
 
+# ---- recorded sound (denoise-audio: the [score] pass reads each output with the audio-quality role, workers/audio_quality.py) -------------
+def reading(output, group, key):
+    """One number from the [score] reading of an output (scored.result.<group>.<key>), or None: not read yet, the reading failed (a failed
+    measurement says nothing about the sound; `failed` counts failed jobs), or the measure did not apply (no reference for an intrusive one)."""
+    sc = (output or {}).get("scored") if isinstance(output, dict) else None
+    if not isinstance(sc, dict) or sc.get("error"):
+        return None
+    v = ((sc.get("result") or {}).get(group) or {}).get(key)
+    return float(v) if isinstance(v, (int, float)) and v == v else None
+
+
+def _reader(group, key):
+    return lambda item, output, error: None if error else reading(output, group, key)
+
+
+def _removed_db(item, output, error):
+    v = output.get("removed_db") if isinstance(output, dict) and not error else None
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+AUDIO_METRICS = [
+    (
+        "dnsmos_ovrl",
+        "dnsmos",
+        "ovrl",
+        "DNSMOS P.835 overall quality (1-5): Microsoft's model of what listeners would score, no reference",
+        "",
+    ),
+    (
+        "dnsmos_sig",
+        "dnsmos",
+        "sig",
+        "DNSMOS P.835 speech quality (1-5): how undistorted the speech itself sounds (denoisers that eat words score low)",
+        "",
+    ),
+    (
+        "dnsmos_bak",
+        "dnsmos",
+        "bak",
+        "DNSMOS P.835 background (1-5): how little the noise intrudes (5 = none heard; keeping the place's sound costs here)",
+        "",
+    ),
+    (
+        "squim_stoi",
+        "squim",
+        "stoi",
+        "SQUIM's estimate of STOI (0-1, intelligibility) without a reference (torchaudio SQUIM objective)",
+        "",
+    ),
+    ("squim_pesq", "squim", "pesq", "SQUIM's estimate of PESQ (1-4.5) without a reference", ""),
+    ("squim_si_sdr", "squim", "si_sdr", "SQUIM's estimate of SI-SDR without a reference", "dB"),
+    (
+        "si_sdr",
+        "intrusive",
+        "si_sdr",
+        "Scale-invariant signal-to-distortion ratio against the clean speech the item was mixed from",
+        "dB",
+    ),
+    ("pesq", "intrusive", "pesq", "PESQ (wide band, 1-4.5) against the clean speech the item was mixed from", ""),
+    (
+        "estoi",
+        "intrusive",
+        "estoi",
+        "Extended STOI (0-1, intelligibility) against the clean speech the item was mixed from",
+        "",
+    ),
+]
+
+
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error):
     """The job's run time; for outputs recorded elsewhere (runtime `recorded`: a replay takes no time) the time they took when made, if it
@@ -603,6 +672,15 @@ METRICS = {
             "How far the speech's length is from the length asked for (wpm or fit_s), as a share",
             "%",
             _fit_err,
+        ),
+        *[Metric(n, "mean", "higher", d, u, _reader(g, k)) for n, g, k, d, u in AUDIO_METRICS],
+        Metric(
+            "removed_db",
+            "mean",
+            "higher",
+            "How much quieter the denoiser left the sound (before levelling): what it took out. Context, not quality: more is not better",
+            "dB",
+            _removed_db,
         ),
         Metric(
             "judged",

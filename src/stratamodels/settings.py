@@ -7,9 +7,11 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
   vram_reserve_gb VRAM left for the desktop and for processes outside the service, on top of what they already use. Default: 1.0.
   gpu_jobs        GPU jobs that may run at once (on different models, when they fit in the budget together). Default: 2. 1 is one at a time.
   cpu_jobs        jobs for zero-VRAM models (recorded outputs, CPU models, cloud CLIs) that may run at once, beside the GPU's. Default: 4.
+  whole_card_gb   a model or lease that needs more than this runs with the whole card to itself, the reserve ignored (to try models too big
+                  to budget for, at their own risk). Default: 10.0.
 
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
-STRATAMODELS_CPU_JOBS. The database is chosen by omarchy-db:
+STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB. The database is chosen by omarchy-db:
 STRATAMODELS_DATABASE_URL, else OMARCHY_DB_URL, else schema `stratamodels` of the shared `omarchy` database over the local socket."""
 
 import json
@@ -22,6 +24,7 @@ DEFAULTS = dict(
     vram_reserve_gb="1.0",
     gpu_jobs="2",
     cpu_jobs="4",
+    whole_card_gb="10.0",
 )
 ENV = dict(
     data_dir="STRATAMODELS_DATA",
@@ -29,6 +32,7 @@ ENV = dict(
     vram_reserve_gb="STRATAMODELS_VRAM_RESERVE_GB",
     gpu_jobs="STRATAMODELS_GPU_JOBS",
     cpu_jobs="STRATAMODELS_CPU_JOBS",
+    whole_card_gb="STRATAMODELS_WHOLE_CARD_GB",
 )
 KNOWN = tuple(DEFAULTS)
 
@@ -112,8 +116,8 @@ def save(changes):
     for k, v in changes.items():
         if k not in KNOWN:
             raise KeyError(f"unknown setting {k!r}")
-        if k == "vram_reserve_gb" and v is not None:
-            _reserve(v)  # refuse a bad number before it is written
+        if k in ("vram_reserve_gb", "whole_card_gb") and v is not None:
+            _gb(k, v)  # refuse a bad number before it is written
         if k in ("gpu_jobs", "cpu_jobs") and v is not None:
             v = _slots(k, v)
         if v is None:
@@ -167,22 +171,31 @@ def models_dir():
     return _folder("models_dir")
 
 
-def _reserve(v):
+def _gb(key, v):
     try:
         f = float(v)
     except (TypeError, ValueError):
-        raise ValueError(f"vram_reserve_gb must be a number of GB, not {v!r}")
+        raise ValueError(f"{key} must be a number of GB, not {v!r}")
     if not 0 <= f <= 64:
-        raise ValueError("vram_reserve_gb must be between 0 and 64")
+        raise ValueError(f"{key} must be between 0 and 64")
     return f
+
+
+def _gb_setting(key):
+    try:
+        return _gb(key, _raw(key))
+    except ValueError:
+        return float(DEFAULTS[key])
 
 
 def vram_reserve_gb():
     """GB of VRAM the service never fills, so the desktop keeps working."""
-    try:
-        return _reserve(_raw("vram_reserve_gb"))
-    except ValueError:
-        return float(DEFAULTS["vram_reserve_gb"])
+    return _gb_setting("vram_reserve_gb")
+
+
+def whole_card_gb():
+    """GB above which a model or lease gets the whole card to itself instead of a share of the budget."""
+    return _gb_setting("whole_card_gb")
 
 
 def _slots(key, v):
@@ -210,4 +223,5 @@ def all_settings():
         vram_reserve_gb=vram_reserve_gb(),
         gpu_jobs=jobs("gpu_jobs"),
         cpu_jobs=jobs("cpu_jobs"),
+        whole_card_gb=whole_card_gb(),
     )
