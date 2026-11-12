@@ -21,6 +21,7 @@ function Results({ a }: { a: Analysis }) {
   const rows: Row[] = a.experiment.candidates.map(c => ({ name: c.name }))
   const columns: Column<Row>[] = [
     { key: 'name', header: 'Candidate', cell: r => <span className="grid"><span className="font-mono">{r.name}</span>{r.name === a.experiment.baseline && <span className="type-caption text-muted-foreground">baseline</span>}</span> },
+    { key: 'items', header: 'Items', numeric: true, cell: r => { const c = a.candidates[r.name]; return c?.compared ?? '–' } },
     ...metrics.map(m => ({ key: m, header: m, numeric: true, cell: (r: Row) => { const v = a.candidates[r.name]?.metrics[m]; const info = a.metrics[m]; return v ? <span className="grid"><span>{value(info, v.value)}</span><span className="type-caption text-muted-foreground">{value(info, v.low)} to {value(info, v.high)}</span></span> : '–' } })),
     { key: 'verdict', header: 'Decision', cell: r => { const v = a.decision.per_candidate[r.name]; return v ? <Status tone={VERDICT_TONE[v.verdict]}>{VERDICT_WORD[v.verdict]}</Status> : <span className="text-muted-foreground">{a.dataset.not_run?.includes(r.name) ? 'Not run yet' : 'Baseline'}</span> } },
   ]
@@ -39,7 +40,7 @@ function Results({ a }: { a: Analysis }) {
         <h2 id="why" className="type-heading">Each candidate</h2>
         <ul className="grid gap-1 type-body">{Object.entries(a.decision.per_candidate).map(([n, v]) => <li key={n}><span className="font-mono">{n}</span>: {VERDICT_WORD[v.verdict].toLowerCase()}, {v.why}.</li>)}</ul>
       </section>
-      <DataTable caption={`Results on ${format.count(a.dataset.compared, 'item')} (value, and its 95 % interval)`} columns={columns} rows={rows} rowKey={r => r.name} />
+      <DataTable caption="Results on each candidate's items (value, and its 95 % interval)" columns={columns} rows={rows} rowKey={r => r.name} />
       {crows.length > 0 && <DataTable caption={`Compared with ${a.experiment.baseline} on the same items (candidate minus baseline)`} columns={ccols} rows={crows} rowKey={r => r.key} />}
       {a.judgments && (
         <section aria-labelledby="judged" className="grid gap-2">
@@ -48,7 +49,7 @@ function Results({ a }: { a: Analysis }) {
           <ul className="grid gap-1 type-body">{Object.entries(a.judgments.strength).sort((x, y) => y[1][0] - x[1][0]).map(([n, s]) => <li key={n}><span className="font-mono">{n}</span>: {s[0].toFixed(2)} ({s[1].toFixed(2)} to {s[2].toFixed(2)})</li>)}</ul>
         </section>
       )}
-      <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: {a.dataset.compared} of {a.dataset.n} items have every candidate&apos;s output{a.dataset.not_run?.length ? ` (of those that have run: ${a.dataset.not_run.join(', ')} not yet)` : ''}. Intervals are 95 %; the Write-up tab says how each is computed.</p>
+      <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: the baseline has {a.dataset.compared} of {a.dataset.n} items; each candidate is compared with it on the items both have (Items column: a sample has fewer, and wider intervals){a.dataset.not_run?.length ? ` (of those that have run: ${a.dataset.not_run.join(', ')} not yet)` : ''}. Intervals are 95 %; the Write-up tab says how each is computed.</p>
     </div>
   )
 }

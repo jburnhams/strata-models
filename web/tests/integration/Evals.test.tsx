@@ -23,7 +23,7 @@ describe('An experiment', () => {
   it('leads with the decision, then results with intervals and comparisons', async () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     expect(await screen.findByText(/Keep large-v3: no candidate is clearly better on wer/)).toBeInTheDocument()
-    const results = screen.getByRole('table', { name: /Results on 200/ })
+    const results = screen.getByRole('table', { name: /Results on each candidate/ })
     expect(within(results).getByText('3.10%')).toBeInTheDocument()
     expect(within(results).getByText('Unclear')).toBeInTheDocument()
     const comp = screen.getByRole('table', { name: /Compared with large-v3/ })

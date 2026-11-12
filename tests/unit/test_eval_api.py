@@ -142,6 +142,9 @@ def test_judgments_count_only_while_their_outputs_are_current(client, scheduler)
     for _ in range(4):
         p = client.get("/api/evals/fake-asr/pair").json()["pair"]
         client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="x"))
+    wait_idle(
+        client
+    )  # as above: on a slow runner (macOS CI) a GET before the queued refresh lands is served the kept analysis, stale
     assert client.get("/api/evals/fake-asr").json()["judgments"]["n"] == 4
     s = C.load_spec("fake-asr")
     C.forget(s, scheduler.store.engine)  # outputs regenerated: new keys? same keys (same params), so still counted

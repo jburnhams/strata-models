@@ -60,7 +60,7 @@ def render(res, examples=None, date=None, pipelines=None):
     L += [
         f"# {e['name']}: {e['question']}",
         "",
-        f"{date} · dataset `{ds['name']}` version `{ds['version']}` · {ds['compared']} of {ds['n']} items compared · role `{e['role']}`",
+        f"{date} · dataset `{ds['name']}` version `{ds['version']}` · {ds['compared']} of {ds['n']} items with the baseline's output · role `{e['role']}`",
         "",
     ]
     L += ["## Answer", ""]
@@ -103,13 +103,16 @@ def render(res, examples=None, date=None, pipelines=None):
         "",
         "## Results",
         "",
-        "| Candidate | " + " | ".join(e["metrics"]) + " |",
-        "|---|" + "---|" * len(e["metrics"]),
+        "Each candidate is compared with the baseline on the items both have: a candidate run on a sample (`items` in its spec) has fewer, and"
+        " intervals as wide as its sample earns.",
+        "",
+        "| Candidate | Items | " + " | ".join(e["metrics"]) + " |",
+        "|---|---|" + "---|" * len(e["metrics"]),
     ]
     for n in names:
         mm = res["candidates"][n]["metrics"]
         L.append(
-            f"| `{n}` | "
+            f"| `{n}` | {res['candidates'][n].get('compared', res['dataset']['compared'])} | "
             + " | ".join(
                 f"{_v(M.METRICS[m], mm[m]['value'])} [{_v(M.METRICS[m], mm[m]['low'])}, {_v(M.METRICS[m], mm[m]['high'])}]"
                 if m in mm

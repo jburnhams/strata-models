@@ -159,6 +159,93 @@ used_by = ["strata-stills"]
 # Not a model this service runs: the descriptions strata-stills got from Sonnet, replayed by picture so they stand beside local models in evals.
 options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 
+# Cloud models on Jonathan's subscriptions (no API credits), recorded through the vendors' own CLIs by scripts/evals/record_cloud.py with the
+# same preset and context as the local candidates (--like qwen3.5-9b). Not models this service runs: replayed by picture for the evals.
+# Every model is tried, on a number of pictures that follows its share of the plan (Jonathan, 2026-11-12): the candidates' `items` in the
+# describe-photos spec (evals.core "Samples"). Measured cost per picture: Flash low ~0.2 % of the Gemini week, Argon ~0.3 % of its own week,
+# Sonnet 5.5 low ~1.4 % of the Claude-and-GPT week (2.9 % of its 5 hours), Opus far more; Codex shows no usage outside its interactive /status.
+# gpt-oss-120b on Antigravity cannot see pictures (it asks for a description), so it is not a vision-language candidate.
+
+[models."gpt-6-luna-photos-v1"]
+runtime = "recorded"
+name = "GPT-6 Luna via Codex CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6-luna)"
+source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6-luna-photo-describe-v1.jsonl", by = "image" }
+
+[models."gemini-3.8-flash-photos-v1"]
+runtime = "recorded"
+name = "Gemini 3.8 Flash (low) via Antigravity CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from Google AI Pro (agy -p --model gemini-3.8-flash-low)"
+source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli agy"
+used_by = []
+options = { file = "evals/recorded/gemini-3.8-flash-low-photo-describe-v1.jsonl", by = "image" }
+
+[models."gpt-6.1-terra-photos-v1"]
+runtime = "recorded"
+name = "GPT-6.1 Terra via Codex CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-terra)"
+source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6.1-terra-photo-describe-v1.jsonl", by = "image" }
+
+[models."gemini-4-argon-photos-v1"]
+runtime = "recorded"
+name = "Gemini 4 Argon (medium) via Antigravity CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from Google AI Pro (agy -p --model gemini-4-argon-medium)"
+source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli agy"
+used_by = []
+options = { file = "evals/recorded/gemini-4-argon-medium-photo-describe-v1.jsonl", by = "image" }
+
+[models."claude-sonnet-5.5-agy-photos-v1"]
+runtime = "recorded"
+name = "Claude Sonnet 5.5 (low) via Antigravity CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from Google AI Pro (agy -p --model claude-sonnet-5-5-low)"
+source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli agy"
+used_by = []
+options = { file = "evals/recorded/claude-sonnet-5-5-low-photo-describe-v1.jsonl", by = "image" }
+
+[models."gpt-6.1-sol-photos-v1"]
+runtime = "recorded"
+name = "GPT-6.1 Sol via Codex CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-sol)"
+source = "scripts/evals/record_cloud.py describe-photos-slow --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6.1-sol-photo-describe-v1.jsonl", by = "image" }
+
+[models."gpt-6-astra-photos-v1"]
+runtime = "recorded"
+name = "GPT-6 Astra via Codex CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6-astra)"
+source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli codex"
+used_by = []
+options = { file = "evals/recorded/gpt-6-astra-photo-describe-v1.jsonl", by = "image" }
+
+[models."claude-opus-5.5-agy-photos-v1"]
+runtime = "recorded"
+name = "Claude Opus 5.5 (low) via Antigravity CLI, photo-describe-v1"
+roles = ["vision-language"]
+vram_gb = 0.0
+licence = "outputs recorded from Google AI Pro (agy -p --model claude-opus-5-5-low)"
+source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli agy"
+used_by = []
+options = { file = "evals/recorded/claude-opus-5-5-low-photo-describe-v1.jsonl", by = "image" }
+
 [models.ast-audioset]
 runtime = "transformers"
 name = "MIT/ast-finetuned-audioset-10-10-0.4593"
