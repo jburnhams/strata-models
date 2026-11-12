@@ -79,6 +79,13 @@ detailed caption (`role = "text"`, `system_preset = "image-prompt-*"`, see `runt
 - A failed stage fails the output (the error names the stage) without running the candidate's job.
 - `forget` keeps shared stage outputs unless asked (`stages=True`).
 
+## Video: judging upscalers and deinterlacers on crops
+`video-enhance` outputs are MP4s at the asked size with `crops` (each of the item's `regions`, the same box of every candidate, enlarged
+nearest-neighbour) and `stills` (PNG frames at fixed times, for `similarity = "video"`). The dataset builder (`scripts/evals/video_clips.py`)
+also writes the source enlarged the same way, as the item's reference, so the Judge tab shows X, Y and the Source on one clock, and the region
+chips switch all three to the face, the text or the stripes, where an upscaler's gains and inventions show; the whole frame is one chip away.
+Every engine gets the same deinterlaced, cropped, square-pixel clip and the same finish, so a pair differs only in the enhancement.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

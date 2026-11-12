@@ -1,0 +1,27 @@
+name = "deinterlace-vhs"
+question = "Which deinterlacer should prepare digitised VHS (25i TFF) before any enhancement: bwdif or yadif, at 50p?"
+role = "video-enhance"
+dataset = "vhs-clips-8"
+metrics = ["judged", "latency_s", "failed"]
+judge = true                 # judged on the regions (combing on the stripes and faces of the fast clips shows first) and the whole frame
+similarity = "video"
+
+# Only the deinterlacer changes: the same crop, lanczos to 1440 x 1080 and encoding (model video-lanczos). QTGMC (VapourSynth + havsfunc) is
+# the usual reference; it is not installed on omarchy yet (VapourSynth R80 core only, no mvtools/nnedi3/havsfunc), so it waits for a round 2.
+[decision]
+primary = "judged"
+baseline = "bwdif"
+min_effect = 0.1
+guards = { latency_s = 3.0, failed = 1.0 }
+
+[[candidates]]
+name = "bwdif"
+model = "video-lanczos"
+params = { deinterlace = "bwdif" }
+note = "bob-weave with a cubic interpolator (ffmpeg), send_field: 50p"
+
+[[candidates]]
+name = "yadif"
+model = "video-lanczos"
+params = { deinterlace = "yadif" }
+note = "yadif send_field: 50p, the older ffmpeg default"

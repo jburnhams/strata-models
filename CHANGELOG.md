@@ -4,6 +4,16 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Video enhancement: role `video-enhance`, VHS evals with crops, video in the Judge and Outputs tabs (branch `claude/project-thread-rea1ol`)**
+Jonathan digitised a 1989 PAL VHS tape (720x576i TFF, 21 min) and wants it upscaled and enhanced; the right model is to be chosen by eye, on crops where the differences show.
+
+- `src/stratamodels/workers/video.py`: **new** venv-worker. Every engine gets the same preparation (bwdif or yadif send_field to 50p with the field order forced, the active picture cropped, 768 x 576 square pixels) and the same finish (lanczos to 1440 x 1080, x264, the source's audio), so candidates differ only in the enhancement. Engines: `ffmpeg` (classical, the baseline; optional `filters` such as hqdn3d), `spandrel` (per-frame models: Real-ESRGAN, RealPLKSR, SwinIR..., optional tiles), `seedvr2` (SeedVR2 3B FP8 through numz's standalone CLI, block swap) and `flashvsr` (official FlashVSR+, which falls back to PyTorch SDPA, so no Block-Sparse-Attention build). For judging, each `regions` box (source pixels) is also written as a crop of the result enlarged nearest-neighbour, and a few `stills` are kept as PNG. The peak VRAM of a CLI engine's processes is polled from nvidia-smi.
+- `models.toml`: role `video-enhance` (video-lanczos until the eval decides) and 10 models. `scripts/setup_worker_venv.sh`: recipes `video` (torch + spandrel, and the five weights files), `seedvr2` and `flashvsr-plus` (the CLI repos pinned to a commit under `<models>/src/`, and their weights).
+- `evals/similarity.py`: kind `video` (the stills' image similarity, frame for frame). `evals/api.py`: `GET /api/evals/{name}/media/{item}?file=` serves an item's reference previews (`reference.preview`, `reference.crops[].path`) and no other file.
+- `scripts/evals/video_clips.py`: **new** dataset builder from a folder of clips and its private `clips.toml` (crop, field order, regions per clip); writes the source enlarged nearest-neighbour (whole frame and each region) into `<data>/evals/media/<dataset>/` as the item's reference.
+- `evals/specs/video-enhance-vhs.toml` (judged against plain lanczos: hqdn3d, Real-ESRGAN x4plus/x2plus/general-v3, RealPLKSR, SwinIR, SeedVR2 3B, FlashVSR+ Turbo/Base; guards latency 100x and failures, since VRAM against a 0-VRAM baseline cannot be a ratio) and `evals/specs/deinterlace-vhs.toml` (bwdif against yadif; QTGMC waits for VapourSynth plugins).
+- `web/`: `VideoCompare` (until strata-react#156-159): videos on one clock (the first leads, followers pulled back when they drift by more than a frame), side by side or flipped in one frame, region chips (Whole frame, Face, Stripes...) that switch every side to its crop, frame stepping, 0.25x and 0.5x, looping. Judge tab: X and Y plus the Source; Outputs tab: the Source and every candidate.
+
 **Evals: model judges beside people, and how far each agrees with them (branch `claude/project-thread-kjwkpt`)**
 Jonathan asked whether models judge eval outputs (they did not: only his blind A/B picks) and wanted a model's verdict recorded beside his on the same pairs, to learn how good a judge it is before relying on it more; and judges sorted by kind, each with its own model.
 

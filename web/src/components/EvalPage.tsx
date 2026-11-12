@@ -6,6 +6,7 @@ import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AsyncButton, Button, Compare, CompareGrid, DataTable, DataView, Disclosure, EmptyState, Field, KeysLegend, MediaPlayer, NativeSelect, PageHeader, SPEECH_RATES, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useHotkeys, useLoad, type Candidate, type Column, type CompareMode, type Shortcut } from 'strata-react'
 import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Share, type Step } from '../api'
+import { VideoCompare, videoOf, type VideoSide } from './VideoCompare'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
 
@@ -98,9 +99,32 @@ export const imageSize = (o: unknown): [number, number] | undefined => {
   return r && typeof r.width === 'number' && typeof r.height === 'number' ? [r.width, r.height] : undefined
 }
 
+/** A video side from an output: its whole frame and region crops as served files. */
+export const videoSide = (id: string, label: string, o: unknown, note?: string): VideoSide | null => {
+  const v = videoOf(o)
+  return v ? { id, label, note, whole: imagesApi.fileUrl(v.path), regions: Object.fromEntries(v.crops.map(c => [c.id, imagesApi.fileUrl(c.path)])) } : null
+}
+
+/** The tape itself, from the item's reference (a dataset builder's playable copy of the source and its region crops), if it has one. */
+export const sourceSide = (name: string, itemId: string, reference: Record<string, unknown> | null): VideoSide | null => {
+  const preview = reference?.preview
+  if (typeof preview !== 'string') return null
+  const crops = Array.isArray(reference?.crops) ? (reference.crops as { id?: unknown; path?: unknown }[]) : []
+  return { id: 'source', label: 'Source', note: 'the tape, deinterlaced, enlarged nearest-neighbour', whole: evalsApi.mediaUrl(name, itemId, preview), regions: Object.fromEntries(crops.filter(c => typeof c.id === 'string' && typeof c.path === 'string').map(c => [c.id as string, evalsApi.mediaUrl(name, itemId, c.path as string)])) }
+}
+
+/** Region labels by id, from any output's or the reference's crops. */
+export const regionLabels = (...os: unknown[]) => {
+  const out: Record<string, string> = {}
+  for (const o of os) for (const c of (o && typeof o === 'object' && Array.isArray((o as { crops?: unknown }).crops) ? (o as { crops: { id?: unknown; label?: unknown }[] }).crops : [])) if (typeof c.id === 'string' && typeof c.label === 'string') out[c.id] = c.label
+  return out
+}
+
 function Output({ o, label }: { o: unknown; label: string }) {
   const img = imagePath(o); const snd = audioPath(o)
   if (img) return <img src={imagesApi.fileUrl(img)} alt={label} className="h-auto max-w-full rounded-control" />
+  const vid = videoOf(o)
+  if (vid) return <video controls muted playsInline preload="metadata" src={imagesApi.fileUrl(vid.path)} aria-label={label} className="h-auto max-w-full rounded-control" />
   if (snd) return <MediaPlayer label={`${label}, spoken`} src={imagesApi.fileUrl(snd)} rates={SPEECH_RATES} shortcuts={false} /> // two players on one screen: neither binds Space
   return <p className="type-body whitespace-pre-wrap">{outputText(o)}</p>
 }
@@ -163,7 +187,10 @@ function Outputs({ name }: { name: string }) {
     <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-96 w-full" />} empty={<EmptyState title="No items" />}>
       {d => {
         const it = d.items[at] ?? d.items[0]
-        const { pictures, others } = candidatesOf(it.outputs, d.candidates.map(c => c.name))
+        const names = d.candidates.map(c => c.name)
+        const videos = names.map(n => { const o = it.outputs[n]; return o && !o.error ? videoSide(n, n, o.output, typeof o.run_s === 'number' ? `${o.run_s.toFixed(1)} s` : undefined) : null }).filter((v): v is VideoSide => v !== null)
+        const source = videos.length ? sourceSide(name, it.id, it.reference) : null
+        const { pictures, others } = candidatesOf(it.outputs, names.filter(n => !videos.some(v => v.id === n)))
         return (
           <div className="grid gap-4">
             <p className="type-body-sm text-muted-foreground">Every candidate&apos;s output, and for a pipeline what each step was sent and answered. The Judge tab shows only the end results, so look here after judging.</p>
@@ -173,6 +200,7 @@ function Outputs({ name }: { name: string }) {
             </div>
             {typeof it.input.prompt === 'string' && <p className="type-body">Prompt: {it.input.prompt}</p>}
             {typeof it.input.text === 'string' && <p className="type-body">Text: {it.input.text}</p>}
+            {videos.length > 0 && <VideoCompare key={it.id} label={`Item ${it.id}: ${format.count(videos.length, 'video')}`} sides={source ? [source, ...videos] : videos} regionLabels={regionLabels(it.reference, ...names.map(n => it.outputs[n]?.output))} keys={false} />}
             {pictures.length > 0 && <CompareGrid key={it.id} label={`Item ${it.id}: ${format.count(pictures.length, 'picture')}`} items={pictures} blind={false} missing="Picture not found" columns={pictures.length >= 4 ? 4 : pictures.length >= 3 ? 3 : 2}
               actions={c => { const steps = pipelineOf(it.outputs[c.id]?.output); return steps ? <PipelineSteps steps={steps} /> : null }} />}
             {others.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{others.map(c => <FullOutput key={c} name={c} out={it.outputs[c] ?? null} />)}</div>}
@@ -225,16 +253,19 @@ function Judge({ name }: { name: string }) {
     <DataView state={load} isEmpty={d => d.pair === null} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="Nothing to judge">Either the outputs are not in yet (run the experiment), or every candidate gave the same output for every item, so there is nothing to choose between.</EmptyState>}>
       {({ pair, remaining }) => {
         const p = pair!; const pics = imagePath(p.x) && imagePath(p.y)
+        const vx = videoSide('x', 'X', p.x); const vy = videoSide('y', 'Y', p.y); const src = vx && vy ? sourceSide(name, p.item_id, p.reference) : null
         const side = (k: 'x' | 'y'): Candidate => ({ id: k, label: k.toUpperCase(), media: { kind: 'image', src: imagesApi.fileUrl(imagePath(p[k])!), alt: `Output ${k.toUpperCase()}`, size: imageSize(p[k]) } })
         return (
           <div className="grid gap-4">
             <p className="type-body">Which output is better for item <span className="font-mono">{p.item_id}</span>? The candidates are hidden until you answer.</p>
             {p.similarity !== undefined && <p className="type-body-sm text-muted-foreground">{`${format.percent(1 - p.similarity)} different`}{remaining !== undefined ? ` · ${format.count(remaining, 'pair')} not judged yet, most different first` : ''}</p>}
-            {p.has_media && !imagePath(p.x) && <PhrasePlayer key={p.item_id} src={evalsApi.mediaUrl(name, p.item_id)} clip={Array.isArray(p.input.clip) ? p.input.clip as [number, number] : undefined} />}
+            {p.has_media && !imagePath(p.x) && !vx && <PhrasePlayer key={p.item_id} src={evalsApi.mediaUrl(name, p.item_id)} clip={Array.isArray(p.input.clip) ? p.input.clip as [number, number] : undefined} />}
             {typeof p.input.prompt === 'string' && <p className="type-body">Prompt: {p.input.prompt}</p>}
             {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
             {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
-            {pics
+            {vx && vy
+              ? <VideoCompare key={p.token} label={`Item ${p.item_id}, two outputs`} sides={src ? [vx, vy, src] : [vx, vy]} regionLabels={regionLabels(p.reference, p.x, p.y)} columns={src ? 3 : 2} />
+              : pics
               ? <Compare key={p.token} label={`Item ${p.item_id}, two outputs`} a={side('x')} b={side('y')} blind missing="Picture not found" mode={mode} onModeChange={setMode} />
               : <div className="grid gap-4 md:grid-cols-2">
                   {(['x', 'y'] as const).map(k => (
