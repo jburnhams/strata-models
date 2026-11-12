@@ -1,5 +1,5 @@
 """Build a video-enhance dataset from a folder of short clips and its manifest, `clips.toml`, which stays beside the clips (private: it
-describes home video):
+describes private footage):
 
     crop = [14, 0, 692, 568]           # the active picture in source pixels (no black side bars, no head-switching lines), for every clip
     field_order = "tff"                # forced: never trusted from the file
@@ -15,7 +15,7 @@ Each item's input is the clip with its crop, field order and regions (what worke
 source made the same way the candidates' are finished, but enlarged nearest-neighbour instead of enhanced, so the Judge and Outputs tabs can
 show what was on the tape: `preview` (the whole frame) and `crops` (each region). They go in <data>/evals/media/<dataset>/.
 
-    .venv/bin/python scripts/evals/video_clips.py ~/code/scratch/vhs-eval/clips --name vhs-clips-8"""
+    .venv/bin/python scripts/evals/video_clips.py /path/to/clips --name vhs-clips-8"""
 
 import argparse
 import os

@@ -35,7 +35,7 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
 - Elsewhere: errors are `Alert`s, the reference picture is a `FileButton` (keyboard reachable), and `index.html` inlines `colorSchemeScript()` so dark mode does not flash light.
 
 ## 2026-11-12: video enhancement for digitised VHS
-- The tape (`VHS.mp4`, 21:12, H.264 10 Mb/s in MP4) is PAL 720x576 at 25 fps, SAR 787:720 (4:3 from the 702-pixel active line), coded
+- The tape (H.264 10 Mb/s in MP4) is PAL 720x576 at 25 fps, SAR 787:720 (4:3 from the 702-pixel active line), coded
   interlaced; ffmpeg idet on 3 x 1000 frames: 100 % TFF. The file's own field order says nothing, so the worker forces it. Active picture: about
   4 px of black on the left, 10 on the right and 8 head-switching lines at the bottom: crop 692x568 at (14, 0), which is 4:3 at 1440 x 1080.
 - The classical baseline (bwdif, hqdn3d, lanczos) runs at ~20 s per 8 s clip on the CPU. The worker's CPU-only engines were run end to end on

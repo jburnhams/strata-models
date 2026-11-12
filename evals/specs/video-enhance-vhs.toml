@@ -1,7 +1,7 @@
 name = "video-enhance-vhs"
 question = "Which model should serve video-enhance for digitised VHS: does any upscaler beat plain deinterlace + lanczos, judged by eye?"
 role = "video-enhance"
-dataset = "vhs-clips-8"      # scripts/evals/video_clips.py: 8 clips of 8 s from a 1989 PAL tape, two regions each (faces, text, stripes, detail)
+dataset = "vhs-clips-8"      # scripts/evals/video_clips.py: 8 clips of 8 s from a digitised PAL tape, two regions each (faces, text, stripes, detail)
 metrics = ["judged", "latency_s", "peak_vram_gb", "failed"]
 judge = true                 # no reference exists: blind pairs on the Judge tab, the regions enlarged nearest-neighbour beside the whole frame
 similarity = "video"         # the stills of each output, frame for frame: the most different pairs are judged first

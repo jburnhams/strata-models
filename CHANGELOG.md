@@ -5,7 +5,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 ## 2026-11-12
 
 **Video enhancement: role `video-enhance`, VHS evals with crops, video in the Judge and Outputs tabs (branch `claude/project-thread-rea1ol`)**
-Jonathan digitised a 1989 PAL VHS tape (720x576i TFF, 21 min) and wants it upscaled and enhanced; the right model is to be chosen by eye, on crops where the differences show.
+Jonathan digitised a PAL VHS tape (720x576i TFF) and wants it upscaled and enhanced; the right model is to be chosen by eye, on crops where the differences show.
 
 - `src/stratamodels/workers/video.py`: **new** venv-worker. Every engine gets the same preparation (bwdif or yadif send_field to 50p with the field order forced, the active picture cropped, 768 x 576 square pixels) and the same finish (lanczos to 1440 x 1080, x264, the source's audio), so candidates differ only in the enhancement. Engines: `ffmpeg` (classical, the baseline; optional `filters` such as hqdn3d), `spandrel` (per-frame models: Real-ESRGAN, RealPLKSR, SwinIR..., optional tiles), `seedvr2` (SeedVR2 3B FP8 through numz's standalone CLI, block swap) and `flashvsr` (official FlashVSR+, which falls back to PyTorch SDPA, so no Block-Sparse-Attention build). For judging, each `regions` box (source pixels) is also written as a crop of the result enlarged nearest-neighbour, and a few `stills` are kept as PNG. The peak VRAM of a CLI engine's processes is polled from nvidia-smi.
 - `models.toml`: role `video-enhance` (video-lanczos until the eval decides) and 10 models. `scripts/setup_worker_venv.sh`: recipes `video` (torch + spandrel, and the five weights files), `seedvr2` and `flashvsr-plus` (the CLI repos pinned to a commit under `<models>/src/`, and their weights).
