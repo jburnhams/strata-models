@@ -102,7 +102,7 @@ export const imageSize = (o: unknown): [number, number] | undefined => {
 /** A video side from an output: its whole frame and region crops as served files. */
 export const videoSide = (id: string, label: string, o: unknown, note?: string): VideoSide | null => {
   const v = videoOf(o)
-  return v ? { id, label, note, whole: imagesApi.fileUrl(v.path), regions: Object.fromEntries(v.crops.map(c => [c.id, imagesApi.fileUrl(c.path)])) } : null
+  return v ? { id, label, note, whole: imagesApi.fileUrl(v.path), regions: Object.fromEntries(v.crops.map(c => [c.id, imagesApi.fileUrl(c.path)])), fps: v.fps } : null
 }
 
 /** The tape itself, from the item's reference (a dataset builder's playable copy of the source and its region crops), if it has one. */
@@ -200,7 +200,7 @@ function Outputs({ name }: { name: string }) {
             </div>
             {typeof it.input.prompt === 'string' && <p className="type-body">Prompt: {it.input.prompt}</p>}
             {typeof it.input.text === 'string' && <p className="type-body">Text: {it.input.text}</p>}
-            {videos.length > 0 && <VideoCompare key={it.id} label={`Item ${it.id}: ${format.count(videos.length, 'video')}`} sides={source ? [source, ...videos] : videos} regionLabels={regionLabels(it.reference, ...names.map(n => it.outputs[n]?.output))} keys={false} />}
+            {videos.length > 0 && <VideoCompare key={it.id} label={`Item ${it.id}: ${format.count(videos.length, 'video')}`} sides={source ? [source, ...videos] : videos} regionLabels={regionLabels(it.reference, ...names.map(n => it.outputs[n]?.output))} fps={videos.find(v => v.fps)?.fps} keys={false} />}
             {pictures.length > 0 && <CompareGrid key={it.id} label={`Item ${it.id}: ${format.count(pictures.length, 'picture')}`} items={pictures} blind={false} missing="Picture not found" columns={pictures.length >= 4 ? 4 : pictures.length >= 3 ? 3 : 2}
               actions={c => { const steps = pipelineOf(it.outputs[c.id]?.output); return steps ? <PipelineSteps steps={steps} /> : null }} />}
             {others.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{others.map(c => <FullOutput key={c} name={c} out={it.outputs[c] ?? null} />)}</div>}
@@ -264,7 +264,7 @@ function Judge({ name }: { name: string }) {
             {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
             {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
             {vx && vy
-              ? <VideoCompare key={p.token} label={`Item ${p.item_id}, two outputs`} sides={src ? [vx, vy, src] : [vx, vy]} regionLabels={regionLabels(p.reference, p.x, p.y)} columns={src ? 3 : 2} />
+              ? <VideoCompare key={p.token} label={`Item ${p.item_id}, two outputs`} sides={src ? [vx, vy, src] : [vx, vy]} regionLabels={regionLabels(p.reference, p.x, p.y)} fps={vx.fps ?? vy.fps} columns={src ? 3 : 2} />
               : pics
               ? <Compare key={p.token} label={`Item ${p.item_id}, two outputs`} a={side('x')} b={side('y')} blind missing="Picture not found" mode={mode} onModeChange={setMode} />
               : <div className="grid gap-4 md:grid-cols-2">

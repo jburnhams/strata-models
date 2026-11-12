@@ -18,7 +18,7 @@ export const videoOf = (o: unknown): VideoOut | null => {
 }
 
 /** One video on the clock: its whole frame and its regions, by region id, as URLs. */
-export type VideoSide = { id: string; label: string; note?: string; whole: string; regions: Record<string, string> }
+export type VideoSide = { id: string; label: string; note?: string; whole: string; regions: Record<string, string>; fps?: number }
 
 export const WHOLE = 'whole'
 

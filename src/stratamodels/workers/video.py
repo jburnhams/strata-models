@@ -37,6 +37,7 @@ params:
 Result: {path, width, height, fps, frames, seconds, engine, model, crops: [{id, label, box, path}], stills: [paths], enhance_s, fps_enhance,
 peak_vram_mb (the engine's processes on the card, at their highest)}."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -445,7 +446,7 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen):
     torch = E["torch"]
     if E["device"] == "cuda":
         torch.cuda.reset_peak_memory_stats()
-    n, size = 0, pw * ph * 3
+    n, size, done = 0, pw * ph * 3, False
     try:
         while True:
             buf = dec.stdout.read(size)
@@ -454,8 +455,14 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen):
             y = upscale_frame(np.frombuffer(buf, np.uint8).reshape(ph, pw, 3), int(E["options"].get("tile", 0)))
             enc.stdin.write(y.tobytes())
             n += 1
+        done = True
     finally:
-        enc.stdin.close()
+        if not done:  # the model failed (out of VRAM...): a decoder blocked on its full pipe would never exit, so stop both before waiting
+            for proc in (dec, enc):
+                with contextlib.suppress(OSError):
+                    proc.kill()
+        with contextlib.suppress(OSError):
+            enc.stdin.close()
         rc_e, rc_d = enc.wait(), dec.wait()
     if rc_d != 0 or rc_e != 0 or n == 0:
         raise RuntimeError(f"ffmpeg failed (decode exit {rc_d}, encode exit {rc_e}, {n} frames)")

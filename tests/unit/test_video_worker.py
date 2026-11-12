@@ -432,3 +432,41 @@ def test_prepare_file_writes_a_lossless_clip_without_audio(tmp_path, clip):
         and "-an" in run.calls[0]
         and run.calls[0][run.calls[0].index("-qp") + 1] == "0"
     )
+
+
+def test_spandrel_engine_stops_ffmpeg_when_the_model_fails(monkeypatch, tmp_path, clip):
+    # A decoder blocked on its full pipe never exits on its own: a failed frame (out of VRAM) must kill both ffmpegs before waiting.
+    import numpy as np
+
+    frame = np.zeros((576, 768, 3), np.uint8)
+    procs = []
+
+    class Proc:
+        def __init__(self, cmd):
+            self.cmd, self.killed = cmd, False
+            self.stdout = types.SimpleNamespace(read=lambda n: frame.tobytes()[:n])
+            self.stdin = types.SimpleNamespace(write=lambda b: None, close=lambda: None)
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            assert self.killed, "waited on an ffmpeg that was never stopped"
+            return -9
+
+    def popen(cmd, stdout=None, stdin=None):
+        procs.append(Proc(cmd))
+        return procs[-1]
+
+    def oom(f, tile=0):
+        raise MemoryError("CUDA out of memory")
+
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(reset_peak_memory_stats=lambda: None))
+    V.E.clear()
+    V.E.update(
+        engine="spandrel", key="video-realesrgan-x2plus", scale=2, device="cuda", torch=torch, options=dict(tile=0)
+    )
+    monkeypatch.setattr(V, "upscale_frame", oom)
+    with pytest.raises(MemoryError):
+        V.run(dict(path=clip, out_dir=str(tmp_path)), run_=FakeRun(), popen=popen)
+    assert len(procs) == 2 and all(p.killed for p in procs)
