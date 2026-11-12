@@ -455,6 +455,61 @@ def test_model_judge_beside_a_person(client):
     )  # pairs = judged: nothing new until people judge more
 
 
+def test_a_pair_comes_back_in_time_and_the_rest_are_scored_behind_it(client, scheduler, monkeypatch):
+    import threading
+    import time
+
+    from stratamodels.evals import api as A
+    from stratamodels.evals import similarity as SIM
+
+    client.post("/api/evals/fake-asr/run")
+    wait_run(client, "fake-asr")
+    calls, real = [], SIM.similarity
+
+    def slow(x, y, kind=None):
+        calls.append(1)
+        time.sleep(0.01)
+        return real(x, y, kind)
+
+    monkeypatch.setattr(SIM, "similarity", slow)
+    monkeypatch.setattr(A, "PAIR_SCORE_S", 0.0)  # no time: score until one pair is usable, leave the rest
+    first = client.get("/api/evals/fake-asr/pair").json()
+    assert first["pair"] is not None and len(calls) >= 1
+    for t in threading.enumerate():
+        if t.name == "pair-scores-fake-asr":
+            t.join(10)
+    n = len(calls)
+    assert n > 1  # the rest were scored in the background
+    client.get("/api/evals/fake-asr/pair")
+    assert len(calls) == n  # and kept: the next request scores nothing again
+
+
+def test_judged_pairs_come_back_when_only_identical_ones_are_left_unjudged(client, scheduler, monkeypatch):
+    import json
+
+    from stratamodels.evals import similarity as SIM
+
+    client.post("/api/evals/fake-asr/run")
+    wait_run(client, "fake-asr")
+    differs = []
+
+    def one_differs(x, y, kind=None):  # the first pair scored is the only one whose outputs differ
+        k = json.dumps(sorted([json.dumps(x, sort_keys=True), json.dumps(y, sort_keys=True)]))
+        if not differs:
+            differs.append(k)
+        return 0.5 if k == differs[0] else 1.0
+
+    monkeypatch.setattr(SIM, "similarity", one_differs)
+    for _ in range(10):  # judge the differing pairs (outputs that repeat across candidates can make more than one)
+        p = client.get("/api/evals/fake-asr/pair").json()
+        assert p["pair"] is not None
+        client.post("/api/evals/fake-asr/judgments", json=dict(token=p["pair"]["token"], winner="tie"))
+        if p["remaining"] <= 1:
+            break
+    again = client.get("/api/evals/fake-asr/pair").json()  # only identical pairs are unjudged: a judged one comes back
+    assert again["pair"] is not None and again["remaining"] == 0
+
+
 def test_media_serves_an_items_reference_previews_and_nothing_else(client, tmp_path, setup):
     from stratamodels.evals import core as C
 
