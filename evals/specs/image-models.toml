@@ -116,3 +116,19 @@ note = "technique: short, 40 to 70 words: does length matter?"
 role = "text"
 model = "qwen3.5-9b-vl"
 params = { system_preset = "image-prompt-concise", max_tokens = 3584, temperature = 0.0 }
+
+# Model judges (evals.judges): verdicts on the same pairs Jonathan judged, kept beside his and never counted as his, to measure how far each
+# agrees with him before relying on one. Both see the prompt and the two pictures.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl to start)
+criteria = "Judge which picture better shows the prompt: everything it asks for, nothing it rules out, then how good the picture is (no artefacts, distorted hands or faces, garbled text). A plainer picture that follows the prompt beats a prettier one that does not."
+auto = true                  # also judges each new pair right after a person does
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity, about 0.2 % of the Gemini week per call; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "Judge which picture better shows the prompt: everything it asks for, nothing it rules out, then how good the picture is (no artefacts, distorted hands or faces, garbled text). A plainer picture that follows the prompt beats a prettier one that does not."
+limit = 30                   # pairs per run: run again for the rest
