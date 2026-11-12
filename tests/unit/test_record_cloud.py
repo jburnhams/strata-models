@@ -153,6 +153,7 @@ def test_main_skips_recorded_items_and_stops_on_quota(tmp_path, monkeypatch):
         return dict(text="{}", json={}, seconds=1.0)
 
     monkeypatch.setattr(R, "record_one", rec)
+    monkeypatch.setattr(R, "low_bucket", lambda *a: None)
     code = R.main(["describe", "--like", "local", "--cli", "codex", "--out", str(out)], log=lambda m: None)
     assert code == R.TEMPFAIL and calls == ["/img/p1.jpg", "/img/p2.jpg", "/img/p3.jpg"]
     assert [json.loads(line)["key"] for line in out.read_text().splitlines()] == [
@@ -179,3 +180,123 @@ def test_latency_of_a_recorded_output_is_the_time_it_took_when_made():
     )  # replayed with no time recorded: none, not 0
     assert lat(dict(_run_s=4.2), dict(text="x", seconds=4.2), None) == 4.2  # a model run here: the job's run time
     assert lat(dict(_run_s=4.2), None, "boom") is None
+
+
+AGY_USAGE = dict(
+    status="SUCCESS",
+    command=dict(
+        name="usage",
+        data=dict(
+            groups=[
+                dict(
+                    name="Gemini Models",
+                    buckets=[
+                        dict(id="gemini-weekly", window="weekly", remaining_fraction=0.95, reset_time="w"),
+                        dict(id="gemini-5h", window="5h", remaining_fraction=0.08, reset_time="h"),
+                    ],
+                ),
+                dict(
+                    name="Claude and GPT models",
+                    buckets=[dict(id="3p-weekly", window="weekly", remaining_fraction=0.5, reset_time="w")],
+                ),
+                dict(
+                    name="Gemini 4 Argon",
+                    buckets=[
+                        dict(id="gemini-argon-wtu-weekly", window="weekly", remaining_fraction=0.84, reset_time="a")
+                    ],
+                ),
+            ]
+        ),
+    ),
+)
+
+
+def test_agy_usage_reads_the_models_own_group():
+    run = lambda *a, **k: done(stdout=json.dumps(AGY_USAGE))
+    assert R.usage_agy("gemini-3.8-flash-low", run=run) == [
+        ("Gemini Models weekly", 0.95, "w"),
+        ("Gemini Models 5h", 0.08, "h"),
+    ]
+    assert R.usage_agy("gemini-4-argon-medium", run=run) == [("Gemini 4 Argon weekly", 0.84, "a")]
+    assert R.usage_agy("claude-opus-5-5-low", run=run)[0][1] == 0.5
+    assert R.low_bucket("agy", "gemini-3.8-flash-low", 0.10, usage=lambda m: R.usage_agy(m, run=run)) == (
+        "Gemini Models 5h",
+        0.08,
+        "h",
+    )
+    assert R.low_bucket("agy", "gemini-4-argon-low", 0.10, usage=lambda m: R.usage_agy(m, run=run)) is None
+    with pytest.raises(R.UsageError):
+        R.usage_agy("x", run=lambda *a, **k: done(stdout="not json"))
+
+
+class FakeAppServer:
+    """codex app-server --stdio: answers initialize and account/rateLimits/read."""
+
+    def __init__(self, used=(94, 15), error=None):
+        import io
+
+        self.stdin, self.used, self.error, self.sent = io.StringIO(), used, error, []
+        self.stdout = self
+        self.lines = None
+
+    def readline(self):
+        if self.lines is None:
+            self.sent = [json.loads(x) for x in self.stdin.getvalue().splitlines()]
+            r = dict(
+                rateLimits=dict(
+                    primary=dict(usedPercent=self.used[0], resetsAt=1794461330),
+                    secondary=dict(usedPercent=self.used[1], resetsAt=1795048130),
+                )
+            )
+            self.lines = [
+                json.dumps(dict(id=1, result={})),
+                json.dumps(dict(method="account/updated")),
+                json.dumps(dict(id=2, error=self.error) if self.error else dict(id=2, result=r)),
+            ]
+        return (self.lines.pop(0) + "\n") if self.lines else ""
+
+    def kill(self):
+        pass
+
+    def wait(self):
+        pass
+
+
+def test_codex_usage_comes_from_the_app_server_without_a_model_call():
+    fake = FakeAppServer()
+    u = R.usage_codex(popen=lambda *a, **k: fake)
+    assert [m.get("method") for m in fake.sent] == ["initialize", "initialized", "account/rateLimits/read"]
+    assert [(n, round(r, 2)) for n, r, _ in u] == [("codex 5h", 0.06), ("codex weekly", 0.85)] and u[0][2].startswith(
+        "2026-"
+    )
+    assert R.low_bucket("codex", None, 0.10, usage=lambda m: u)[0] == "codex 5h"
+    with pytest.raises(R.UsageError):
+        R.usage_codex(popen=lambda *a, **k: FakeAppServer(error=dict(message="no")))
+
+
+def test_main_stops_before_the_allowance_runs_dry(tmp_path, monkeypatch):
+    from stratamodels.evals import core as C
+
+    items = [dict(id=f"p{i}", input=dict(image=f"/img/p{i}.jpg", context={})) for i in range(3)]
+    cand = types.SimpleNamespace(name="local", params=dict(preset="photo-describe-v1"))
+    monkeypatch.setattr(
+        C, "load_spec", lambda n: types.SimpleNamespace(name="d", dataset="ds", candidate=lambda n: cand)
+    )
+    monkeypatch.setattr(C, "load_dataset", lambda n: types.SimpleNamespace(items=items))
+    left = iter([None, ("Gemini Models 5h", 0.09, "h")])
+    monkeypatch.setattr(R, "low_bucket", lambda *a: next(left))
+    monkeypatch.setattr(R, "record_one", lambda *a: dict(text="{}", json={}, seconds=1.0))
+    out, log = tmp_path / "r.jsonl", []
+    assert R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out)], log=log.append) == R.TEMPFAIL
+    assert len(out.read_text().splitlines()) == 1 and "9% left" in log[-1]
+
+    def broken(*a):
+        raise R.UsageError("no usage")
+
+    monkeypatch.setattr(R, "low_bucket", broken)
+    assert (
+        R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out)], log=log.append) == 1
+        and "cannot read" in log[-1]
+    )
+    monkeypatch.setattr(R, "low_bucket", lambda *a: pytest.fail("checked with --min-left 0"))
+    assert R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out), "--min-left", "0"], log=log.append) == 0
