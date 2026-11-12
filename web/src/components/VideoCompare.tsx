@@ -81,7 +81,7 @@ const VIEW_LABEL = { side: 'Side by side', flip: 'Flip' } as const
 type View = keyof typeof VIEW_LABEL
 
 /** Two or more videos of the same clip compared on one clock: side by side or flipped in one frame, whole or by region. */
-export function VideoCompare({ label, sides, regionLabels = {}, fps = 50, keys = true, columns }: {
+export function VideoCompare({ label, sides, regionLabels = {}, fps = 50, keys = true, columns, autoPlay = false }: {
   label: string
   sides: VideoSide[]
   regionLabels?: Record<string, string>
@@ -89,8 +89,19 @@ export function VideoCompare({ label, sides, regionLabels = {}, fps = 50, keys =
   /** Bind the player's keys (Space/K play, J/L jump, arrows a frame, G region, V view, B flip); off where the page binds the same keys. */
   keys?: boolean
   columns?: number
+  /** Start playing (muted: browsers block autoplay with sound) as soon as every video has loaded, once; it loops the whole clip. */
+  autoPlay?: boolean
 }) {
   const clock = useVideoClock(fps)
+  const started = useRef(false)
+  const ready = useRef(new Set<string>())
+  const onReady = (key: string) => {
+    ready.current.add(key)
+    if (autoPlay && !started.current && sides.every((s, i) => ready.current.has(`${i}`)) && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      started.current = true
+      clock.toggle()
+    }
+  }
   const [region, setRegion] = useState(WHOLE)
   const [view, setView] = useState<View>('side')
   const [shown, setShown] = useState(0)
@@ -106,8 +117,9 @@ export function VideoCompare({ label, sides, regionLabels = {}, fps = 50, keys =
   ]
   useHotkeys(shortcuts, { enabled: keys && sides.length > 0 })
   const video = (s: VideoSide, i: number, visible = true) => (
-    <video key={`${s.id}-${region}`} ref={clock.attach(i)} src={srcFor(s, region)} muted={i !== 0} playsInline preload="auto" aria-label={`${s.label}, ${regions.find(r => r.value === region)?.label ?? ''}`}
+    <video key={`${s.id}-${region}`} ref={clock.attach(i)} src={srcFor(s, region)} muted={autoPlay || i !== 0} playsInline preload="auto" aria-label={`${s.label}, ${regions.find(r => r.value === region)?.label ?? ''}`}
       onLoadedMetadata={e => { clock.loaded(i)(e); if (i === 0 && e.currentTarget.videoWidth) setAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight) }}
+      onCanPlay={() => onReady(`${i}`)}
       className={`absolute inset-0 h-full w-full object-contain ${visible ? '' : 'invisible'}`} style={{ imageRendering: 'pixelated' }} />
   )
   const cols = columns ?? (sides.length >= 4 ? 4 : sides.length >= 3 ? 3 : 2)

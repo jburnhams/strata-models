@@ -8,7 +8,7 @@ import { Alert, AsyncButton, Button, Compare, CompareGrid, CompareVideo, DataTab
 import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Share, type Step } from '../api'
 import { VideoCompare, videoOf, type VideoSide } from './VideoCompare'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 
 function finding(a: Analysis) {
   const d = a.decision
@@ -138,6 +138,42 @@ export const regionsOf = (input: Record<string, unknown>): Region[] => {
 }
 
 /** A video output as one side of a blind `CompareVideo`, named by its label only. */
+/** The whole clip as a loop range (0 to the shorter output's last frame): a pair plays round and round until it is answered. */
+// The loop a judge sees: their own range while any end of it is set (a half-set range is an edit in progress, e.g. a new in-point that cleared an out-point before it, and must survive until the out-point is set), else the whole clip; `c` clears both ends and so goes back to the whole clip.
+export const judgeLoop = (set: VideoLoop | null, whole: VideoLoop | null): VideoLoop | undefined =>
+  (set && (set.start !== null || set.end !== null) ? set : whole) ?? undefined
+
+export const wholeLoop = (x: unknown, y: unknown, fps = 50): VideoLoop | null => {
+  const d = [x, y].map(o => (o && typeof o === 'object' && typeof (o as { duration_s?: unknown }).duration_s === 'number' ? (o as { duration_s: number }).duration_s : null))
+  if (d.some(v => v === null || v <= 0)) return null
+  return { start: 0, end: Math.max(Math.min(...(d as number[])) - 1 / fps, 0) }
+}
+
+/** Press the comparison's own Play once its videos can play, once per pair (until strata-react#203 gives CompareVideo autoPlay). Muted
+ * sound is what lets a browser start it without a click; a person who asked for less motion is left to press Play. */
+export function useAutoPlay(ref: RefObject<HTMLElement | null>, key: string, enabled = true) {
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    let done = false
+    const id = window.setInterval(() => {
+      const root = ref.current
+      if (done || !root) return
+      const vids = Array.from(root.querySelectorAll('video'))
+      if (!vids.length || vids.some(v => v.readyState < 3)) return
+      const play = Array.from(root.querySelectorAll('button')).find(b => (b.getAttribute('aria-label') ?? b.textContent ?? '').trim() === 'Play')
+      if (play) { done = true; play.click(); window.clearInterval(id) }
+    }, 200)
+    const stop = window.setTimeout(() => window.clearInterval(id), 15000) // a clip that never loads is left paused
+    return () => { window.clearInterval(id); window.clearTimeout(stop) }
+  }, [ref, key, enabled])
+}
+
+/** useAutoPlay as an element, for places a hook cannot go (inside a DataView's render callback). */
+function AutoPlay({ box, id }: { box: RefObject<HTMLElement | null>; id: string }) {
+  useAutoPlay(box, id)
+  return null
+}
+
 const videoCandidate = (k: 'x' | 'y', o: unknown): Candidate<VideoMedia> | null => {
   const v = videoOf(o)
   return v ? { id: k, label: k.toUpperCase(), media: { kind: 'video', src: imagesApi.fileUrl(v.path), width: v.width ?? 1440, height: v.height ?? 1080, fps: v.fps } } : null
@@ -223,7 +259,7 @@ function Outputs({ name }: { name: string }) {
             </div>
             {typeof it.input.prompt === 'string' && <p className="type-body">Prompt: {it.input.prompt}</p>}
             {typeof it.input.text === 'string' && <p className="type-body">Text: {it.input.text}</p>}
-            {videos.length > 0 && <VideoCompare key={it.id} label={`Item ${it.id}: ${format.count(videos.length, 'video')}`} sides={source ? [source, ...videos] : videos} regionLabels={regionLabels(it.reference, ...names.map(n => it.outputs[n]?.output))} fps={videos.find(v => v.fps)?.fps} keys={false} />}
+            {videos.length > 0 && <VideoCompare key={it.id} label={`Item ${it.id}: ${format.count(videos.length, 'video')}`} sides={source ? [source, ...videos] : videos} regionLabels={regionLabels(it.reference, ...names.map(n => it.outputs[n]?.output))} fps={videos.find(v => v.fps)?.fps} keys={false} autoPlay />}
             {pictures.length > 0 && <CompareGrid key={it.id} label={`Item ${it.id}: ${format.count(pictures.length, 'picture')}`} items={pictures} blind={false} missing="Picture not found" columns={pictures.length >= 4 ? 4 : pictures.length >= 3 ? 3 : 2}
               actions={c => { const steps = pipelineOf(it.outputs[c.id]?.output); return steps ? <PipelineSteps steps={steps} /> : null }} />}
             {others.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{others.map(c => <FullOutput key={c} name={c} out={it.outputs[c] ?? null} />)}</div>}
@@ -267,6 +303,7 @@ function Judge({ name }: { name: string }) {
   const [mode, setMode] = useState<CompareMode>('side')
   const [vmode, setVmode] = useState<VideoMode>('side')
   const [loop, setLoop] = useState<{ item: string; range: VideoLoop } | null>(null) // a loop set on one pair is kept for the next pair of the same item
+  const videoBox = useRef<HTMLDivElement>(null)
   const load = useLoad({ queryKey: ['pair', name, n], queryFn: () => evalsApi.pair(name), staleTime: Infinity })
   const answer = useAsyncAction(async (p: Pair, w: Answer) => { const j = await evalsApi.judge(name, p.token, w); setLast({ item_id: j.item_id ?? p.item_id, x: j.x, y: j.y, winner: j.winner }); setN(k => k + 1); void qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 }) // the results refresh behind: the next pair must not wait for them
   const pair = load.status === 'ready' ? load.data.pair : null
@@ -280,7 +317,9 @@ function Judge({ name }: { name: string }) {
       {({ pair, remaining }) => {
         const p = pair!; const pics = imagePath(p.x) && imagePath(p.y)
         const vx = videoCandidate('x', p.x); const vy = videoCandidate('y', p.y); const src = vx && vy ? sourceSide(name, p.item_id, p.reference) : null
-        const answers = <div className="flex flex-wrap items-center gap-3">{(['x', 'tie', 'y'] as const).map(w => <Button key={w} onClick={() => choose(w)} disabled={busy}>{ANSWER_WORD[w]}</Button>)}</div>
+        // the same answers above the pair and below it: no scrolling past a tall picture or video to vote
+        const answerBar = (where: string) => <div role="group" aria-label={`Answers ${where}`} className="flex flex-wrap items-center gap-3">{(['x', 'tie', 'y'] as const).map(w => <Button key={w} onClick={() => choose(w)} disabled={busy}>{ANSWER_WORD[w]}</Button>)}</div>
+        const answers = answerBar('below')
         const side = (k: 'x' | 'y'): Candidate => ({ id: k, label: k.toUpperCase(), media: { kind: 'image', src: imagesApi.fileUrl(imagePath(p[k])!), alt: `Output ${k.toUpperCase()}`, size: imageSize(p[k]) } })
         return (
           <div className="grid gap-4">
@@ -290,10 +329,14 @@ function Judge({ name }: { name: string }) {
             {typeof p.input.prompt === 'string' && <p className="type-body">Prompt: {p.input.prompt}</p>}
             {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
             {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
+            {answerBar('above')}
             {vx && vy
               ? <>
-                  <CompareVideo key={p.token} label={`Item ${p.item_id}, two outputs`} a={vx} b={vy} blind missing="Video not found" mode={vmode} onModeChange={setVmode} regions={regionsOf(p.input)} pixelated="always"
-                    loop={loop?.item === p.item_id ? loop.range : undefined} onLoopChange={range => setLoop({ item: p.item_id, range })} extraShortcuts={keys} footer={answers} maxHeight="viewport" />
+                  <div ref={videoBox}>
+                    <CompareVideo key={p.token} label={`Item ${p.item_id}, two outputs`} a={vx} b={vy} blind missing="Video not found" mode={vmode} onModeChange={setVmode} regions={regionsOf(p.input)} pixelated="always" audio="none"
+                      loop={judgeLoop(loop?.item === p.item_id ? loop.range : null, wholeLoop(p.x, p.y, vx.media.fps))} onLoopChange={range => setLoop({ item: p.item_id, range })} extraShortcuts={keys} footer={answers} maxHeight="viewport" />
+                  </div>
+                  <AutoPlay box={videoBox} id={p.token} />
                   {src && <Disclosure summary="The tape itself (the source, deinterlaced, enlarged nearest-neighbour)"><video controls muted playsInline preload="metadata" src={src.whole} aria-label="The source" className="h-auto max-w-full rounded-control" style={{ imageRendering: 'pixelated' }} /></Disclosure>}
                 </>
               : pics

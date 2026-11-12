@@ -18,6 +18,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLMediaElement.prototype, 'ended', { configurable: true, get() { return of(this).ended } })
   Object.defineProperty(HTMLMediaElement.prototype, 'playbackRate', { configurable: true, get() { return of(this).rate }, set(v: number) { of(this).rate = v } })
   Object.defineProperty(HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get: () => 960 })
+  Object.defineProperty(HTMLMediaElement.prototype, 'readyState', { configurable: true, get: () => 4 })
   Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get: () => 660 })
   frames = []
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length })
@@ -28,7 +29,7 @@ const tick = () => act(() => { const due = frames; frames = []; for (const f of 
 const load = (vs: HTMLVideoElement[]) => { for (const v of vs) v.dispatchEvent(new Event('loadedmetadata')) }
 
 const crops = (k: string) => [{ id: 'face', label: 'Face', path: `/g/${k}.face.mp4` }, { id: 'text', label: 'Card text', path: `/g/${k}.text.mp4` }]
-const video = (k: string) => ({ path: `/g/${k}.mp4`, width: 1440, height: 1080, fps: 50, crops: crops(k), stills: [] })
+const video = (k: string) => ({ path: `/g/${k}.mp4`, width: 1440, height: 1080, fps: 50, duration_s: 8, crops: crops(k), stills: [] })
 const reference = { note: 'tape', preview: '/m/c.source.mp4', crops: [{ id: 'face', label: 'Face', path: '/m/c.source.face.mp4' }, { id: 'text', label: 'Card text', path: '/m/c.source.text.mp4' }] }
 
 describe('Judging video', () => {
@@ -77,7 +78,7 @@ describe('Video outputs', () => {
       http.get('/api/evals/:name/outputs', () => { const d = evalFixtures.outputs(); (d.items[0] as { outputs: Record<string, unknown> }).outputs = { turbo: { output: video('b'), error: null }, 'large-v3': { output: { segments: [{ text: 'x' }] }, error: null } }; return HttpResponse.json(d) }),
     )
     const { user } = setup(<App />, { route: '/evals/vhs?tab=judge' })
-    await user.click(await screen.findByRole('button', { name: 'X is better' }))
+    await user.click((await screen.findAllByRole('button', { name: 'X is better' }))[0])
     await user.click(await screen.findByText(/Last pair \(u1\)/))
     expect(await screen.findByLabelText('turbo', { selector: 'video' })).toHaveAttribute('controls')
   })
@@ -124,5 +125,54 @@ describe('VideoCompare (the Outputs grid until strata-react ships CompareVideoGr
     expect(vids()[2].className).not.toContain('invisible')
     await user.keyboard('{Home}')
     expect(vids().every(v => of(v).t === 0)).toBe(true)
+  })
+})
+
+describe('Video plays on its own', () => {
+  it('starts a judged pair playing, muted, looping the whole clip, once it can play', async () => {
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { similarity: 0.1, item_id: 'c', input: { crop: [14, 0, 692, 568] }, has_media: true, reference, x: video('x'), y: video('y'), token: 't' }, remaining: 4 })))
+    setup(<App />, { route: '/evals/vhs?tab=judge' })
+    const vx = (await screen.findByLabelText('Video X')) as HTMLVideoElement
+    await waitFor(() => expect(of(vx).playing).toBe(true), { timeout: 3000 })
+    expect(of(screen.getByLabelText('Video Y') as HTMLVideoElement).playing).toBe(true)
+    expect(screen.getByText(/^Looping 0:00:00/)).toBeInTheDocument() // the whole clip, with no range set by hand
+    expect(vx.muted && (screen.getByLabelText('Video Y') as HTMLVideoElement).muted).toBe(true)
+  })
+  it('leaves a pair paused for someone who asked for less motion', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), media: q, addEventListener: () => undefined, removeEventListener: () => undefined, addListener: () => undefined, removeListener: () => undefined, onchange: null, dispatchEvent: () => false }))
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { similarity: 0.1, item_id: 'c', input: {}, has_media: false, reference: null, x: video('x'), y: video('y'), token: 't' } })))
+    setup(<App />, { route: '/evals/vhs?tab=judge' })
+    const vx = (await screen.findByLabelText('Video X')) as HTMLVideoElement
+    await new Promise(r => setTimeout(r, 600))
+    expect(of(vx).playing).toBe(false)
+  })
+  it('starts the Outputs grid once every video can play', async () => {
+    const d = evalFixtures.outputs()
+    const item = d.items[0] as { reference: unknown; outputs: Record<string, unknown> }
+    item.reference = reference
+    item.outputs = { 'large-v3': { output: video('a'), error: null }, turbo: { output: video('b'), error: null }, small: null }
+    server.use(http.get('/api/evals/:name/outputs', () => HttpResponse.json(d)))
+    const { container } = setup(<App />, { route: '/evals/vhs?tab=outputs' })
+    await screen.findByLabelText(/Item u1: 2\svideos/)
+    const vids = Array.from(container.querySelectorAll('video'))
+    expect(vids.every(v => v.muted)).toBe(true)
+    vids.slice(0, 2).forEach(v => v.dispatchEvent(new Event('canplay')))
+    expect(vids.some(v => of(v).playing)).toBe(false) // not before the last one is ready
+    vids[2].dispatchEvent(new Event('canplay'))
+    await waitFor(() => expect(vids.every(v => of(v).playing)).toBe(true))
+    vids[0].dispatchEvent(new Event('canplay'))
+    expect(vids.every(v => of(v).playing)).toBe(true) // once only
+  })
+})
+
+describe('Answer buttons', () => {
+  it('are above the pair as well as below it, and both answer', async () => {
+    const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    const above = await screen.findByRole('group', { name: 'Answers above' })
+    const below = screen.getByRole('group', { name: 'Answers below' })
+    expect(above.compareDocumentPosition(screen.getByText('ask knot')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(below.compareDocumentPosition(screen.getByText('ask knot')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    await user.click(within(above).getByRole('button', { name: 'Y is better' }))
+    await waitFor(() => expect(mock.calls).toContain('judge y'))
   })
 })

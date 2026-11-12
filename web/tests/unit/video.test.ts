@@ -43,3 +43,28 @@ describe('regions for CompareVideo', () => {
     expect(regionsOf({ crop: [0, 0, 720, 576] })).toEqual([])
   })
 })
+
+describe('the whole clip as a loop', () => {
+  it('runs from 0 to the shorter output\'s last frame, or nothing when a length is missing', async () => {
+    const { wholeLoop } = await import('../../src/components/EvalPage')
+    const w = wholeLoop({ duration_s: 8 }, { duration_s: 7.98 }, 50)
+    expect(w?.start).toBe(0)
+    expect(w?.end).toBeCloseTo(7.96, 6)
+    expect(wholeLoop({ duration_s: 0.01 }, { duration_s: 8 }, 50)).toEqual({ start: 0, end: 0 })
+    expect(wholeLoop({ duration_s: 8 }, {}, 50)).toBeNull()
+    expect(wholeLoop(null, { duration_s: 0 })).toBeNull()
+  })
+})
+
+describe('the loop a judge sees', () => {
+  it('keeps a half-set range (a new in-point mid edit), and falls back to the whole clip when none or cleared', async () => {
+    const { judgeLoop } = await import('../../src/components/EvalPage')
+    const whole = { start: 0, end: 7.96 }
+    expect(judgeLoop({ start: 5, end: null }, whole)).toEqual({ start: 5, end: null })
+    expect(judgeLoop({ start: null, end: 6 }, whole)).toEqual({ start: null, end: 6 })
+    expect(judgeLoop({ start: 5, end: 6 }, whole)).toEqual({ start: 5, end: 6 })
+    expect(judgeLoop({ start: null, end: null }, whole)).toEqual(whole)
+    expect(judgeLoop(null, whole)).toEqual(whole)
+    expect(judgeLoop(null, null)).toBeUndefined()
+  })
+})
