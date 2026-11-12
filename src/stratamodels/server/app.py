@@ -100,6 +100,8 @@ class SettingsIn(BaseModel):
     data_dir: str | None = None
     models_dir: str | None = None
     vram_reserve_gb: float | None = None
+    gpu_jobs: int | None = None
+    cpu_jobs: int | None = None
 
 
 def create_app(scheduler: Scheduler, history: gpu.History | None = None):
@@ -281,8 +283,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
                 if not os.path.isabs(os.path.expanduser(v)):
                     raise HTTPException(400, f"{k} must be an absolute path")
                 changes[k] = v
-        if b.vram_reserve_gb is not None:
-            changes["vram_reserve_gb"] = b.vram_reserve_gb
+        for k in ("vram_reserve_gb", "gpu_jobs", "cpu_jobs"):
+            if getattr(b, k) is not None:
+                changes[k] = getattr(b, k)
         try:
             settings.save(changes)
         except ValueError as e:
@@ -291,6 +294,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             s.reserve_mb = settings.vram_reserve_gb() * 1024.0
         if "models_dir" in changes:
             s.models_dir = settings.models_dir()
+        if "gpu_jobs" in changes or "cpu_jobs" in changes:  # takes effect at the next dispatch; jobs running now finish
+            s.gpu_jobs, s.cpu_jobs = settings.jobs("gpu_jobs"), settings.jobs("cpu_jobs")
+            s._notify()
         return settings.all_settings()
 
     @app.get("/api/images")
@@ -377,6 +383,8 @@ def build(memory=False, sample_every_s=5.0):
         settings.models_dir(),
         probe=gpu.query,
         reserve_gb=settings.vram_reserve_gb(),
+        gpu_jobs=settings.jobs("gpu_jobs"),
+        cpu_jobs=settings.jobs("cpu_jobs"),
     )
     sch.start()
     history.start()

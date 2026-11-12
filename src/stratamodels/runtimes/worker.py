@@ -47,7 +47,7 @@ def cuda_libs(root):
 
 
 class Worker:
-    """One worker process. `ask` sends a request and waits for its answer (one at a time: the scheduler runs one job at a time)."""
+    """One worker process. `ask` sends a request and waits for its answer (one at a time: the scheduler runs one job per model at a time; the lock keeps it so)."""
 
     def __init__(self, cmd, log_path, env=None, popen=subprocess.Popen):
         self.log = open(log_path, "a", buffering=1)

@@ -48,6 +48,10 @@ describe('the VRAM breakdown and the finding', () => {
     expect(finding({ ...s, current: null, queued: [], resident: s.resident.slice(1) })).toBe('Idle, with buffalo_l loaded and 5.1 GB free for more.')
     expect(finding({ ...s, current: null, queued: [], resident: [] })).toBe('Idle, nothing loaded: 5.1 GB free for models.')
     expect(finding({ ...s, gpu: null })).toBe('No NVIDIA GPU found: models run on the CPU.')
+    const cloud = { ...s.current!, id: 42, role: 'text', app: 'evals', lane: 'cpu' as const }
+    expect(finding({ ...s, running: [s.current!, cloud] })).toBe('Running transcribe for strata-360 and text for evals, 2 waiting.')
+    expect(finding({ ...s, running: [s.current!, cloud, { ...cloud, id: 43 }], queued: [] })).toBe('Running 3 jobs: transcribe for strata-360 and 2 more.')
+    expect(finding({ ...s, running: [], queued: [] })).toBe('Idle, with 2 models loaded and 5.1 GB free for more.')
     expect(finding({ ...s, budget: null, current: null, queued: [], resident: [] })).toBe('Idle, nothing loaded: 0.0 GB free for models.')
   })
   it('totals usage by app, most first', () => {

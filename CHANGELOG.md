@@ -2,6 +2,15 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-12
+
+**Scheduler: several jobs at once, cloud and CPU jobs beside the GPU's (branch `claude/project-thread-kf7tb7`)**
+The one worker thread ran one job at a time, so a 30 s cloud CLI call (the subscription-backends idea) or a CPU model would hold up the GPU queue, and two small GPU models that fit together still took turns.
+
+- `src/stratamodels/scheduler.py`: a dispatcher decides (`dispatch`), each job runs on its own thread (`execute`; `step` still does both inline for the tests). Two lanes: zero-VRAM models (vram_gb 0) run up to `cpu_jobs` at once and never wait for the GPU or a lease, exclusive ones included; GPU jobs run up to `gpu_jobs` at once on different models, when they fit together. One job per model at a time; a running or loading model is never evicted; a loading model's estimate, and a running one's estimate beyond what it measured at load (sd-cpp allocates per job), count as promised, so a second job never starts into room the first is about to take. A GPU job that does not fit beside running ones waits and nothing on the GPU passes it (no starving big jobs); with nothing else running it starts as before. Leases wait for the room running jobs hold; an exclusive one waits until GPU jobs finish. A load is measured from the card only when no other GPU work overlapped it; otherwise the estimate stands. Load requests from the Models page run like jobs; an unload of a busy model waits for its job.
+- `settings.py`, `/api/settings`, `strata-models set`, Settings page: `gpu_jobs` (default 2) and `cpu_jobs` (default 4), 1-16, applied at once (`STRATAMODELS_GPU_JOBS`, `STRATAMODELS_CPU_JOBS`). `gpu_jobs = 1` is the old one-at-a-time behaviour for the GPU.
+- `/api/status`: `running` (every job running, with its lane), `slots`, `budget.pending_mb`, `resident[].busy`; `current` stays (the oldest running). CLI `status` and the Overview list every running job.
+
 ## 2026-11-10
 
 **Evals page: analyses worked out ahead and kept in the database (branch `evals-precompute`)**
