@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Scheduler: models and leases above 10 GB get the whole card (branch `claude/project-thread-ecj9cv`)**
+Jonathan: "above 10gb any model can run as long as it gets whole card reservation", so bigger models can be tried at their own risk instead of waiting forever or being refused.
+
+- `scheduler.py`: a model job, a load from the Models page or a sized lease that needs more than `whole_card_gb`, or more than the card less the reserve, waits until no GPU job runs and no lease is held (nothing on the GPU passes it), frees every idle GPU model, ignores the reserve, and holds the card alone until it ends (the CPU lane carries on). An event says it runs on the whole GPU at its own risk. Only a lease bigger than the card itself fails; before, a lease above the card less the reserve failed and one that fit that but not beside other programs waited forever.
+- `settings.py`, `PUT /api/settings`, `strata-models set`, Settings page: `whole_card_gb` (default 10, env `STRATAMODELS_WHOLE_CARD_GB`), applied at once.
+
 **Sound: noise reduction moved here from strata-360, with evals scored by people, models and measures (branch `claude/project-thread-ecj9cv`)**
 Jonathan asked to move strata-360's audio noise reduction into this service, look at other denoisers, and build evals on real audio (race speech from strata-360, a digitised tape's soundtrack), judged by programmatic measures and model judges as well as people.
 

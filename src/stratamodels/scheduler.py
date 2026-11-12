@@ -22,7 +22,13 @@ it (idle models only: it waits for running jobs to finish if it must), and keeps
 whose model does not fit waits), and other sized leases can be held at the same time. The reservation counts until the app's own process
 (the pid it sent) is seen using that memory, so a model is never loaded into room the app is about to take. Without a size the lease is
 EXCLUSIVE: it waits for running GPU jobs, every GPU model is freed and nothing else on the GPU runs until it is given back (the CPU lane
-carries on). Either way a lease ends when released or when the app stops sending heartbeats for `ttl_s`. Not sharing memory is what keeps
+carries on). Either way a lease ends when released or when the app stops sending heartbeats for `ttl_s`.
+
+Whole card: a model job or a sized lease that needs more than `whole_card_gb` (or more than the budget could ever give: the card less the
+reserve) does not share the card. It waits until no GPU job runs and no lease is held, every idle GPU model is freed, the reserve is ignored,
+and nothing else on the GPU starts until it ends (the CPU lane carries on). It is a way to try a model that is too big to budget for: the
+card's other programs may still leave it short, and then it fails like any job that runs out of memory. Only a lease bigger than the card
+itself is refused. Not sharing memory is what keeps
 two GPU users from corrupting each other's work; sharing the card's time just makes both a little slower.
 
 Deciding happens on one dispatcher thread (`step` decides one thing and, called directly, also runs it, which is how the tests drive it);
@@ -87,10 +93,13 @@ class Scheduler:
         max_skip_s=120.0,
         gpu_jobs=2,
         cpu_jobs=4,
+        whole_card_gb=10.0,
     ):
         self.store, self.registry, self.models_dir, self.probe = store, registry, models_dir, probe
         self.reserve_mb, self.clock, self.get_runtime, self.max_skip_s = reserve_gb * MB, clock, get_runtime, max_skip_s
         self.gpu_jobs, self.cpu_jobs = max(int(gpu_jobs), 1), max(int(cpu_jobs), 1)
+        self.whole_card_mb = whole_card_gb * MB
+        self.alone = set()  # keys of the models running or loading with the whole card to themselves
         self.resident = collections.OrderedDict()  # model key -> Resident, least recently used first
         self.cv = threading.Condition()
         self.control = collections.deque()
@@ -260,6 +269,7 @@ class Scheduler:
             current=running[0] if running else None,
             running=running,
             slots=dict(gpu=self.gpu_jobs, cpu=self.cpu_jobs),
+            whole_card_mb=self.whole_card_mb,
             lease=exclusive or (leases[0] if leases else None),
             leases=leases,
             queued=q,
@@ -340,13 +350,32 @@ class Scheduler:
         with self.cv:
             return [(k, r) for k, r in self.resident.items() if k not in self.busy]
 
-    def _make_room(self, need_mb, keep=None):
+    def _whole(self, need_mb):
+        """Whether `need_mb` (a model's estimate or a lease's size) takes the whole card: more than `whole_card_gb`, or more than the budget
+        could ever give."""
+        if need_mb > self.whole_card_mb:
+            return True
+        state = self._state()
+        return bool(state) and need_mb > state["total_mb"] - self.reserve_mb
+
+    def _whole_model(self, model):
+        return self._on_gpu(model) and self._whole(model.vram_gb * MB)
+
+    def _card_taken(self):
+        """Why a whole-card job or lease must wait now (GPU jobs running or loading, leases held), or None when the card is free."""
+        if self.held:
+            return f"{len(self.held)} lease(s) hold part of it"
+        if self._gpu_busy():
+            return "the jobs running on it finish first"
+        return None
+
+    def _make_room(self, need_mb, keep=None, why="lease wants the whole GPU"):
         """Unload idle models, least recently used first, until `need_mb` fits (None: every idle GPU model). Without a GPU there is no budget
         to keep. Models running a job are never unloaded."""
         if need_mb is None:
             for k, r in self._idle():
-                if self._on_gpu(r.model) or r.vram_mb > 0:
-                    self._unload(k, "lease wants the whole GPU")
+                if k != keep and (self._on_gpu(r.model) or r.vram_mb > 0):
+                    self._unload(k, why)
             return
         state = self._state()
         if not state:
@@ -454,10 +483,16 @@ class Scheduler:
             with self.cv:
                 if key in self.resident:
                     continue
-            if self._on_gpu(m) and self._gpu_busy() and not self._room_now(m):
+            if self._whole_model(m):
+                if self._card_taken():
+                    later.append((action, key))  # waits for the whole card like a job
+                    continue
+                self._make_room(None, keep=key, why=f"{key} takes the whole GPU")
+            elif self._on_gpu(m) and self._gpu_busy() and not self._room_now(m):
                 later.append((action, key))  # waits for room like a job
                 continue
-            self._make_room(m.vram_gb * MB)
+            else:
+                self._make_room(m.vram_gb * MB)
             ticket = self._take(None, m, "gpu" if self._on_gpu(m) else "cpu")
         self.control.extend(later)
         return ticket
@@ -514,9 +549,11 @@ class Scheduler:
 
     def _grant(self, j):
         """Free what the lease asked for and grant it. A sized lease waits (stays queued, and nothing on the GPU passes it) while running jobs,
-        other programs and leases hold so much that the room is not there even with every idle model freed; one that could never fit on this
-        card fails at once. An exclusive lease waits until the sized ones held now are given back and the GPU jobs running now finish."""
+        other programs and leases hold so much that the room is not there even with every idle model freed. An exclusive lease waits until the sized ones held now are given back and the GPU jobs running now finish, and so
+        does a sized one too big to share the card (see Whole card), which is then granted whatever the reserve."""
         need = None if j["vram_gb"] is None else j["vram_gb"] * MB
+        if need is not None and self._whole(need):
+            return self._grant_whole(j, need)
         if need is None and self.held:
             self._wait_note(
                 j, f"lease {j['id']} ({j['app']}) waits for the whole GPU: {len(self.held)} lease(s) hold part of it"
@@ -529,15 +566,6 @@ class Scheduler:
             return None
         self._make_room(need)
         state = self._state() if need is not None else None
-        if state and need > state["total_mb"] - self.reserve_mb:
-            j = self.store.update(
-                j["id"],
-                status="failed",
-                finished_at=self.clock(),
-                error=f"{j['vram_gb']:g} GB will never fit: the card has {state['total_mb'] / MB:.1f} GB and {self.reserve_mb / MB:.1f} GB is kept free",
-            )
-            self._notify()
-            return j
         if state and self.free_mb(state) < need:
             who = (
                 "running jobs and other programs hold the card" if self._gpu_busy() else "other programs hold the card"
@@ -548,6 +576,32 @@ class Scheduler:
         if claimed is None:
             return None  # withdrawn while the room was being made
         self._event(f"lease {j['id']} granted to {j['app']}" + (f" ({j['note']})" if j["note"] else ""))
+        self._notify()
+        return claimed
+
+    def _grant_whole(self, j, need):
+        state = self._state()
+        if state and need > state["total_mb"]:
+            j = self.store.update(
+                j["id"],
+                status="failed",
+                finished_at=self.clock(),
+                error=f"{j['vram_gb']:g} GB will never fit: the card has {state['total_mb'] / MB:.1f} GB",
+            )
+            self._notify()
+            return j
+        why = self._card_taken()
+        if why:
+            self._wait_note(j, f"lease {j['id']} ({j['app']}) waits for the whole GPU ({need / MB:.1f} GB): {why}")
+            return None
+        self._make_room(None, why=f"lease {j['id']} takes the whole GPU")
+        claimed = self.store.claim(j["id"], status="running", started_at=self.clock(), heartbeat_at=self.clock())
+        if claimed is None:
+            return None
+        self._event(
+            f"lease {j['id']} granted to {j['app']} with the whole GPU ({need / MB:.1f} GB, nothing else on it, at its own risk)"
+            + (f" ({j['note']})" if j["note"] else "")
+        )
         self._notify()
         return claimed
 
@@ -567,6 +621,13 @@ class Scheduler:
         j = self._next(cands)
         if j is None or j["kind"] == "lease":
             return j
+        m = self._model_of(j)
+        if m is not None and self._whole_model(m):
+            why = self._card_taken()
+            if why:  # nothing on the GPU passes it, or it would never find the card empty
+                self._wait_note(j, f"job {j['id']} ({j['role']}) waits for the whole GPU ({m.vram_gb:g} GB): {why}")
+                return None
+            return j
         if self._lane_jobs("gpu") >= self.gpu_jobs:
             return None
         if not self._fits(j):  # does not fit beside the leases: something smaller may
@@ -576,6 +637,8 @@ class Scheduler:
             if j is None:
                 return None
         m = self._model_of(j)
+        if m is not None and self._whole_model(m):
+            return None  # a smaller job stood in for one that cannot run beside the leases; a whole-card one waits for them
         if m is not None and self._gpu_busy() and not self._room_now(m):
             self._wait_note(j, f"job {j['id']} ({j['role']}) waits for {m.vram_gb:g} GB: the jobs running now hold it")
             return None  # nothing on the GPU passes it, so a big job is not starved by small ones
@@ -596,6 +659,8 @@ class Scheduler:
             self.busy[key] = j["id"] if j else "load"
             if model is not None and not self._same(self.resident.get(key), model) and self._on_gpu(model):
                 self.loading[key] = model.vram_gb * MB
+            if model is not None and lane == "gpu" and self._whole_model(model):
+                self.alone.add(key)
             if j is not None:
                 self.running[j["id"]] = (j, lane)
             if lane == "gpu":
@@ -605,7 +670,9 @@ class Scheduler:
     def dispatch(self):
         """Decide one thing: grant a lease (returns its row), or claim a job or a load (returns a ticket for `execute`), or None."""
         self._snap = None
-        exclusive = any(l["vram_gb"] is None for l in self._held_leases())
+        exclusive = any(l["vram_gb"] is None or self._whole(l["vram_gb"] * MB) for l in self._held_leases())
+        with self.cv:
+            exclusive = exclusive or bool(self.alone)  # a whole-card job or load runs with nothing beside it
         if not exclusive:  # load requests wait too: the holder has the card to itself
             t = self._do_control()
             if t is not None:
@@ -627,7 +694,12 @@ class Scheduler:
                     return r
                 continue  # it waits; nothing on the GPU passes it, the CPU lane may
             model, lane = self._model_of(j), ("gpu" if j is g else "cpu")
-            if lane == "gpu" and model is not None:
+            if lane == "gpu" and model is not None and self._whole_model(model):
+                self._make_room(None, keep=model.key, why=f"{model.key} takes the whole GPU")
+                self._event(
+                    f"job {j['id']} ({j['role']}) runs {model.key} on the whole GPU ({model.vram_gb:g} GB, nothing else on it, at its own risk)"
+                )
+            elif lane == "gpu" and model is not None:
                 self._make_room(self._need_mb(model), keep=model.key)
             claimed = self.store.claim(j["id"], status="running", started_at=self.clock())
             if claimed is None:
@@ -652,6 +724,7 @@ class Scheduler:
                 if t["key"] is not None:
                     self.busy.pop(t["key"], None)
                     self.loading.pop(t["key"], None)
+                    self.alone.discard(t["key"])
                 if t["job"] is not None:
                     self.running.pop(t["job"]["id"], None)
                 if t["lane"] == "gpu":
