@@ -3,6 +3,8 @@ engines' own CLIs, a fake /proc. The real thing (spandrel on the card, the diffu
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import types
@@ -52,6 +54,13 @@ class FakeRun:
             )
         if self.fail and any(self.fail in str(a) for a in cmd):
             return subprocess.CompletedProcess(cmd, 1, b"", b"Error while filtering")
+        if cmd[-1] == "-":  # a measuring run: ffmpeg's ssim/psnr/signalstats log, or a raw frame
+            if "rawvideo" in cmd:
+                w, h = (int(v) for v in re.search(r"scale=(\d+):(\d+)", cmd[cmd.index("-vf") + 1]).groups())
+                return subprocess.CompletedProcess(cmd, 0, bytes(i * 37 % 251 for i in range(w * h * 3)), b"")
+            log = "[Parsed_ssim_4] SSIM Y:0.96 U:0.97 V:0.97 All:0.9650 (14.5)\n[Parsed_psnr_5] PSNR y:33.1 u:40.2 v:40.0 average:34.20 min:30\n"
+            log += "".join(f"lavfi.signalstats.YAVG={v}\n" for v in (99, 4.0, 6.0))
+            return subprocess.CompletedProcess(cmd, 0, b"", log.encode())
         with open(cmd[-1], "wb") as f:
             f.write(b"x")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
@@ -91,7 +100,7 @@ def test_prep_filter_deinterlaces_with_the_field_order_forced_crops_and_makes_sq
     ("kw", "match"),
     [
         (dict(field_order="auto"), "field_order"),
-        (dict(deinterlace="qtgmc"), "deinterlace"),
+        (dict(deinterlace="nnedi"), "deinterlace"),
         (dict(crop=[0, 0, 800, 576]), "not inside"),
         (dict(crop=[0, 0, 720]), r"\[x, y, w, h\]"),
         (dict(crop=[0, 0, 0, 576]), "not inside"),
@@ -150,7 +159,13 @@ def test_extras_crop_each_region_nearest_neighbour_and_keep_stills_inside_the_cl
     ]  # the second is outside the crop: no file
     face = run.calls[1]
     assert face[face.index("-vf") + 1] == "crop=540:370:386:170,scale=960:658:flags=neighbor,setsar=1,format=yuv420p"
-    assert crops[0] == dict(id="face", label="Face", box=[200, 90, 260, 195], path=str(tmp_path / "video-1.face.mp4"))
+    assert crops[0] == dict(
+        id="face",
+        label="Face",
+        box=[200, 90, 260, 195],
+        path=str(tmp_path / "video-1.face.mp4"),
+        stills=[str(tmp_path / "video-1.face.3s.png")],
+    )  # 6 s is past the end
     assert [os.path.basename(s) for s in stills] == [
         "video-1.still1s.png",
         "video-1.still3s.png",
@@ -408,7 +423,9 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
     V.E.update(
         engine="spandrel", key="video-realesrgan-x2plus", scale=2, device="cuda", torch=torch, options=dict(tile=0)
     )
-    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0: np.zeros((f.shape[0] * 2, f.shape[1] * 2, 3), np.uint8))
+    monkeypatch.setattr(
+        V, "upscale_frame", lambda f, tile=0, mm=None: np.zeros((f.shape[0] * 2, f.shape[1] * 2, 3), np.uint8)
+    )
     r = V.run(dict(path=clip, out_dir=str(tmp_path)), run_=FakeRun(), popen=popen)
     _dec, enc = procs
     assert (
@@ -416,7 +433,7 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
     )  # the half frame at the end is dropped
     assert r["peak_vram_mb"] == 3072.0 and resets == [1]
     procs.clear()
-    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0: f)
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: f)
 
     def none(cmd, stdout=None, stdin=None):
         p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), stdin=Pipe(), wait=lambda: 0)
@@ -428,9 +445,10 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
 
 def test_prepare_file_writes_a_lossless_clip_without_audio(tmp_path, clip):
     run = FakeRun()
-    path = V.prepare_file(P(path=clip), SRC, str(tmp_path), run=run)
+    path, peak = V.prepare_file(P(path=clip), SRC, str(tmp_path), run=run)
     assert (
         path == str(tmp_path / "prep.mp4")
+        and peak == 0.0
         and "-an" in run.calls[0]
         and run.calls[0][run.calls[0].index("-qp") + 1] == "0"
     )
@@ -460,7 +478,7 @@ def test_spandrel_engine_stops_ffmpeg_when_the_model_fails(monkeypatch, tmp_path
         procs.append(Proc(cmd))
         return procs[-1]
 
-    def oom(f, tile=0):
+    def oom(f, tile=0, mm=None):
         raise MemoryError("CUDA out of memory")
 
     torch = types.SimpleNamespace(cuda=types.SimpleNamespace(reset_peak_memory_stats=lambda: None))
@@ -472,3 +490,361 @@ def test_spandrel_engine_stops_ffmpeg_when_the_model_fails(monkeypatch, tmp_path
     with pytest.raises(MemoryError):
         V.run(dict(path=clip, out_dir=str(tmp_path)), run_=FakeRun(), popen=popen)
     assert len(procs) == 2 and all(p.killed for p in procs)
+
+
+def test_cleanup_filters_run_on_the_tapes_own_pixels_before_the_resize():
+    f = V.prep_filter(
+        P(crop=[14, 0, 692, 568], cleanup=dict(chroma_shift=[-2, 0, -2, 0], filters="hqdn3d=0:4:0:6")), SRC
+    )
+    assert f == (
+        "bwdif=mode=send_field:parity=tff:deint=all,crop=692:568:14:0,format=yuv444p,"
+        "chromashift=cbh=-2:cbv=0:crh=-2:crv=0:edge=smear,hqdn3d=0:4:0:6,scale=768:576:flags=lanczos,setsar=1"
+    )
+    assert V.cleanup_filters(None) == [] and V.cleanup_filters(dict(model="m.pth")) == []
+
+
+@pytest.mark.parametrize(
+    ("c", "match"),
+    [
+        (dict(sharpen=1), "cleanup is a table"),
+        ("hqdn3d", "cleanup is a table"),
+        (dict(chroma_shift=[1, 2]), "chroma_shift"),
+        (dict(chroma_shift=[1, 2, 3, 99]), "chroma_shift"),
+        (dict(filters=3), "string of ffmpeg filters"),
+    ],
+)
+def test_cleanup_refuses_bad_stages(c, match):
+    with pytest.raises(protocol.ParamError, match=match):
+        V.prep_filter(P(cleanup=c), SRC)
+
+
+def fake_model(scale, device="cpu"):
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(reset_peak_memory_stats=lambda: None, max_memory_reserved=lambda: 2**30)
+    )
+    return dict(model=object(), scale=scale, device=device, half=False, torch=torch, architecture="Compact")
+
+
+def test_cleanup_model_is_loaded_once_and_must_keep_the_size(monkeypatch, tmp_path):
+    loads = []
+    monkeypatch.setattr(
+        V,
+        "load_spandrel",
+        lambda f, models_dir, half=True, cpu=False: loads.append(f) or fake_model(2 if "x2" in f else 1),
+    )
+    V.E.clear()
+    V.E.update(models_dir=str(tmp_path))
+    assert V.cleanup_model(P()) is None
+    m = V.cleanup_model(P(cleanup=dict(model="1x_BleedOut.pth")))
+    assert V.cleanup_model(P(cleanup=dict(model="1x_BleedOut.pth"))) is m and loads == ["1x_BleedOut.pth"]
+    with pytest.raises(protocol.ParamError, match="keeps the size"):
+        V.cleanup_model(P(cleanup=dict(model="x2.pth")))
+
+
+class Pipe:
+    def __init__(self, data=b""):
+        self.data, self.written = data, []
+
+    def read(self, n):
+        out, self.data = self.data[:n], self.data[n:]
+        return out
+
+    def write(self, b):
+        self.written.append(len(b))
+
+    def close(self):
+        pass
+
+
+def frames_popen(procs, n=1):
+    import numpy as np
+
+    frame = np.zeros((576, 768, 3), np.uint8).tobytes()
+
+    def popen(cmd, stdout=None, stdin=None, **kw):
+        p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(frame * n), stdin=Pipe(), wait=lambda: 0, pid=1)
+        procs.append(p)
+        return p
+
+    return popen
+
+
+def test_ffmpeg_engine_with_a_cleanup_model_pipes_frames_through_it(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    V.load(dict(key="video-lanczos", options=dict(engine="ffmpeg", filters="hqdn3d=1")), str(tmp_path))
+    cm = fake_model(1)
+    seen = []
+    monkeypatch.setattr(V, "cleanup_model", lambda p: cm)
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: seen.append((mm is cm, tile)) or f)
+    procs = []
+    r = V.run(
+        dict(path=clip, out_dir=str(tmp_path), cleanup=dict(model="1x.pth", tile=128)),
+        run_=FakeRun(),
+        popen=frames_popen(procs, 2),
+    )
+    _dec, enc = procs
+    assert seen == [(True, 128)] * 2 and enc.cmd[enc.cmd.index("-s") + 1] == "768x576"
+    assert enc.cmd[enc.cmd.index("-vf") + 1].startswith("hqdn3d=1,scale=1440:1080") and r["peak_vram_mb"] == 0.0
+
+
+def test_spandrel_engine_chains_the_cleanup_model_before_the_upscaler(monkeypatch, tmp_path, clip):
+    import numpy as np
+
+    cm = fake_model(1, "cuda")
+    V.E.clear()
+    V.E.update(fake_model(2, "cuda"), engine="spandrel", key="x2", options=dict(tile=0), models_dir=str(tmp_path))
+    order = []
+
+    def up(f, tile=0, mm=None):
+        order.append(mm["scale"])
+        return np.zeros((f.shape[0] * mm["scale"], f.shape[1] * mm["scale"], 3), np.uint8)
+
+    monkeypatch.setattr(V, "cleanup_model", lambda p: cm)
+    monkeypatch.setattr(V, "upscale_frame", up)
+    procs = []
+    r = V.run(
+        dict(path=clip, out_dir=str(tmp_path), cleanup=dict(model="1x.pth")), run_=FakeRun(), popen=frames_popen(procs)
+    )
+    assert order == [1, 2] and procs[1].cmd[procs[1].cmd.index("-s") + 1] == "1536x1152" and r["peak_vram_mb"] == 1024.0
+
+
+def test_cli_engine_cleans_the_prepared_clip_with_the_model(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    (tmp_path / "src" / "flashvsr-plus").mkdir(parents=True)
+    V.load(dict(key="video-flashvsr-plus-turbo", options=dict(engine="flashvsr")), str(tmp_path))
+    monkeypatch.setattr(V, "cleanup_model", lambda p: fake_model(1, "cuda"))
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: f)
+    monkeypatch.setattr(V, "gpu_mb", lambda pids, run=None: 500.0)
+    procs = []
+    base = frames_popen(procs)
+
+    def popen(cmd, cwd=None, stdout=None, stderr=None, stdin=None):
+        if cmd[0] == "ffmpeg":
+            return base(cmd, stdout=stdout, stdin=stdin)
+        out = cmd[cmd.index("--output") + 1]
+        return types.SimpleNamespace(pid=2, wait=lambda: open(out, "wb").write(b"up") and 0)
+
+    r = V.run(dict(path=clip, out_dir=str(tmp_path / "out"), cleanup=dict(model="1x.pth")), run_=FakeRun(), popen=popen)
+    enc = procs[1].cmd
+    assert (
+        enc[-1].endswith("prep.mp4") and enc[enc.index("-qp") + 1] == "0" and r["peak_vram_mb"] == 1024.0
+    )  # the cleanup's peak beats the CLI's
+
+
+def test_quality_measures_fidelity_flicker_sharpness_and_noise(tmp_path, clip):
+    run = FakeRun()
+    res = str(tmp_path / "video-q.mp4")
+    open(res, "wb").close()
+    q = V.quality(
+        P(path=clip, crop=[14, 0, 692, 568], cleanup=dict(filters="hqdn3d")), SRC, res, dict(seconds=8.0), run=run
+    )
+    assert q["ssim"] == 0.965 and q["psnr"] == 34.2 and q["flicker"] == 5.0 and q["flicker_ratio"] == 1.0
+    assert q["sharpness"] > 0 and q["luma_noise"] > 0 and q["chroma_noise"] > 0
+    fid = next(c for c in run.calls if "-filter_complex" in c)
+    assert "hqdn3d" not in fid[fid.index("-filter_complex") + 1]  # measured against the tape as it is, not as cleaned
+    assert len([c for c in run.calls if "rawvideo" in c]) == 4  # a still at each of 1, 3, 5, 7 s
+
+
+def test_quality_copes_with_what_ffmpeg_does_not_say(tmp_path, clip, monkeypatch):
+    with pytest.raises(RuntimeError, match="ffmpeg failed"):
+        V._ffmpeg_log(
+            ["-i", "x"], run=lambda cmd, capture_output=True: subprocess.CompletedProcess(cmd, 1, b"", b"Invalid data")
+        )
+    monkeypatch.setattr(V, "_ffmpeg_log", lambda args, run=None: "PSNR y:inf average:inf")
+    monkeypatch.setattr(V, "frames_at", lambda *a, **k: [])
+    q = V.quality(P(path=clip), SRC, "r.mp4", dict(seconds=8.0))
+    assert q == dict(ssim=None, psnr=99.0, flicker=None, flicker_source=None, flicker_ratio=None)
+
+
+def test_noise_and_sharpness_read_planes():
+    import numpy as np
+
+    flat = np.full((20, 20), 100, np.uint8)
+    rng = np.random.default_rng(0)
+    noisy = np.clip(100 + rng.normal(0, 8, (64, 64)), 0, 255).astype(np.uint8)
+    assert V.noise_sigma(flat) == 0.0 and 6 < V.noise_sigma(noisy) < 10 and V.noise_sigma(np.zeros((2, 2))) == 0.0
+    assert V.sharpness(flat) == 0.0 and V.sharpness(noisy) > 100
+    assert (
+        V.frames_at(
+            "x.mp4", [1], (8, 6), run=lambda cmd, capture_output=True: subprocess.CompletedProcess(cmd, 1, b"", b"")
+        )
+        == []
+    )
+
+
+def test_cleanup_on_one_kind_of_plane_merges_the_others_from_the_original():
+    f = V.cleanup_filters(dict(filters="hqdn3d=4:4:6:6", planes="chroma"))
+    assert f == [
+        "format=yuv420p,split[cl_orig][cl_in];[cl_in]hqdn3d=4:4:6:6[cl_out];[cl_orig][cl_out]mergeplanes=map0s=0:map0p=0:map1s=1:map1p=1:map2s=1:map2p=2:format=yuv420p"
+    ]
+    luma = V.cleanup_filters(dict(chroma_shift=[-2, 0, -2, 0], filters="nlmeans", planes="luma"))
+    assert luma[-1].startswith("format=yuv444p,split") and luma[-1].endswith(
+        "mergeplanes=map0s=1:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:format=yuv444p"
+    )
+    assert V.cleanup_filters(dict(filters="hqdn3d", planes="all")) == ["hqdn3d"]
+    with pytest.raises(protocol.ParamError, match="planes is all, luma or chroma"):
+        V.cleanup_filters(dict(filters="hqdn3d", planes="red"))
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="needs ffmpeg on the PATH to filter a real picture (CI runners may not have it)",
+)
+@pytest.mark.parametrize(("planes", "kept", "changed"), [("chroma", "y", "u"), ("luma", "u", "y")])
+def test_cleanup_leaves_the_untouched_planes_bit_identical(planes, kept, changed):
+    src = "testsrc2=s=64x48:d=0.4,noise=alls=20:allf=t,format=yuv420p"
+    vf = V.cleanup_filters(dict(filters="hqdn3d=4:4:6:6", planes=planes))[0]
+
+    def plane(chain, pl):
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            src,
+            "-vf",
+            f"{chain}extractplanes={pl}",
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+        return subprocess.run(cmd, capture_output=True, check=True).stdout
+
+    assert plane(f"{vf},", kept) == plane("", kept)
+    assert plane(f"{vf},", changed) != plane("", changed)
+
+
+def test_a_model_given_no_vram_keeps_its_cleanup_model_off_the_card(monkeypatch, tmp_path, ffmpeg_on_path):
+    seen = []
+    monkeypatch.setattr(
+        V, "load_spandrel", lambda f, models_dir, half=True, cpu=False: seen.append(cpu) or fake_model(1)
+    )
+    V.load(dict(key="video-lanczos", vram_gb=0.0, options=dict(engine="ffmpeg")), str(tmp_path))
+    V.cleanup_model(P(cleanup=dict(model="a.pth")))
+    V.load(dict(key="video-lanczos-cleanup", vram_gb=1.5, options=dict(engine="ffmpeg")), str(tmp_path))
+    V.cleanup_model(P(cleanup=dict(model="a.pth")))
+    assert seen == [True, False]
+
+
+def test_load_spandrel_on_the_cpu_when_asked(monkeypatch, tmp_path):
+    (tmp_path / "spandrel").mkdir()
+    (tmp_path / "spandrel" / "c.pth").write_bytes(b"x")
+
+    class Net:
+        def eval(self):
+            return self
+
+        def to(self, dev):
+            self.dev = dev
+            return self
+
+    desc = types.SimpleNamespace(
+        model=Net(), scale=1, supports_half=True, architecture=types.SimpleNamespace(name="Compact")
+    )
+    monkeypatch.setitem(
+        sys.modules, "torch", types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spandrel",
+        types.SimpleNamespace(ModelLoader=lambda: types.SimpleNamespace(load_from_file=lambda p: desc)),
+    )
+    m = V.load_spandrel("c.pth", str(tmp_path), cpu=True)
+    assert m["device"] == "cpu" and not m["half"] and desc.model.dev == "cpu"
+
+
+def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
+    q = V.vs_script(P(deinterlace="qtgmc"), "/t/c.mkv")
+    assert "c = core.bs.VideoSource(source='/t/c.mkv')" in q and "c = core.std.SetFieldBased(c, 2)" in q
+    assert (
+        "c = QTempGaussMC().deinterlace(c, tff=True)" in q and q.endswith("c.set_output()\n") and "mc_degrain" not in q
+    )
+    d = V.vs_script(
+        P(field_order="bff", cleanup=dict(vs=dict(degrain=dict(tr=3, thsad=400)), planes="luma")), "/t/c.mkv"
+    )
+    assert "c = core.bwdif.Bwdif(c, field=2)" in d and "c = mc_degrain(c, tr=3, thsad=400, blksize=16, planes=0)" in d
+    n = V.vs_script(P(deinterlace="none", cleanup=dict(vs=dict(degrain={}), planes="chroma")), "/t/c.mkv")
+    assert "SetFieldBased" not in n and "planes=[1, 2]" in n and "tr=2, thsad=300" in n
+    assert (
+        V.needs_vs(P(deinterlace="qtgmc")) and V.needs_vs(P(cleanup=dict(vs=dict(degrain={})))) and not V.needs_vs(P())
+    )
+
+
+@pytest.mark.parametrize(
+    ("kw", "match"),
+    [
+        (dict(deinterlace="yadif", cleanup=dict(vs=dict(degrain={}))), "use bwdif, qtgmc or none"),
+        (dict(cleanup=dict(vs="smdegrain")), "cleanup vs is"),
+        (dict(cleanup=dict(vs=dict(degrain=dict(tr=0)))), "whole numbers"),
+        (dict(cleanup=dict(vs=dict(degrain=dict(radius=2)))), "whole numbers"),
+        (dict(cleanup=dict(vs=dict(degrain={}), planes="red")), "planes is all, luma or chroma"),
+    ],
+)
+def test_vs_script_refuses_bad_stages(kw, match):
+    with pytest.raises(protocol.ParamError, match=match):
+        V.vs_script(P(**kw), "/t/c.mkv")
+
+
+def test_vspipe_comes_from_the_vapoursynth_venv(tmp_path):
+    with pytest.raises(RuntimeError, match="setup_worker_venv.sh vapoursynth"):
+        V.vspipe_of(str(tmp_path), {})
+    exe = tmp_path / "venvs" / "vapoursynth" / "bin" / "vspipe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert V.vspipe_of(str(tmp_path), {}) == str(exe) and V.vspipe_of("/none", dict(vspipe=str(exe))) == str(exe)
+
+
+def test_qtgmc_runs_the_vapoursynth_stage_then_the_engine_on_its_intermediate(
+    monkeypatch, tmp_path, clip, ffmpeg_on_path
+):
+    vspipe = tmp_path / "vspipe"
+    vspipe.write_text("")
+    V.load(dict(key="video-lanczos", options=dict(engine="ffmpeg", vspipe=str(vspipe))), str(tmp_path))
+    monkeypatch.setattr(V, "quality", lambda p, src, out, info, run=None: dict(seen=p["deinterlace"], path=p["path"]))
+    procs = []
+
+    def popen(cmd, stdout=None, stdin=None, **kw):
+        if cmd[0] == "ffmpeg":
+            open(cmd[-1], "wb").write(b"ffv1")
+        p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), wait=lambda: 0)
+        procs.append(p)
+        return p
+
+    run = FakeRun()
+    out = tmp_path / "out"
+    r = V.run(
+        dict(
+            path=clip,
+            out_dir=str(out),
+            crop=[14, 0, 692, 568],
+            deinterlace="qtgmc",
+            cleanup=dict(vs=dict(degrain={}), planes="luma", filters="hqdn3d=1"),
+        ),
+        run_=run,
+        popen=popen,
+    )
+    vsp, enc = procs
+    assert (
+        vsp.cmd[:3] == [str(vspipe), "-c", "y4m"]
+        and enc.cmd[enc.cmd.index("-c:v") + 1] == "ffv1"
+        and enc.cmd[-1].endswith("vs.mkv")
+    )
+    main = next(
+        c
+        for c in run.calls
+        if c[0] == "ffmpeg" and c[-1].endswith(".mp4") and "-vf" in c and "scale=1440:1080" in c[c.index("-vf") + 1]
+    )
+    vf = main[main.index("-vf") + 1]
+    assert (
+        main[main.index("-i") + 1].endswith("vs.mkv") and not vf.startswith(("bwdif", "yadif")) and "hqdn3d=1" in vf
+    )  # deinterlaced already; the ffmpeg cleanup still runs
+    assert main[main.index("-r") + 1] == "25"  # the intermediate's own rate (the fake probe says 25): not doubled again
+    assert r["quality"] == dict(seen="bwdif", path=clip)  # measured against the tape, deinterlaced the plain way
+    assert not [d for d in os.listdir(out) if d.startswith("video-vs-")]  # the intermediate is gone
+
+    def failing(cmd, stdout=None, stdin=None, **kw):
+        return types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), wait=lambda: 1)
+
+    with pytest.raises(RuntimeError, match="VapourSynth stage failed"):
+        V.run(dict(path=clip, out_dir=str(out), deinterlace="qtgmc"), run_=FakeRun(), popen=failing)

@@ -500,6 +500,16 @@ source = "https://ffmpeg.org/ffmpeg-filters.html#hqdn3d"
 used_by = []
 options = { worker = "video", venv = "video", engine = "ffmpeg", filters = "hqdn3d=2:1.5:3:3" }
 
+[models.video-lanczos-cleanup]
+runtime = "venv-worker"
+name = "bwdif + a 1x cleanup model + lanczos"
+roles = ["video-enhance"]
+vram_gb = 1.5                                # the cleanup stage's 1x model (BleedOut, BaldrickVHSFix...) on the card: GPU-accounted, unlike video-lanczos
+licence = "LGPL/GPL (ffmpeg); the cleanup model's own (see scripts/setup_worker_venv.sh video)"
+source = "https://openmodeldb.info/"
+used_by = []
+options = { worker = "video", venv = "video", engine = "ffmpeg" }
+
 [models.video-realesrgan-x4plus]
 runtime = "venv-worker"
 name = "RealESRGAN_x4plus.pth"

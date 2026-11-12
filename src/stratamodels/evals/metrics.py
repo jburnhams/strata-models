@@ -418,6 +418,17 @@ def _peak_vram(item, output, error):
     return None if not v else v / 1024
 
 
+def _quality(key):
+    """A reading the video worker measured on its result (output.quality), for the video evals: fidelity, flicker, sharpness, noise."""
+
+    def score(item, output, error):
+        q = output.get("quality") if isinstance(output, dict) and not error else None
+        v = q.get(key) if isinstance(q, dict) else None
+        return float(v) if isinstance(v, (int, float)) else None
+
+    return score
+
+
 METRICS = {
     m.name: m
     for m in [
@@ -430,6 +441,54 @@ METRICS = {
             _wer,
         ),
         Metric("cer", "ratio", "lower", "Character error rate, the same on characters", "%", _cer),
+        Metric(
+            "fidelity_ssim",
+            "mean",
+            "higher",
+            "SSIM of the video, resized back to the prepared size, against the tape (the same deinterlace and crop): low means invented or lost detail, or colour drift",
+            "",
+            _quality("ssim"),
+        ),
+        Metric(
+            "fidelity_psnr",
+            "mean",
+            "higher",
+            "PSNR of the video, resized back, against the tape",
+            "dB",
+            _quality("psnr"),
+        ),
+        Metric(
+            "flicker_ratio",
+            "mean",
+            "lower",
+            "Frame-to-frame luma change of the video over the tape's own: over 1 shimmers or flickers more than the tape (per-frame models), under 1 is steadier",
+            "",
+            _quality("flicker_ratio"),
+        ),
+        Metric(
+            "sharpness",
+            "mean",
+            "higher",
+            "Variance of the luma Laplacian on stills at the prepared size: falls when detail is blurred (read it with luma_noise: noise raises it too)",
+            "",
+            _quality("sharpness"),
+        ),
+        Metric(
+            "luma_noise",
+            "mean",
+            "lower",
+            "Luma noise (Immerkaer sigma) on stills at the prepared size: grain",
+            "",
+            _quality("luma_noise"),
+        ),
+        Metric(
+            "chroma_noise",
+            "mean",
+            "lower",
+            "Colour noise (Immerkaer sigma of Cb and Cr) on stills at the prepared size: VHS's blotchy colour",
+            "",
+            _quality("chroma_noise"),
+        ),
         Metric(
             "faces_missed",
             "ratio",
