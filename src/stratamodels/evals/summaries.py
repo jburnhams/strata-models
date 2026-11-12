@@ -22,7 +22,7 @@ def _code_hash():
     """The analysis code itself: a deploy that changes how a metric is worked out makes every kept summary out of date."""
     h = hashlib.sha256()
     here = os.path.dirname(__file__)
-    for f in ("core.py", "metrics.py", "stats.py", "summaries.py"):
+    for f in ("core.py", "judges.py", "metrics.py", "stats.py", "summaries.py"):
         with open(os.path.join(here, f), "rb") as fh:
             h.update(fh.read())
     return h.hexdigest()[:16]

@@ -90,8 +90,17 @@ export interface Analysis {
   metrics: Record<string, MetricInfo>
   decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }
   judgments?: { n: number; strength: Record<string, [number, number, number]> }
+  judges?: Record<string, JudgeSummary> // model judges beside the people (evals.judges): agreement with people's judgments on the same pairs
   summary?: { computed_at: number; seconds: number; stale: boolean } // worked out ahead and kept; stale: a fresh one is on its way
 }
+export interface Share { value: number | null; low: number | null; high: number | null; n: number; k?: number }
+export interface JudgeSummary {
+  kind: 'text' | 'vision'; model: string | null; via: string; role: string | null; judged: number; with_people: number
+  agree: Share; decided: Share; kappa: number | null; consistent: Share
+  tally: { same_winner: number; opposite: number; judge_tie: number; person_tie: number; both_tie: number }
+  disagreements: { item_id: string; a: string; b: string; person: string; judge: string; reason: string }[]
+}
+export interface JudgmentRow { a: string; b: string; winner: string; rater: string; judge: string | null; at: number; note: string | null; detail: { consistent?: boolean | null } | null; a_key: string | null; b_key: string | null }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
 
@@ -104,6 +113,7 @@ export const evalsApi = {
   pair: (name: string) => get<{ pair: Pair | null; remaining?: number }>(`/api/evals/${encodeURIComponent(name)}/pair`),
   outputs: (name: string, item?: string) => get<{ candidates: Candidate[]; items: ItemOutputs[] }>(`/api/evals/${encodeURIComponent(name)}/outputs${item ? `?item_id=${encodeURIComponent(item)}` : ''}`),
   judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; item_id: string; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
+  verdicts: (name: string, item: string) => get<{ item_id: string; judgments: JudgmentRow[] }>(`/api/evals/${encodeURIComponent(name)}/verdicts/${encodeURIComponent(item)}`),
   mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
 }
 

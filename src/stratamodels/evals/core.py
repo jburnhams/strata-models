@@ -321,6 +321,9 @@ class Spec:
     score: dict = dataclasses.field(
         default_factory=dict
     )  # a second model that reads each output for the metrics (TTS: transcribe the audio back): {role, model?, params}
+    judges: list = dataclasses.field(
+        default_factory=list
+    )  # model judges whose verdicts are kept beside people's (evals.judges.parse_judge): [{name, model, role | cli, ...}]
 
     def candidate(self, name):
         c = next((c for c in self.candidates if c.name == name), None)
@@ -344,6 +347,7 @@ class Spec:
             similarity=self.similarity,
             source=self.source,
             score=self.score,
+            judges=self.judges,
         )
 
 
@@ -395,6 +399,7 @@ def parse_spec(d, source=""):
             similarity=str(d.get("similarity", "")),
             source=source,
             score=dict(d.get("score") or {}),
+            judges=[_parse_judge(x) for x in d.get("judges") or []],
         )
         if s.score and not s.score.get("role"):
             raise ValueError("[score] names no role")
@@ -417,8 +422,16 @@ def parse_spec(d, source=""):
     names = [c.name for c in cands]
     if len(set(names)) != len(names):
         raise EvalError(f"{s.name}: two candidates share a name")
+    if len({j["name"] for j in s.judges}) != len(s.judges):
+        raise EvalError(f"{s.name}: two judges share a name")
     s.candidate(s.baseline)
     return s
+
+
+def _parse_judge(d):
+    from stratamodels.evals.judges import parse_judge
+
+    return parse_judge(d)
 
 
 def spec_folders():
@@ -954,10 +967,13 @@ def outputs_for(spec, engine, dataset=None):
 
 
 def judgments(engine, experiment, current=None):
-    """(a, b, winner) of the experiment's judgments; with `current` ({(candidate, item): result key}) only those of outputs that are still the
-    candidates' (a changed model, params or dataset, or a forgotten and regenerated output, makes a new key, and the old judgments stop counting)."""
+    """(a, b, winner) of the experiment's judgments by people (a model judge's verdicts are apart: evals.judges); with `current` ({(candidate,
+    item): result key}) only those of outputs that are still the candidates' (a changed model, params or dataset, or a forgotten and regenerated
+    output, makes a new key, and the old judgments stop counting)."""
     with session(engine) as s:
-        rows = list(s.scalars(select(EvalJudgment).where(EvalJudgment.experiment == experiment)))
+        rows = list(
+            s.scalars(select(EvalJudgment).where(EvalJudgment.experiment == experiment, EvalJudgment.judge.is_(None)))
+        )
     if current is None:
         return [(j.a, j.b, j.winner) for j in rows]
     return [
@@ -1053,6 +1069,10 @@ def analyse(spec, engine, dataset=None, seed=None):
         res["judgments"] = dict(
             n=len(j), strength={k: list(v) for k, v in S.bradley_terry_ci(j, names, b=500, seed=seed).items()}
         )
+    if spec.judges:
+        from stratamodels.evals import judges as J
+
+        res["judges"] = J.summary(spec, engine, current, names, base)
     return res
 
 

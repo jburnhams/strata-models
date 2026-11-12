@@ -47,6 +47,7 @@ export const evalFixtures = {
     metrics: { wer, latency_s: lat },
     decision: { per_candidate: { turbo: { verdict: 'unclear', why: 'difference -0.20 points, interval includes no change', gain: -0.002 } }, recommendation: 'large-v3', change: false },
     judgments: { n: 12, strength: { 'large-v3': [1.2, 0.8, 1.6], turbo: [0.8, 0.5, 1.1] } },
+    judges: { 'qwen-text': { kind: 'text', model: 'qwen3.5-9b-vl', via: 'queue', role: 'judge-text', judged: 14, with_people: 12, agree: { value: 0.75, low: 0.47, high: 0.91, n: 12, k: 9 }, decided: { value: 0.9, low: 0.6, high: 0.98, n: 10, k: 9 }, kappa: 0.58, consistent: { value: 0.86, low: 0.6, high: 0.96, n: 14, k: 12 }, tally: { same_winner: 9, opposite: 1, judge_tie: 1, person_tie: 1, both_tie: 0 }, disagreements: [] } },
   }),
   outputs: () => ({
     candidates: [{ name: 'large-v3', model: 'whisper-large-v3', params: {}, options: {}, note: '' }, { name: 'turbo', model: 'whisper-large-v3-turbo', params: {}, options: {}, note: '' }, { name: 'small', model: 'whisper-small', params: {}, options: {}, note: '' }],
@@ -93,6 +94,7 @@ export const handlers = [
   http.get('/api/evals/:name/report', () => HttpResponse.text('# transcribe-en: Which Whisper model for English?\n\n## Answer\n')),
   http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair(), remaining: 12 })),
   http.get('/api/evals/:name/outputs', ({ request }) => { const item = new URL(request.url).searchParams.get('item_id'); const d = evalFixtures.outputs(); return HttpResponse.json(item ? { ...d, items: d.items.filter(i => i.id === item) } : d) }),
+  http.get('/api/evals/:name/verdicts/:item', ({ params }) => HttpResponse.json({ item_id: params.item, judgments: [{ a: 'turbo', b: 'large-v3', winner: 'turbo', rater: 'qwen-text', judge: 'k1', at: 2, note: 'turbo keeps the last word', detail: { consistent: true }, a_key: 'a', b_key: 'b' }, { a: 'turbo', b: 'large-v3', winner: 'tie', rater: 'jonathan', judge: null, at: 1, note: null, detail: null, a_key: 'a', b_key: 'b' }] })),
   http.post('/api/evals/:name/judgments', async ({ request }) => { const b = (await request.json()) as { winner: string }; mock.calls.push(`judge ${b.winner}`); return HttpResponse.json({ ok: true, x: 'turbo', y: 'large-v3', winner: b.winner }, { status: 201 }) }),
   http.get('/api/evals/:name', ({ params }) => params.name === 'nope' ? HttpResponse.json({ detail: 'no experiment' }, { status: 404 }) : HttpResponse.json(mock.analysis)),
   http.get('/api/settings', () => HttpResponse.json(mock.settings)),

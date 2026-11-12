@@ -5,7 +5,7 @@ import { useParams } from 'react-router'
 import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, Button, DataTable, DataView, EmptyState, PageHeader, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useLoad, type Column } from 'strata-react'
-import { evalsApi, imagesApi, type Analysis, type Pair, type Step } from '../api'
+import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Share, type Step } from '../api'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useState } from 'react'
 
@@ -49,9 +49,41 @@ function Results({ a }: { a: Analysis }) {
           <ul className="grid gap-1 type-body">{Object.entries(a.judgments.strength).sort((x, y) => y[1][0] - x[1][0]).map(([n, s]) => <li key={n}><span className="font-mono">{n}</span>: {s[0].toFixed(2)} ({s[1].toFixed(2)} to {s[2].toFixed(2)})</li>)}</ul>
         </section>
       )}
+      {a.judges && Object.keys(a.judges).length > 0 && <ModelJudges judges={a.judges} />}
       <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: the baseline has {a.dataset.compared} of {a.dataset.n} items; each candidate is compared with it on the items both have (Items column: a sample has fewer, and wider intervals){a.dataset.not_run?.length ? ` (of those that have run: ${a.dataset.not_run.join(', ')} not yet)` : ''}. Intervals are 95 %; the Write-up tab says how each is computed.</p>
     </div>
   )
+}
+
+const share = (s: Share) => (!s.n || s.value === null ? 'n/a' : `${Math.round(s.value * 100)} % (${Math.round((s.low ?? 0) * 100)} to ${Math.round((s.high ?? 0) * 100)}) of ${s.n}`)
+
+/** Model judges: their verdicts on the pairs people judged, and how often they gave the person's answer. */
+function ModelJudges({ judges }: { judges: Record<string, JudgeSummary> }) {
+  type JRow = JudgeSummary & { name: string }
+  const cols: Column<JRow>[] = [
+    { key: 'name', header: 'Judge', cell: r => <span className="grid"><span className="font-mono">{r.name}</span><span className="type-caption text-muted-foreground">{r.kind}, {r.model ?? '?'}{r.via !== 'queue' ? ` via ${r.via}` : ''}</span></span> },
+    { key: 'judged', header: 'Verdicts', numeric: true, cell: r => `${r.judged} (${r.with_people} with people)` },
+    { key: 'agree', header: 'Agrees with people', numeric: true, cell: r => share(r.agree) },
+    { key: 'decided', header: 'Same winner', numeric: true, cell: r => share(r.decided) },
+    { key: 'kappa', header: 'Kappa', numeric: true, cell: r => (r.kappa === null ? 'n/a' : r.kappa.toFixed(2)) },
+    { key: 'consistent', header: 'Same either way round', numeric: true, cell: r => share(r.consistent) },
+  ]
+  return (
+    <section aria-labelledby="model-judges" className="grid gap-2">
+      <h2 id="model-judges" className="type-heading">Model judges</h2>
+      <p className="type-body-sm text-muted-foreground">Verdicts by models on the same blind pairs, kept beside people's and never counted as theirs. Agrees: the person's answer, tie included. Same winner: of pairs where both picked one. Kappa: agreement beyond chance (1 perfect, 0 chance).</p>
+      <DataTable caption="Model judges against people" columns={cols} rows={Object.entries(judges).map(([name, j]) => ({ ...j, name }))} rowKey={r => r.name} />
+    </section>
+  )
+}
+
+/** What the model judges said about the pair a person just judged (shown after, so they cannot sway the person). */
+function PairVerdicts({ name, last }: { name: string; last: { item_id: string; x: string; y: string } }) {
+  const load = useLoad({ queryKey: ['verdicts', name, last.item_id], queryFn: () => evalsApi.verdicts(name, last.item_id), refetchInterval: 4000 })
+  if (load.status !== 'ready') return null
+  const mine = load.data.judgments.filter(v => v.judge && [v.a, v.b].includes(last.x) && [v.a, v.b].includes(last.y))
+  if (!mine.length) return null
+  return <ul className="mt-2 grid gap-1 type-body-sm">{mine.map(v => <li key={`${v.rater}-${v.at}`}><span className="font-mono">{v.rater}</span>: {v.winner === 'tie' ? 'about the same' : `chose ${v.winner}`}{v.detail?.consistent === false ? ' (changed its mind when X and Y were swapped)' : ''}{v.note ? `. ${v.note}` : ''}</li>)}</ul>
 }
 
 /** The picture of an image job's output, if it is one. */
@@ -129,6 +161,7 @@ function LastPair({ name, last }: { name: string; last: { item_id: string; x: st
   return (
     <details className="rounded-surface border border-border p-3">
       <summary className="type-body-sm cursor-pointer">{`Last pair (${last.item_id}): X was ${last.x}, Y was ${last.y}; ${last.winner === 'tie' ? 'about the same' : `you chose ${last.winner}`}`}</summary>
+      <PairVerdicts name={name} last={last} />
       <DataView state={load} isEmpty={d => d.items.length === 0} skeleton={<Skeleton className="h-24 w-full" />} empty={null}>
         {d => <div className="mt-2 grid gap-4 md:grid-cols-2">{[last.x, last.y].map(c => <FullOutput key={c} name={c} out={d.items[0].outputs[c] ?? null} />)}</div>}
       </DataView>
