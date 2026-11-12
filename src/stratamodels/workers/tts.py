@@ -219,6 +219,12 @@ def run(p):
         if wpm is not None
         else None
     )
+    if (
+        target is not None and target <= 0.05
+    ):  # a line with nothing to say at a pace (no syllables), or a length all edges
+        raise ParamError(
+            f"nothing to fit: the target speech length is {target:.2f} s (fit_s must be more than 2 x edge, and wpm needs words)"
+        )
     t0 = time.perf_counter()
 
     def once(params, s):
@@ -255,6 +261,13 @@ def run(p):
     elif not native and abs(speed - 1.0) > 1e-3:
         stretch(path, speed)
     y, sr2 = sf.read(path, dtype="float32")
+    if y.ndim > 1:
+        y = y.mean(axis=1)
+    if (
+        max_pause is not None and len(y) and (factor < 1.0 or (target is None and not native and speed < 1.0))
+    ):  # a slowdown lengthened the pauses again
+        y = pacing.tighten(y, sr2, max_pause, edge)
+        sf.write(path, y, sr2, subtype="PCM_16")
     m = pacing.measure(text, y, sr2)
     dur = len(y) / sr2
     res = dict(
