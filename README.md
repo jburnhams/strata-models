@@ -41,6 +41,8 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `faces` | insightface `buffalo_l` (SCRFD, ArcFace, 3D landmarks) | 0.6 GB, 0.05 s a photo once loaded |
 | `transcribe` | Whisper large-v3-turbo (faster-whisper, float16, in its own CUDA 12 worker venv) | 2.0 GB, 0.4 s for 11 s of speech |
 | `transcribe-fast` | Whisper small | 0.6 GB, 0.3 s for 11 s |
+| `denoise-audio` | DeepFilterNet3 capped at 18 dB with strata-360's speech finish and -14 LUFS (its `audio_clean`), in its own worker venv; MossFormer2, MossFormerGAN, FRCRN, Resemble Enhance, noisereduce and afftdn as eval candidates | not yet measured here |
+| `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
 The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.
 

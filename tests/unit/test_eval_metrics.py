@@ -211,3 +211,57 @@ def test_description_metrics_against_a_reference():
         M.field_agreement(ref, dict(people=dict(count="x", children="y")))["people"] is False
         and M._main_light({}) is None
     )
+
+
+def test_audio_quality_metrics_read_the_score_pass():
+    out = dict(
+        path="/o.wav",
+        removed_db=7.5,
+        scored=dict(
+            result=dict(
+                dnsmos=dict(sig=3.4, bak=4.0, ovrl=3.1),
+                squim=dict(stoi=0.9, pesq=2.5, si_sdr=12.0),
+                intrusive=dict(si_sdr=9.0, pesq=2.2, estoi=0.8),
+            )
+        ),
+    )
+    got = {
+        n: M.METRICS[n].score({}, out, None)
+        for n in (
+            "dnsmos_ovrl",
+            "dnsmos_sig",
+            "dnsmos_bak",
+            "squim_stoi",
+            "squim_pesq",
+            "squim_si_sdr",
+            "si_sdr",
+            "pesq",
+            "estoi",
+            "removed_db",
+        )
+    }
+    assert got == dict(
+        dnsmos_ovrl=3.1,
+        dnsmos_sig=3.4,
+        dnsmos_bak=4.0,
+        squim_stoi=0.9,
+        squim_pesq=2.5,
+        squim_si_sdr=12.0,
+        si_sdr=9.0,
+        pesq=2.2,
+        estoi=0.8,
+        removed_db=7.5,
+    )
+    assert all(M.METRICS[n].better == "higher" for n in got)
+    # not read yet, a failed reading, a measure that did not apply (no reference), a failed job: no number, never a zero
+    assert M.METRICS["pesq"].score({}, dict(path="/o.wav", scored=dict(result=dict(dnsmos={}))), None) is None
+    assert M.METRICS["dnsmos_ovrl"].score({}, dict(path="/o.wav", scored=dict(error="boom")), None) is None
+    assert M.METRICS["dnsmos_ovrl"].score({}, dict(path="/o.wav"), None) is None
+    assert (
+        M.METRICS["dnsmos_ovrl"].score({}, out, "failed") is None
+        and M.METRICS["removed_db"].score({}, out, "failed") is None
+    )
+    assert (
+        M.reading("text", "dnsmos", "ovrl") is None
+        and M.reading(dict(scored=dict(result=dict(dnsmos=dict(ovrl=float("nan"))))), "dnsmos", "ovrl") is None
+    )

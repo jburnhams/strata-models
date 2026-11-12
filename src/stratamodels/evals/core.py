@@ -403,6 +403,10 @@ def parse_spec(d, source=""):
         )
         if s.score and not s.score.get("role"):
             raise ValueError("[score] names no role")
+        if not isinstance(s.score.get("with") or {}, dict) or not all(
+            isinstance(v, str) for v in (s.score.get("with") or {}).values()
+        ):
+            raise ValueError('[score] with is a table of param = "item.field" (e.g. reference = "reference.audio")')
     except (KeyError, TypeError, ValueError, IndexError) as e:
         raise EvalError(f"{source or 'spec'}: {e!r}")
     unknown = [m for m in s.metrics + [s.primary] + list(s.guards) if m not in M.METRICS]
@@ -811,7 +815,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     out = dict(ran=ran, cached=total - ran, failed=failed)
     if spec.score:
         out["scored"] = score_outputs(
-            spec, engine, executor, [result_key(spec, c, it) for c in cands for it in items], log, batch
+            spec, engine, executor, {result_key(spec, c, it): it for c in cands for it in items}, log, batch
         )
     return out
 
@@ -835,13 +839,35 @@ def readings(output):
     return out
 
 
+def item_field(item, dotted):
+    """A field of an item by its dotted path ("reference.audio", "input.text"), or None."""
+    v = item
+    for part in str(dotted).split("."):
+        v = v.get(part) if isinstance(v, dict) else None
+    return v
+
+
+def score_params(spec, output, item):
+    """The scoring job's params: the [score] params, path = the output's file, and each `with` param taken from the item (e.g. with =
+    {reference = "reference.audio"}: the clean recording a noisy item was made from, for measures that compare with it). A param whose field
+    the item lacks is left out."""
+    p = {**(spec.score.get("params") or {}), "path": output["path"]}
+    for k, dotted in (spec.score.get("with") or {}).items():
+        v = item_field(item or {}, dotted)
+        if v is not None:
+            p[k] = v
+    return p
+
+
 def score_outputs(spec, engine, executor, keys, log=print, batch=32):
     """The [score] pass: every stored output with a file (`path`) and no reading by the current scoring config gets one: a job on the scoring
-    role with path = the output's file, whose result is kept in the output under `scores` = {score key: {result} or {error}}. Returns how many ran."""
+    role with path = the output's file (score_params), whose result is kept in the output under `scores` = {score key: {result} or {error}}.
+    `keys`: result keys, or {result key: item} when the [score] takes fields from the item (`with`). Returns how many ran."""
     sk = score_key(spec)
+    items = keys if isinstance(keys, dict) else {}
     rows = [
         r
-        for r in cached(engine, keys).values()
+        for r in cached(engine, list(keys)).values()
         if r.output and isinstance(r.output.get("path"), str) and sk not in readings(r.output)
     ]
     if rows:
@@ -851,7 +877,7 @@ def score_outputs(spec, engine, executor, keys, log=print, batch=32):
         ids = [
             executor.submit(
                 spec.score["role"],
-                {**(spec.score.get("params") or {}), "path": r.output["path"]},
+                score_params(spec, r.output, items.get(r.key)),
                 spec.score.get("model"),
                 None,
             )

@@ -206,8 +206,33 @@ def test_run_parses_the_answer_and_measures_vram(setup):
     assert llama.run(h, dict(prompt="x", schema={"type": "object"}), probe=lambda: None, post=bad)["json"] is None
     assert "json" not in llama.run(h, dict(prompt="x"), probe=lambda: None, post=bad)
     h["vision"] = False
-    with pytest.raises(RunError, match="no vision projector"):
+    with pytest.raises(RunError, match="no projector"):
         llama.run(h, dict(prompt="x", image=str(img)), post=post)
+
+
+def test_recordings_go_as_input_audio_after_the_pictures(setup):
+    tmp, img = setup
+    wav, mp3 = tmp / "a.wav", tmp / "b.mp3"
+    wav.write_bytes(b"RIFFwav")
+    mp3.write_bytes(b"ID3mp3")
+    body, _ = llama.request(dict(prompt="which is cleaner?", image=str(img), audios=[str(wav), str(mp3)]))
+    parts = body["messages"][0]["content"]
+    assert [p["type"] for p in parts] == ["image_url", "input_audio", "input_audio", "text"]
+    assert parts[1]["input_audio"]["format"] == "wav" and parts[2]["input_audio"]["format"] == "mp3"
+    assert llama.request(dict(prompt="x", audio=str(wav)))[0]["messages"][0]["content"][0]["type"] == "input_audio"
+    flac = tmp / "c.flac"
+    flac.write_bytes(b"fLaC")
+    for p, msg in [
+        (dict(prompt="x", audio=str(flac)), "WAV or MP3"),
+        (dict(prompt="x", audio="/no/such.wav"), "no such recording"),
+        (dict(prompt="x", audios=str(wav)), "list of paths"),
+    ]:
+        with pytest.raises(RunError, match=msg):
+            llama.request(p)
+    h = llama.load(model(), str(tmp), popen=FakeProc)
+    h["vision"] = False
+    with pytest.raises(RunError, match="hear recordings"):
+        llama.run(h, dict(prompt="x", audio=str(wav)), post=lambda url, body: {})
 
 
 def test_post_reports_a_refusal(monkeypatch):

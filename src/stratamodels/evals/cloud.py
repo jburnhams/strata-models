@@ -34,6 +34,9 @@ class CallError(RuntimeError):
     """This item failed (bad answer, CLI error): log it and go on."""
 
 
+AUDIO_EXT = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+
+
 def prompt_of(system, text, names, schema, attached=False):
     """One prompt for an agent CLI: they take no separate system message. `names`: the pictures, attached to the message (codex -i) or saved
     in the agent's working directory (agy). The agent is told not to use tools beyond looking at the pictures."""
@@ -43,9 +46,17 @@ def prompt_of(system, text, names, schema, attached=False):
     if names:
         many = len(names) > 1
         where = "attached" if attached else "in your working directory: " + ", ".join(names)
-        parts.append(
-            f"The picture{'s are' if many else ' is'} {where}. Look at {'them' if many else 'it'}; do not run commands or edit files."
-        )
+        if all(
+            n.lower().endswith(AUDIO_EXT) for n in names
+        ):  # recordings (an audio judge): agy hears them through its file viewer
+            parts.append(
+                f"The recording{'s are' if many else ' is'} {where}. Open {'each' if many else 'it'} with your file viewing tool and listen; "
+                "do not run shell commands or edit files."
+            )
+        else:
+            parts.append(
+                f"The picture{'s are' if many else ' is'} {where}. Look at {'them' if many else 'it'}; do not run commands or edit files."
+            )
     parts.append(text.strip())
     if schema:
         parts.append("Answer with the JSON object only: no prose, no code fence.")
@@ -158,10 +169,12 @@ CLIS = {"codex": call_codex, "agy": call_agy}
 
 
 def stage_images(images, d):
-    """Copy the pictures into the agent's workspace as img0.jpg, img1.png, ... (agy only reads its workspace)."""
+    """Copy the pictures (or recordings) into the agent's workspace as img0.jpg, img1.png, ... or rec1.wav, rec2.wav, ... (agy only reads its
+    workspace). Recordings are numbered from 1, as the judge's prompt names them."""
     names = []
     for n, i in enumerate(images):
-        name = f"img{n}{os.path.splitext(i)[1].lower() or '.jpg'}"
+        ext = os.path.splitext(i)[1].lower()
+        name = f"rec{n + 1}{ext}" if ext in AUDIO_EXT else f"img{n}{ext or '.jpg'}"
         shutil.copyfile(i, os.path.join(d, name))
         names.append(name)
     return names

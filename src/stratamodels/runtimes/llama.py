@@ -13,6 +13,8 @@ Loading starts one llama-server on a free local port and waits for it to answer;
 
 params:
   image        path of a picture (or images: a list of paths)
+  audio        path of a WAV or MP3 recording (or audios: a list), for a model whose mmproj hears (Qwen3-Omni, Gemma 4 E4B): after the
+               pictures, in order, before the text
   prompt       the question or instruction (or preset: a prompt kept in this package, see presets/; its {context} is filled from `context`)
   context      a dict of facts about the picture (capture metadata), given to a preset prompt
   schema       a JSON schema the answer must follow (grammar-constrained); a preset brings its own. Off with schema=false.
@@ -44,6 +46,8 @@ LIVE = (
 PARAMS = {
     "image",
     "images",
+    "audio",
+    "audios",
     "prompt",
     "preset",
     "context",
@@ -181,6 +185,21 @@ def _image_part(path):
     }
 
 
+AUDIO_FORMATS = {".wav": "wav", ".mp3": "mp3"}  # what llama-server's input_audio takes
+
+
+def _audio_part(path):
+    fmt = AUDIO_FORMATS.get(os.path.splitext(str(path))[1].lower())
+    if not isinstance(path, str) or not os.path.isfile(path):
+        raise RunError(f"no such recording: {path!r}")
+    if fmt is None:
+        raise RunError(f"{path}: llama-server hears WAV or MP3 only")
+    return {
+        "type": "input_audio",
+        "input_audio": {"data": base64.b64encode(open(path, "rb").read()).decode(), "format": fmt},
+    }
+
+
 def request(params):
     """The chat request body for a job (and the schema it asked for, if any)."""
     unknown = set(params) - PARAMS
@@ -205,8 +224,16 @@ def request(params):
     imgs = params.get("images") or ([params["image"]] if params.get("image") else [])
     if not isinstance(imgs, list):
         raise RunError("images is a list of paths")
+    auds = params.get("audios") or ([params["audio"]] if params.get("audio") else [])
+    if not isinstance(auds, list):
+        raise RunError("audios is a list of paths")
     msgs = ([{"role": "system", "content": str(system)}] if system else []) + [
-        {"role": "user", "content": [_image_part(i) for i in imgs] + [{"type": "text", "text": text}]}
+        {
+            "role": "user",
+            "content": [_image_part(i) for i in imgs]
+            + [_audio_part(a) for a in auds]
+            + [{"type": "text", "text": text}],
+        }
     ]
     body = dict(
         messages=msgs,
@@ -226,11 +253,13 @@ def request(params):
 def run(handle, params, probe=gpu.query, post=None):
     body, schema = request(params)
     if any(
-        isinstance(c, dict) and c.get("type") == "image_url"
+        isinstance(c, dict) and c.get("type") in ("image_url", "input_audio")
         for m in body["messages"]  # pyright: ignore[reportGeneralTypeIssues]
         for c in (m["content"] if isinstance(m["content"], list) else [])
     ) and not handle.get("vision"):
-        raise RunError(f"model {handle['key']} has no vision projector (mmproj) in models.toml")
+        raise RunError(
+            f"model {handle['key']} has no projector (mmproj) in models.toml: it cannot see pictures or hear recordings"
+        )
     peak = [0.0]
     stop = threading.Event()
     pid = handle["proc"].pid

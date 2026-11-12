@@ -48,7 +48,10 @@ runtime.
   settle it. Judgments count only while both outputs are current (a changed model, params or dataset makes new outputs).
 - **`[score]`** names a second model that reads every output with a file (`role`, optional `model`, `params`): after a run, each output gets
   a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
-  the words are scored against the text that was to be spoken, an intelligibility guard for text to speech.
+  the words are scored against the text that was to be spoken, an intelligibility guard for text to speech. `with = {param = "item.field"}`
+  gives the scoring job fields of the output's own item: the denoise mixes send `reference = "reference.audio"`, the clean speech, so the
+  `audio-quality` role can measure SI-SDR, PESQ and STOI against it (`denoise-audio-mix`). Without a reference the same role gives DNSMOS
+  P.835 and SQUIM, learned estimates of what listeners would say (`dnsmos_*`, `squim_*` metrics).
 
 ## Model judges: a model's verdict beside a person's
 People's blind judgments are slow to gather, so a spec can name **model judges** (`[[judges]]`, see `src/stratamodels/evals/judges.py`) that
@@ -59,7 +62,10 @@ beyond chance) and how often it gave the same answer with X and Y swapped. A jud
 more later (pairs nobody has time for, or a first pass before people).
 - **Kinds**, by what a judge must read: `text` (transcripts, captions, JSON) and `vision` (photo descriptions, generated pictures: it sees the
   item's pictures and the candidates'). Each kind is a registry role (`judge-text`, `judge-vision`) with its chosen model, picked like any model:
-  by an eval, here on agreement with people. A judge may name another model serving the role to trial it. Voices have no judge kind yet.
+  by an eval, here on agreement with people. A judge may name another model serving the role to trial it. `audio` (`judge-audio`: cleaned
+  sound, speech) hears the item's own recording, then X's and Y's, each as 16 kHz mono WAV (made once into `<data>/judges/audio/`): a local
+  model whose projector hears (Qwen3-Omni-30B-A3B, Gemma 4 E4B, through llama-server's `input_audio`) or Gemini through agy, which opens the
+  files with its file viewer (codex has no audio). 16 kHz is what these models hear anyway, so hiss above 8 kHz is for people to judge.
 - **Cloud judges** (`cli = "codex" | "agy"`, `model` the CLI's slug) call the vendor's own CLI on the plan, never its sign-in token
   elsewhere. Give a dear one a `limit`, like a sampled candidate. A judge that is also a candidate tends to prefer its own answers.
 - Which pairs: `pairs = "judged"` (default; the ones agreement is measured on) or `"all"`; `auto = true` judges each pair right after a person

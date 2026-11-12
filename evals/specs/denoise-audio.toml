@@ -1,0 +1,116 @@
+name = "denoise-audio"
+question = "Which denoiser and settings make real recordings best to listen to: race speech in wind and crowds, and an old tape's soundtrack?"
+role = "denoise-audio"
+dataset = "denoise-real"         # scripts/evals/denoise_audio.py real: strata-360 race speech (Legends) and windows of a digitised tape's soundtrack
+metrics = ["judged", "dnsmos_ovrl", "dnsmos_sig", "dnsmos_bak", "squim_stoi", "squim_pesq", "removed_db", "rtf", "failed"]
+judge = true                     # no clean reference exists: people decide, blind, every pair against the baseline (the original is heard first)
+
+[decision]
+primary = "judged"               # share of blind head-to-head pairs won against strata-360's audio_clean (a tie is half)
+baseline = "strata360"
+min_effect = 0.1                 # win at least 60 % of pairs (the interval clear of 50 %) to be worth a change
+# No more failures; speech no more than 15 % more distorted by DNSMOS's reckoning (a denoiser that eats words); at most 25x the run time.
+guards = { failed = 1.0, dnsmos_sig = 1.15, rtf = 25.0 }
+
+# Programmatic scores: every output read by the audio-quality role (DNSMOS P.835, SQUIM), on the CPU. They favour removing everything (bak),
+# which is not the goal here: strata-360 caps the denoiser so the crowd and the place stay. They are context and a guard, people decide.
+[score]
+role = "audio-quality"
+params = { metrics = ["dnsmos", "squim"] }
+
+# Model judges that listen (kind audio): they hear the original, then X and Y, as 16 kHz WAV (hiss above 8 kHz is lost on them). Measured
+# against people's verdicts before they are trusted with more (`judges` in the analysis).
+[[judges]]
+name = "qwen3-omni"
+kind = "audio"                   # role judge-audio: Qwen3-Omni-30B-A3B for now
+pairs = "all"                    # every pair the Judge tab would offer: a first pass ahead of people, agreement measured where both judged
+criteria = "The recordings will be heard in a home film. Better: the speech is clear and natural (no robotic, watery, lisping or muffled artefacts, no words or syllables lost, the voice still sounds like the same person); steady noise (hiss, hum, buzz, wind, rumble) is gone or much reduced; the sense of place (a crowd, a room, music, birds) is kept rather than stripped to silence. Artefacts in the speech count more than leftover noise. Recording 1 is the original."
+
+[[judges]]
+name = "gemma-e4b"
+kind = "audio"
+model = "gemma-4-e4b"            # a small one, to trial against Qwen3-Omni
+pairs = "all"
+criteria = "The recordings will be heard in a home film. Better: the speech is clear and natural (no robotic, watery, lisping or muffled artefacts, no words or syllables lost, the voice still sounds like the same person); steady noise (hiss, hum, buzz, wind, rumble) is gone or much reduced; the sense of place (a crowd, a room, music, birds) is kept rather than stripped to silence. Artefacts in the speech count more than leftover noise. Recording 1 is the original."
+
+[[judges]]
+name = "gemini-flash"
+kind = "audio"
+cli = "agy"                      # Google AI Pro via Antigravity: Gemini hears the files through its file viewer
+model = "gemini-3.8-flash-low"
+pairs = "all"
+limit = 40                       # per run; asked both ways round, so ~80 calls
+criteria = "The recordings will be heard in a home film. Better: the speech is clear and natural (no robotic, watery, lisping or muffled artefacts, no words or syllables lost, the voice still sounds like the same person); steady noise (hiss, hum, buzz, wind, rumble) is gone or much reduced; the sense of place (a crowd, a room, music, birds) is kept rather than stripped to silence. Artefacts in the speech count more than leftover noise. Recording 1 is the original."
+
+# Every candidate runs the same chain (workers/audio.py): high-pass, denoiser, optional cap, optional finish, -14 LUFS. Levels match, so
+# nobody wins by being louder.
+
+[[candidates]]
+name = "strata360"
+model = "deepfilternet3"
+params = { highpass = 80, atten_lim_db = 18, finish = "strata360", lufs = -14 }
+note = "strata-360's audio_clean today: DeepFilterNet3 capped at 18 dB, speech EQ and speechnorm, -14 LUFS"
+
+[[candidates]]
+name = "original"
+model = "audio-passthrough"
+params = { highpass = 0, lufs = -14 }
+note = "no denoising, only levelled: is any of this better than nothing?"
+
+[[candidates]]
+name = "dfn3-uncapped"
+model = "deepfilternet3"
+params = { highpass = 80, finish = "strata360", lufs = -14 }
+note = "DeepFilterNet3 taking out all it can"
+
+[[candidates]]
+name = "dfn3-no-finish"
+model = "deepfilternet3"
+params = { highpass = 80, atten_lim_db = 18, lufs = -14 }
+note = "the baseline without the speech EQ and speechnorm: what the finish adds"
+
+[[candidates]]
+name = "mossformer2-capped"
+model = "mossformer2-se-48k"
+params = { highpass = 80, atten_lim_db = 18, finish = "strata360", lufs = -14 }
+note = "strata-360's stand-in on Windows; DNSMOS 2.94 against DeepFilterNet's 2.47 there (docs/progress/2026-10-windows-gpu.md), uncapped"
+
+[[candidates]]
+name = "mossformer2"
+model = "mossformer2-se-48k"
+params = { highpass = 80, finish = "strata360", lufs = -14 }
+
+[[candidates]]
+name = "mossformergan-16k"
+model = "mossformergan-se-16k"
+params = { highpass = 80, finish = "strata360", lufs = -14 }
+note = "16 kHz: nothing above 8 kHz comes back"
+
+[[candidates]]
+name = "frcrn-16k"
+model = "frcrn-se-16k"
+params = { highpass = 80, finish = "strata360", lufs = -14 }
+note = "16 kHz: nothing above 8 kHz comes back"
+
+[[candidates]]
+name = "resemble-denoise"
+model = "resemble-enhance"
+params = { highpass = 80, mode = "denoise", finish = "strata360", lufs = -14 }
+
+[[candidates]]
+name = "resemble-enhance"
+model = "resemble-enhance"
+params = { highpass = 80, mode = "enhance", lambd = 0.9, tau = 0.5, finish = "strata360", lufs = -14 }
+note = "generative: also restores bandwidth; reported to change voices"
+
+[[candidates]]
+name = "noisereduce"
+model = "noisereduce"
+params = { highpass = 80, stationary = true, prop_decrease = 0.9, finish = "strata360", lufs = -14 }
+note = "classical spectral gating (Audacity's method): steady hiss and hum, not wind"
+
+[[candidates]]
+name = "afftdn"
+model = "afftdn"
+params = { highpass = 80, nr = 18, nf = -40, finish = "strata360", lufs = -14 }
+note = "ffmpeg's adaptive FFT denoiser, strata-360's old speech chain settings"

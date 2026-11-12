@@ -4,14 +4,16 @@ its verdicts are kept beside theirs, so how far each judge agrees with people ca
 Judges come in kinds, by what they must read, and each kind is a registry role with its own chosen model (models.toml), as `transcribe` has:
   text     judge-text: transcripts, captions, JSON answers; sees no pictures
   vision   judge-vision: photo descriptions, generated pictures; sees the item's pictures and pictures the candidates made
-(No audio kind yet: no model here can listen to two voices and compare them, so voices stay with people.) Which model a kind uses is decided
-like any model choice: by an eval, here on agreement with people (the `judges` part of the analysis).
+  audio    judge-audio: recordings (cleaned sound, speech): hears the item's own recording, then X's and Y's, each as 16 kHz mono WAV (what
+           the models hear anyway: hiss above 8 kHz is lost on them, people judge that); a local model whose mmproj hears (Qwen3-Omni,
+           Gemma 4 E4B), or Gemini through agy (codex has no audio)
+Which model a kind uses is decided like any model choice: by an eval, here on agreement with people (the `judges` part of the analysis).
 
 A spec names its judges in `[[judges]]`:
 
     [[judges]]
     name = "vision"                   # how it appears beside the people (unique in the spec)
-    kind = "vision"                   # text | vision (default vision): a local judge runs on role judge-<kind>, through the queue like any job
+    kind = "vision"                   # text | vision | audio (default vision): a local judge runs on role judge-<kind>, through the queue like any job
     model = "gemma-4-12b-vl"          # optional for a local judge: a model serving that role, to trial it; default the role's chosen model
     params = { think = false }        # added to the judging job (temperature defaults to 0)
 
@@ -47,7 +49,7 @@ from stratamodels.evals import core as C
 from stratamodels.evals import stats as S
 
 PROMPT_VERSION = 1  # bump when the prompt below changes: every judge's verdicts are then a new judge's
-KINDS = ("text", "vision")
+KINDS = ("text", "vision", "audio")
 JUDGE_KEYS = {
     "name",
     "kind",
@@ -65,6 +67,7 @@ JUDGE_KEYS = {
     "note",
 }
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+AUDIO_EXT = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus")
 HIDDEN = {  # output fields a judge never sees: they would tell the candidates apart, or say nothing about quality
     "model",
     "pipeline",
@@ -107,9 +110,9 @@ def parse_judge(d):
         raise ValueError(f"judge {d['name']!r}: a cloud judge names its model (the CLI's model slug)")
     kind = str(d.get("kind") or "vision")
     if kind not in KINDS:
-        raise ValueError(
-            f"judge {d['name']!r}: kind is {' or '.join(KINDS)} (voices have no judge model yet: they stay with people)"
-        )
+        raise ValueError(f"judge {d['name']!r}: kind is {', '.join(KINDS[:-1])} or {KINDS[-1]}")
+    if kind == "audio" and d.get("cli") == "codex":
+        raise ValueError(f"judge {d['name']!r}: codex cannot hear recordings (an audio judge in the cloud is agy)")
     extra = set(d) - JUDGE_KEYS
     if extra:
         raise ValueError(
@@ -180,6 +183,28 @@ def _is_image(p):
     return isinstance(p, str) and p.lower().endswith(IMAGE_EXT)
 
 
+def _is_audio(p):
+    return isinstance(p, str) and p.lower().endswith(AUDIO_EXT)
+
+
+def _wav16(path, clip=None, cut=None):
+    """A recording (or its clip) as 16 kHz mono WAV, made once into <data>/judges/audio/ (keyed by the file, its size and time, and the clip):
+    every audio judge hears the same format, local or cloud."""
+    import os
+
+    from stratamodels import settings
+    from stratamodels.evals import cloud
+
+    st = os.stat(path)
+    key = C._h(C._canon(dict(p=os.path.abspath(path), s=st.st_size, m=int(st.st_mtime), c=clip)), 16)
+    out = os.path.join(settings.data_dir(), "judges", "audio", f"{key}.wav")
+    if not os.path.isfile(out):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        (cut or cloud.cut_audio)(path, clip, out + ".part.wav")
+        os.replace(out + ".part.wav", out)
+    return out
+
+
 def _item_images(item):
     inp = item.get("input") or {}
     imgs = list(inp.get("images") or []) + ([inp["image"]] if inp.get("image") else [])
@@ -203,14 +228,20 @@ def shown(output):
     return json.dumps({k: v for k, v in o.items() if k not in HIDDEN}, ensure_ascii=False, indent=1)
 
 
-def prompt(spec, j, item, x, y):
-    """(system, text, images) for one verdict: the task, the item's input (and reference, if it has one), answers X and Y, and the pictures
-    (the item's, then X's and Y's when the answers are pictures)."""
-    inp = {k: v for k, v in (item.get("input") or {}).items() if k not in ("path", "image", "images")}
-    vision = j["kind"] == "vision"
+def prompt(spec, j, item, x, y, cut=None):
+    """(system, text, files) for one verdict: the task, the item's input (and reference, if it has one), answers X and Y, and the files: for
+    a vision judge the pictures (the item's, then X's and Y's when the answers are pictures), for an audio judge the recordings (the item's,
+    then X's and Y's, as 16 kHz WAV)."""
+    raw = item.get("input") or {}
+    vision, audio = j["kind"] == "vision", j["kind"] == "audio"
+    inp = {k: v for k, v in raw.items() if k not in ("path", "image", "images", *(("clip",) if audio else ()))}
     imgs = _item_images(item) if vision else []
+    if audio and _is_audio(raw.get("path")):
+        imgs = [_wav16(str(raw["path"]), raw.get("clip"), cut)]
     parts = [f"Task: {spec.question}", f"Criteria: {j['criteria']}"]
-    if imgs:
+    if imgs and audio:
+        parts.append("Recording 1 is the input (the original recording). Listen to every recording before you judge.")
+    elif imgs:
         parts.append(f"The input picture{'s are' if len(imgs) > 1 else ' is'} attached first ({len(imgs)}).")
     if inp:
         parts.append("Input:\n" + json.dumps(inp, ensure_ascii=False, indent=1))
@@ -223,6 +254,9 @@ def prompt(spec, j, item, x, y):
         if vision and _is_image(p):
             imgs.append(str(p))
             parts.append(f"Answer {label}: the picture attached as number {len(imgs)}.")
+        elif audio and _is_audio(p):
+            imgs.append(_wav16(str(p), None, cut))
+            parts.append(f"Answer {label}: recording {len(imgs)}.")
         else:
             parts.append(f"Answer {label}:\n{shown(o)}")
     parts.append('Which answer is better? Reply with JSON: {"reason": "...", "winner": "X" | "Y" | "tie"}.')
@@ -259,7 +293,7 @@ class QueueAsker:
             "schema": schema,
         }
         if images:
-            params["images"] = images
+            params["audios" if j["kind"] == "audio" else "images"] = images
         r = self.ex.wait(self.ex.submit(j["role"], params, j.get("resolved") or j["model"], None))
         if r["status"] != "done":
             raise JudgeError(f"judging job {r['status']}: {r.get('error') or ''}".strip())

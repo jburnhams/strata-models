@@ -200,3 +200,44 @@ def test_judged_head_to_head_counts():
     v = C.judged_vs(j, "a", "b")
     assert v["n"] == 2 and v["diff"] == pytest.approx(0.25) and v["improves"] is None and v["p"] == 1.0
     assert C.judged_vs([], "a", "b")["improves"] is None and C.judged_share([], "a")["n"] == 0
+
+
+def test_score_takes_params_from_the_item(tts, scheduler):
+    """[score] with = {param = "item.field"}: the reading of an output gets a field of its own item (a clean reference recording, here the
+    fake listener's `drop`); a field the item lacks is left out, and a with that is not a table of fields is refused."""
+    assert C.item_field(dict(reference=dict(audio="/c.flac")), "reference.audio") == "/c.flac"
+    assert C.item_field(dict(reference="x"), "reference.audio") is None and C.item_field({}, "a.b") is None
+    sp = dict(tts.score, **{"with": dict(drop="tags.drop", reference="reference.audio")})
+    tts.score = sp
+    assert C.score_params(tts, dict(path="/o.wav"), dict(tags=dict(drop=2))) == dict(drop=2, path="/o.wav")
+    assert C.score_params(tts, dict(path="/o.wav"), None) == dict(drop=0, path="/o.wav")
+
+    class Spy(C.SchedulerExecutor):
+        sent = []
+
+        def submit(self, role, params, model, options):
+            if role == "other":
+                Spy.sent.append(params)
+            return super().submit(role, params, model, options)
+
+    stop = scheduler.start()
+    try:
+        r = C.run(tts, scheduler.store.engine, Spy(scheduler), limit=3, log=lambda m: None)
+        assert r["scored"] == 9 and all(
+            p["drop"] == 0 and "reference" not in p for p in Spy.sent
+        )  # the items have no tags.drop
+    finally:
+        stop.set()
+    for bad in ({"with": "reference.audio"}, {"with": dict(reference=3)}):
+        with pytest.raises(C.EvalError, match="with is a table"):
+            C.parse_spec(
+                dict(
+                    name="x",
+                    question="q",
+                    role="r",
+                    dataset="d",
+                    metrics=["wer"],
+                    score=dict(role="o", **bad),
+                    candidates=[dict(name="a", model="m")],
+                )
+            )

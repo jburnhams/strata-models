@@ -44,3 +44,19 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
   end. `wpm` or `fit_s` sets a target: Kokoro re-speaks at the speed that lands on it, and sampled models make `tries` takes and keep the
   nearest. A pitch-keeping stretch (0.75 to 1.35x) then closes the rest, and `fit` says when it could not.
 - Eval speak-pace (primary pace_spread, baseline unpaced kokoro-lewis) asks whether 160 wpm evens the lines without hurting them.
+
+## 2026-11-12: noise reduction from strata-360 (role `denoise-audio`)
+- What strata-360 does today (`audio/dsp.py clean_for_playback`, stage `audio_clean`): high-pass 80 Hz, DeepFilterNet3 with
+  `atten_lim_db=18` (it takes out at most 18 dB, so the crowd and the place stay and artefacts stay small), EQ -2 dB at 250 Hz and +2 dB at
+  3 kHz, ffmpeg speechnorm, then -14 LUFS with alimiter. Recognition uses the raw audio: enhancement raised Whisper's word error rate there
+  (0.16 to 0.19-0.22 with small), so this role is for listening, not for transcribing. On Windows DeepFilterNet needed a Rust build and
+  MossFormer2_SE_48K stood in with the same cap.
+- strata-360's own comparison on the Windows GPU (76 English segments, DNSMOS overall): original 2.10, its capped DeepFilterNet 2.47,
+  MossFormer2 2.94, MossFormerGAN 3.04, FRCRN 3.02; but the others are uncapped and remove the place's sound, which DNSMOS rewards (bak).
+  That is why `denoise-audio` is decided by people with the original heard first, and DNSMOS's speech score (sig) is only a guard.
+- Other options looked at (2026-11): DPDFNet (streaming DeepFilterNet with a dual-path RNN, Dec 2025), GTCRN (tiny), MP-SENet, MaTSE,
+  DriftSE: no head-to-head on real recordings found; worth adding as candidates when one is packaged. Generative restorers (Resemble
+  Enhance's enhance mode) can change a voice: in the eval, but judged with that in mind.
+- Model judges that listen: llama.cpp hears through the mmproj of Qwen3-Omni-30B-A3B (ggml-org GGUF, 18.6 GB Q4_K_M, experts partly on the
+  CPU with `--fit`) and Gemma 4 E4B; Gemini through agy. All of them hear 16 kHz, so tape hiss above 8 kHz is for people.
+

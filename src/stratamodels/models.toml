@@ -472,3 +472,133 @@ licence = "MIT (CLIP weights: LAION); the head is trained here from the apps' ow
 source = "https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
 used_by = ["strata-stills", "bright-horizons"]
 options = { head = "head-v1.npz" }
+
+# ---- recorded sound: noise out, and how good the result sounds ---------------------------------------------------------------------------
+# Moved from strata-360 (audio/dsp.py clean_for_playback, its audio_clean stage). One worker script (stratamodels/workers/audio.py), one venv
+# per model family: DeepFilterNet needs its own torch and a patch for torchaudio 2.1+, ClearerVoice pins numpy<2, Resemble Enhance torch 2.1.
+# Make them with scripts/setup_worker_venv.sh dfn | clearvoice | resemble | audio. Every engine runs the same chain (high-pass, denoise, an
+# optional cap on how much it takes out, an optional speech finish, loudness to -14 LUFS), so candidates differ only where they should.
+[roles.denoise-audio]
+description = "Take noise out of recorded sound (wind, hiss, hum, rumble) and keep the speech clear, for listening and for films"
+model = "deepfilternet3"                     # strata-360's audio_clean today (capped at 18 dB so the crowd and the place stay); eval denoise-audio decides
+
+[models.deepfilternet3]
+runtime = "venv-worker"
+name = "DeepFilterNet3"
+roles = ["denoise-audio"]
+vram_gb = 0.5
+licence = "MIT or Apache-2.0"
+source = "https://github.com/Rikorose/DeepFilterNet"
+used_by = ["strata-360"]
+# strata-360's clean_for_playback: high-pass 80 Hz, DeepFilterNet3 capped at 18 dB, speech EQ and speechnorm, -14 LUFS.
+options = { worker = "audio", venv = "dfn", engine = "dfn3", defaults = { highpass = 80, atten_lim_db = 18, finish = "strata360", lufs = -14 } }
+
+[models.mossformer2-se-48k]
+runtime = "venv-worker"
+name = "MossFormer2_SE_48K"
+roles = ["denoise-audio"]
+vram_gb = 1.5
+licence = "Apache-2.0"
+source = "https://github.com/modelscope/ClearerVoice-Studio"
+used_by = ["strata-360"]                     # its stand-in for DeepFilterNet on Windows, with the same 18 dB cap
+options = { worker = "audio", venv = "clearvoice", engine = "clearvoice" }
+
+[models.mossformergan-se-16k]
+runtime = "venv-worker"
+name = "MossFormerGAN_SE_16K"
+roles = ["denoise-audio"]
+vram_gb = 1.5
+licence = "Apache-2.0"
+source = "https://github.com/modelscope/ClearerVoice-Studio"
+used_by = []
+options = { worker = "audio", venv = "clearvoice", engine = "clearvoice" }
+
+[models.frcrn-se-16k]
+runtime = "venv-worker"
+name = "FRCRN_SE_16K"
+roles = ["denoise-audio"]
+vram_gb = 1.0
+licence = "Apache-2.0"
+source = "https://github.com/modelscope/ClearerVoice-Studio"
+used_by = []
+options = { worker = "audio", venv = "clearvoice", engine = "clearvoice" }
+
+[models.resemble-enhance]
+runtime = "venv-worker"
+name = "Resemble Enhance"
+roles = ["denoise-audio"]
+vram_gb = 2.5
+licence = "MIT"
+source = "https://github.com/resemble-ai/resemble-enhance"
+used_by = []
+# Generative: mode = "enhance" also restores bandwidth and can invent detail (it is reported to change voices); "denoise" is its denoiser alone.
+options = { worker = "audio", venv = "resemble", engine = "resemble" }
+
+[models.audio-passthrough]
+runtime = "venv-worker"
+name = "no denoiser (the chain only)"
+roles = ["denoise-audio"]
+vram_gb = 0.0
+licence = "-"
+source = "stratamodels/workers/audio.py"
+used_by = []
+options = { worker = "audio", venv = "audio", engine = "none" }
+
+[models.afftdn]
+runtime = "venv-worker"
+name = "ffmpeg afftdn"
+roles = ["denoise-audio"]
+vram_gb = 0.0
+licence = "LGPL-2.1 (ffmpeg)"
+source = "https://ffmpeg.org/ffmpeg-filters.html#afftdn"
+used_by = ["strata-360"]                     # its speech chain for recognition (enhance_speech, no longer used there: raw audio recognises better)
+options = { worker = "audio", venv = "audio", engine = "afftdn" }
+
+[models.noisereduce]
+runtime = "venv-worker"
+name = "noisereduce (spectral gating)"
+roles = ["denoise-audio"]
+vram_gb = 0.0
+licence = "MIT"
+source = "https://github.com/timsainb/noisereduce"
+used_by = []
+options = { worker = "audio", venv = "audio", engine = "noisereduce" }
+
+[roles.audio-quality]
+description = "How good a recording of speech sounds, by models rather than people (DNSMOS, SQUIM; SI-SDR, PESQ, STOI against a clean reference): an eval's [score]"
+model = "dnsmos-squim"
+
+[models.dnsmos-squim]
+runtime = "venv-worker"
+name = "DNSMOS P.835 + torchaudio SQUIM objective"
+roles = ["audio-quality"]
+vram_gb = 0.0                                # on the CPU: the CPU lane, never waiting for the card
+licence = "DNSMOS: Microsoft DNS Challenge (see source); SQUIM: BSD-2-Clause (torchaudio)"
+source = "https://github.com/microsoft/DNS-Challenge/tree/master/DNSMOS"
+used_by = []
+options = { worker = "audio_quality", venv = "audio-quality" }
+
+[roles.judge-audio]
+description = "Judge two recordings made from the same one, blind (cleaned sound, speech): an eval's model judge of kind audio (evals.judges)"
+model = "qwen3-omni-30b-a3b"                 # first pick, not yet measured: its agreement with people's judgments decides (eval analysis, judges)
+
+[models.qwen3-omni-30b-a3b]
+runtime = "llama-server"
+name = "Qwen3-Omni-30B-A3B-Instruct Q4_K_M (MoE, experts partly on the CPU)"
+roles = ["judge-audio"]
+vram_gb = 11.0
+licence = "Apache-2.0"
+source = "https://huggingface.co/ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF"
+used_by = []
+# 18.6 GB of weights: --fit keeps as many expert layers on the card as fit (3B active parameters). Its mmproj hears and sees.
+options = { model = "ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF:Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf", mmproj = "ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF:mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf", ctx = 16384, args = ["--fit", "on"] }
+
+[models.gemma-4-e4b]
+runtime = "llama-server"
+name = "Gemma 4 E4B UD-Q4_K_XL"
+roles = ["judge-audio"]
+vram_gb = 6.5
+licence = "Gemma Terms of Use"
+source = "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF"
+used_by = []
+options = { model = "unsloth/gemma-4-E4B-it-GGUF:gemma-4-E4B-it-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-E4B-it-GGUF:mmproj-F16.gguf", ctx = 16384 }

@@ -78,7 +78,8 @@ def test_judge_defaults_kinds_and_errors():
     for bad, msg in [
         (dict(), "needs a name"),
         (dict(name="c", cli="agy"), "names its model"),
-        (dict(name="a", kind="audio"), "voices have no judge"),
+        (dict(name="a", kind="smell"), "text, vision or audio"),
+        (dict(name="a", kind="audio", cli="codex", model="gpt"), "cannot hear"),
         (dict(name="a", cli="gemini", model="m"), "codex or agy"),
         (dict(name="a", pairs="some"), "judged or all"),
         (dict(name="a", orders=3), "1 or 2"),
@@ -159,6 +160,79 @@ def test_prompt_attaches_pictures_for_vision_only():
         dict(text="b"),
     )
     assert imgs == [] and "attached" not in text
+
+
+def test_an_audio_judge_hears_the_original_then_x_and_y_as_16k_wav(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRATAMODELS_DATA", str(tmp_path / "data"))
+    src, x, y = (tmp_path / n for n in ("orig.flac", "x.wav", "y.wav"))
+    for f in (src, x, y):
+        f.write_bytes(b"sound")
+    cuts = []
+
+    def cut(path, clip, out):
+        cuts.append((path, clip))
+        open(out, "wb").write(b"wav16")
+        return out
+
+    sp = C.parse_spec(
+        dict(
+            name="x",
+            question="Which is cleaner?",
+            role="r",
+            dataset="d",
+            metrics=["wer"],
+            candidates=[dict(name="a", model="m")],
+        )
+    )
+    j = J.parse_judge(dict(name="ear", kind="audio"))
+    assert (
+        j["role"] == "judge-audio"
+        and J.parse_judge(dict(name="g", kind="audio", cli="agy", model="gemini"))["cli"] == "agy"
+    )
+    item = dict(id="i", input=dict(path=str(src), clip=[1.0, 3.0], note="tape"))
+    _, text, files = J.prompt(sp, j, item, dict(path=str(x), model="secret"), dict(path=str(y)), cut=cut)
+    assert len(files) == 3 and all(
+        f.endswith(".wav") and os.path.dirname(f).endswith(os.path.join("judges", "audio")) for f in files
+    )
+    assert cuts == [(str(src), [1.0, 3.0]), (str(x), None), (str(y), None)]
+    assert "Recording 1 is the input" in text and "Answer X: recording 2" in text and "Answer Y: recording 3" in text
+    assert '"note"' in text and "clip" not in text and "secret" not in text
+    J.prompt(sp, j, item, dict(path=str(x)), dict(path=str(y)), cut=cut)
+    assert len(cuts) == 3  # made once, kept
+    _, text, files = J.prompt(sp, j, dict(id="t", input=dict(text="hi")), dict(text="a"), dict(text="b"), cut=cut)
+    assert files == [] and "Answer X:\na" in text  # nothing to hear: read as text
+
+    class Ex:
+        def __init__(self):
+            self.sent = []
+
+        def submit(self, role, params, model, options):
+            self.sent.append((role, params))
+            return 1
+
+        def wait(self, jid):
+            return dict(status="done", result=dict(text='{"winner": "X", "reason": "r"}'))
+
+    ex = Ex()
+    J.QueueAsker(ex)(dict(j, resolved=None), "s", "t", ["/a.wav", "/b.wav"], J.SCHEMA)
+    assert (
+        ex.sent[0][0] == "judge-audio"
+        and ex.sent[0][1]["audios"] == ["/a.wav", "/b.wav"]
+        and "images" not in ex.sent[0][1]
+    )
+
+
+def test_agy_hears_recordings_through_its_file_viewer(tmp_path):
+    a, b = tmp_path / "x.wav", tmp_path / "p.jpg"
+    a.write_bytes(b"w")
+    b.write_bytes(b"j")
+    d = tmp_path / "ws"
+    d.mkdir()
+    assert cloud.stage_images([str(a), str(a)], str(d)) == ["rec1.wav", "rec2.wav"]
+    assert cloud.stage_images([str(b)], str(d)) == ["img0.jpg"]
+    p = cloud.prompt_of(None, "judge", ["rec1.wav", "rec2.wav"], None)
+    assert "recordings are in your working directory: rec1.wav, rec2.wav" in p and "file viewing tool" in p
+    assert "picture" in cloud.prompt_of(None, "judge", ["img0.jpg"], None)
 
 
 def test_verdict_reads_json_or_text_and_refuses_anything_else():

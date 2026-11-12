@@ -1,0 +1,63 @@
+name = "denoise-audio-mix"
+question = "Which denoiser recovers clean speech best from real noise (race wind and crowds, tape hiss), measured against the clean speech?"
+role = "denoise-audio"
+dataset = "denoise-mix"          # scripts/evals/denoise_audio.py mix: LibriSpeech test-clean mixed into real noise at -5, 0, 5 and 10 dB
+metrics = ["pesq", "estoi", "si_sdr", "dnsmos_ovrl", "dnsmos_sig", "dnsmos_bak", "rtf", "failed"]
+
+[decision]
+primary = "pesq"                 # perceived quality against the clean speech (wide band)
+baseline = "strata360"
+min_effect = 0.1
+guards = { failed = 1.0, estoi = 1.05 }   # intelligibility no more than 5 % below the baseline's
+# The baseline is capped on purpose (it leaves up to 18 dB of the noise: the place stays), so it loses here by design; this eval says how
+# well each model separates speech from noise, denoise-audio (people, on real recordings) says which sounds best in a film.
+
+[score]
+role = "audio-quality"
+params = { metrics = ["dnsmos", "intrusive"] }
+with = { reference = "reference.audio" }    # the clean speech of each mix, for SI-SDR, PESQ and STOI
+
+[[candidates]]
+name = "strata360"
+model = "deepfilternet3"
+params = { highpass = 80, atten_lim_db = 18, finish = "strata360", lufs = -14 }
+
+[[candidates]]
+name = "original"
+model = "audio-passthrough"
+params = { highpass = 0, lufs = -14 }
+
+[[candidates]]
+name = "dfn3-uncapped"
+model = "deepfilternet3"
+params = { highpass = 80, lufs = -14 }
+
+[[candidates]]
+name = "mossformer2"
+model = "mossformer2-se-48k"
+params = { highpass = 80, lufs = -14 }
+
+[[candidates]]
+name = "mossformergan-16k"
+model = "mossformergan-se-16k"
+params = { highpass = 80, lufs = -14 }
+
+[[candidates]]
+name = "frcrn-16k"
+model = "frcrn-se-16k"
+params = { highpass = 80, lufs = -14 }
+
+[[candidates]]
+name = "resemble-denoise"
+model = "resemble-enhance"
+params = { highpass = 80, mode = "denoise", lufs = -14 }
+
+[[candidates]]
+name = "noisereduce"
+model = "noisereduce"
+params = { highpass = 80, stationary = true, prop_decrease = 0.9, lufs = -14 }
+
+[[candidates]]
+name = "afftdn"
+model = "afftdn"
+params = { highpass = 80, nr = 18, nf = -40, lufs = -14 }
