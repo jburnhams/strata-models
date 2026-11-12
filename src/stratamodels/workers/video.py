@@ -31,14 +31,17 @@ params:
   regions        [{id, label, box: [x, y, w, h]}] in source pixels
   crop_width     width of each region's enlargement (default 960; the height keeps the box's shape)
   stills         times in seconds of the frames kept as PNG (default [1, 3, 5, 7], those past the end left out)
+  region_stills  times of the frames kept as PNG of each region's crop (default [3]): what a vision judge is shown (one moment: 3 pictures a region keep a small judge within its context)
   crf            x264 quality of the result (default 14; the regions get crf - 2)
   seed           for the diffusion engines (default 42)
   cleanup        a VHS cleanup stage before any engine (see cleanup_filters): {chroma_shift = [cb_h, cb_v, cr_h, cr_v], filters = "...",
                  model = "1x model file under <models>/spandrel/", tile = 0}; the same stage can go before every upscaler, so a cleanup eval
                  picks it once with lanczos and the winner then chains
+  quality        measure the result (default true): see quality()
   out_dir        added by the runtime
-Result: {path, width, height, fps, frames, seconds, engine, model, crops: [{id, label, box, path}], stills: [paths], enhance_s, fps_enhance,
-peak_vram_mb (the engine's processes on the card, at their highest)}."""
+Result: {path, width, height, fps, frames, seconds, engine, model, crops: [{id, label, box, path, stills}], stills: [paths], enhance_s, fps_enhance,
+peak_vram_mb (the engine's processes on the card, at their highest), quality {ssim, psnr, flicker, flicker_source, flicker_ratio,
+sharpness, luma_noise, chroma_noise}}."""
 
 import contextlib
 import json
@@ -57,6 +60,7 @@ E = {}
 from protocol import ParamError, serve  # noqa: E402  (the shared JSON-lines loop, workers/protocol.py)
 
 DEFAULTS = dict(
+    region_stills=[3],
     deinterlace="bwdif",
     field_order="tff",
     prep_size=[768, 576],
@@ -139,13 +143,20 @@ def prep_filter(p, src):
     return ",".join(f)
 
 
-CLEANUP_KEYS = ("chroma_shift", "filters", "model", "tile")
+CLEANUP_KEYS = ("chroma_shift", "filters", "planes", "model", "tile")
+
+
+# mergeplanes inputs: 0 the original, 1 the filtered copy; output planes Y, U, V
+PLANE_MAPS = dict(
+    luma="map0s=1:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2",
+    chroma="map0s=0:map0p=0:map1s=1:map1p=1:map2s=1:map2p=2",
+)
 
 
 def cleanup_filters(c):
     """The ffmpeg part of a `cleanup` stage, run on the deinterlaced, cropped picture at its own pixels (before the resize, so a shift is in
     the tape's pixels): chroma_shift [cb_h, cb_v, cr_h, cr_v] (chroma moved against luma; negative is left or up; edges smeared), then
-    `filters` (any ffmpeg filters, e.g. a chroma-only hqdn3d "hqdn3d=0:4:0:6"). Its `model` (a 1x spandrel model) runs after the resize."""
+    `filters` (any ffmpeg filters) on the planes `planes` names: all (default), luma or chroma, the others left bit-identical. Its `model` (a 1x spandrel model) runs after the resize."""
     if not c:
         return []
     if not isinstance(c, dict) or set(c) - set(CLEANUP_KEYS):
@@ -161,7 +172,18 @@ def cleanup_filters(c):
     if c.get("filters"):
         if not isinstance(c["filters"], str):
             raise ParamError("cleanup filters is a string of ffmpeg filters")
-        f.append(c["filters"])
+        planes = c.get("planes", "all")
+        if planes == "all":
+            f.append(c["filters"])
+        elif planes in PLANE_MAPS:
+            # Exactly one kind of plane: the filters run on a copy and mergeplanes takes the other planes from the original, bit for bit.
+            # (A strength of 0 does not switch a plane off in every filter: hqdn3d reads 0 as "use the default".)
+            fmt = "yuv444p" if cs is not None else "yuv420p"
+            f.append(
+                f"format={fmt},split[cl_orig][cl_in];[cl_in]{c['filters']}[cl_out];[cl_orig][cl_out]mergeplanes={PLANE_MAPS[planes]}:format={fmt}"
+            )
+        else:
+            raise ParamError(f"cleanup planes is all, luma or chroma, not {planes!r}")
     return f
 
 
@@ -256,7 +278,13 @@ def extras(p, result, crop, stem, run=subprocess.run):
             ],
             run=run,
         )
-        crops.append(dict(id=rid, label=str(r.get("label") or rid), box=list(r["box"]), path=path))
+        shots = []
+        for t in p.get("region_stills") or []:  # a frame of the crop, for a vision judge (it reads pictures, not video)
+            if isinstance(t, (int, float)) and 0 <= t < info["seconds"]:
+                shot = f"{stem}.{rid}.{float(t):g}s.png"
+                ffmpeg(["-ss", f"{float(t):.3f}", "-i", path, "-frames:v", "1", shot], run=run)
+                shots.append(shot)
+        crops.append(dict(id=rid, label=str(r.get("label") or rid), box=list(r["box"]), path=path, stills=shots))
     stills = []
     for t in p.get("stills") or []:
         if not isinstance(t, (int, float)) or t < 0 or t >= info["seconds"]:
@@ -265,6 +293,139 @@ def extras(p, result, crop, stem, run=subprocess.run):
         ffmpeg(["-ss", f"{float(t):.3f}", "-i", result, "-frames:v", "1", path], run=run)
         stills.append(path)
     return info, crops, stills
+
+
+# ---- quality, measured (beside people's judgments, never instead of them) ----------------------------------------------------------------
+def _ffmpeg_log(args, run=subprocess.run):
+    """ffmpeg's log (stderr, at info level) of a run whose output is thrown away: the ssim/psnr summaries are written there."""
+    r = run(["ffmpeg", "-nostdin", "-hide_banner", "-v", "info", *args, "-f", "null", "-"], capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {(r.stderr or b'').decode(errors='replace').strip()[-400:]}")
+    return (r.stderr or b"").decode(errors="replace")
+
+
+def fidelity(p, src, result, run=subprocess.run):
+    """How far the result strays from the tape: the result resized back to the prepared size (lanczos) against the prepared source (the same
+    deinterlace and crop, no cleanup), SSIM (all planes) and PSNR in dB. Invented detail, colour drift and smearing all lower them; a cleanup
+    that removes noise lowers them a little too, so they are context, not a verdict."""
+    import re
+
+    pw, ph = _pair(p["prep_size"], "prep_size")
+    ref = prep_filter({**p, "cleanup": None}, src)
+    fc = f"[0:v]scale={pw}:{ph}:flags=lanczos,setsar=1,format=yuv420p,split[a1][a2];[1:v]{ref},format=yuv420p,split[b1][b2];[a1][b1]ssim;[a2][b2]psnr"
+    log = _ffmpeg_log(["-i", result, "-i", p["path"], "-filter_complex", fc], run=run)
+    ssim = re.search(r"SSIM .*?All:([0-9.]+)", log)
+    psnr = re.search(r"PSNR .*?average:([0-9.]+|inf)", log)
+    return dict(
+        ssim=float(ssim.group(1)) if ssim else None,
+        psnr=(99.0 if psnr.group(1) == "inf" else float(psnr.group(1))) if psnr else None,
+    )
+
+
+def flicker(path, vf, run=subprocess.run):
+    """Mean absolute difference of luma between consecutive frames (0-255), after `vf`: how much the picture moves or shimmers."""
+    import re
+
+    log = _ffmpeg_log(
+        [
+            "-i",
+            path,
+            "-an",
+            "-vf",
+            f"{vf},tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+        ],
+        run=run,
+    )
+    vals = [
+        float(v) for v in re.findall(r"lavfi\.signalstats\.YAVG=([0-9.]+)", log)[1:]
+    ]  # the first blend is with nothing
+    return sum(vals) / len(vals) if vals else None
+
+
+def noise_sigma(plane):
+    """Immerkaer's fast estimate of white noise in one plane (a 2-D numpy array): the standard deviation of what a Laplacian difference leaves."""
+    import numpy as np
+
+    a = plane.astype(np.float64)
+    h, w = a.shape
+    if h < 3 or w < 3:
+        return 0.0
+    c = (
+        a[:-2, :-2]
+        - 2 * a[:-2, 1:-1]
+        + a[:-2, 2:]
+        - 2 * a[1:-1, :-2]
+        + 4 * a[1:-1, 1:-1]
+        - 2 * a[1:-1, 2:]
+        + a[2:, :-2]
+        - 2 * a[2:, 1:-1]
+        + a[2:, 2:]
+    )
+    return float(np.sqrt(np.pi / 2) * np.abs(c).sum() / (6 * (w - 2) * (h - 2)))
+
+
+def sharpness(plane):
+    """Variance of the Laplacian of luma: falls when a denoiser or upscaler blurs, rises with detail (and with noise, so read it with noise)."""
+    import numpy as np
+
+    a = plane.astype(np.float64)
+    lap = a[:-2, 1:-1] + a[2:, 1:-1] + a[1:-1, :-2] + a[1:-1, 2:] - 4 * a[1:-1, 1:-1]
+    return float(lap.var())
+
+
+def frames_at(path, times, size, vf="", run=subprocess.run):
+    """yuv444p frames (numpy, 3 x h x w) of a video at `times`, resized to `size` with lanczos after `vf`."""
+    import numpy as np
+
+    w, h = size
+    out = []
+    for t in times:
+        chain = (f"{vf}," if vf else "") + f"scale={w}:{h}:flags=lanczos,format=yuv444p"
+        r = run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-ss",
+                f"{float(t):.3f}",
+                "-i",
+                path,
+                "-frames:v",
+                "1",
+                "-vf",
+                chain,
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            capture_output=True,
+        )
+        if r.returncode == 0 and len(r.stdout or b"") >= w * h * 3:
+            out.append(np.frombuffer(r.stdout[: w * h * 3], np.uint8).reshape(3, h, w))
+    return out
+
+
+def quality(p, src, result, info, run=subprocess.run):
+    """Programmatic readings of a result, at the prepared size so every candidate is measured alike: fidelity to the tape (ssim, psnr),
+    temporal stability (flicker against the tape's own, flicker_ratio; over 1 shimmers more than the tape), and on stills luma sharpness,
+    luma_noise and chroma_noise (Immerkaer sigma; chroma noise on VHS is the blotchy colour on flat areas)."""
+    pw, ph = _pair(p["prep_size"], "prep_size")
+    q = dict(fidelity(p, src, result, run=run))
+    f_out = flicker(result, f"scale={pw}:{ph}:flags=lanczos", run=run)
+    f_src = flicker(p["path"], prep_filter({**p, "cleanup": None}, src), run=run)
+    q.update(
+        flicker=f_out, flicker_source=f_src, flicker_ratio=(f_out / f_src) if f_out is not None and f_src else None
+    )
+    times = [t for t in (p.get("stills") or []) if isinstance(t, (int, float)) and 0 <= t < info["seconds"]]
+    frames = frames_at(result, times, (pw, ph), run=run)
+    if frames:
+        q.update(
+            sharpness=sum(sharpness(f[0]) for f in frames) / len(frames),
+            luma_noise=sum(noise_sigma(f[0]) for f in frames) / len(frames),
+            chroma_noise=sum((noise_sigma(f[1]) + noise_sigma(f[2])) / 2 for f in frames) / len(frames),
+        )
+    return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in q.items()}
 
 
 # ---- VRAM of child processes -------------------------------------------------------------------------------------------------------------
@@ -367,6 +528,8 @@ def load(model, models_dir):
     eng = o.get("engine")
     E.clear()
     E.update(engine=eng, name=model.get("name"), key=model.get("key"), options=o, models_dir=models_dir)
+    # a model registered with no VRAM runs in the scheduler's CPU lane (even beside an exclusive GPU lease): nothing of its may go on the card
+    E["cpu_only"] = float(model.get("vram_gb") or 0) == 0
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise RuntimeError("ffmpeg and ffprobe must be on the PATH")
     if eng == "ffmpeg":
@@ -386,7 +549,7 @@ def load(model, models_dir):
     raise RuntimeError(f"unknown engine {eng!r} (ffmpeg, spandrel, seedvr2, flashvsr)")
 
 
-def load_spandrel(f, models_dir, half=True):
+def load_spandrel(f, models_dir, half=True, cpu=False):
     """A model spandrel loads (an upscaler, or a 1x cleanup model), on the card in half precision when it can: {model, scale, device, half, torch, architecture}."""
     import torch
     from spandrel import ModelLoader
@@ -395,7 +558,7 @@ def load_spandrel(f, models_dir, half=True):
     if not os.path.isfile(path):
         raise RuntimeError(f"missing {path}: run scripts/setup_worker_venv.sh video (it downloads the weights)")
     d = ModelLoader().load_from_file(path)
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    dev = "cuda" if torch.cuda.is_available() and not cpu else "cpu"
     half = half and dev == "cuda" and d.supports_half
     m = d.model.eval().to(dev)
     if half:
@@ -411,7 +574,9 @@ def cleanup_model(p):
         return None
     cache = E.setdefault("cleanups", {})
     if f not in cache:
-        cache[f] = load_spandrel(f, E["models_dir"])
+        cache[f] = load_spandrel(
+            f, E["models_dir"], cpu=bool(E.get("cpu_only"))
+        )  # on the card only when the model was given VRAM
     if cache[f]["scale"] != 1:
         raise ParamError(f"a cleanup model keeps the size (1x); {f} is {cache[f]['scale']}x")
     return cache[f]
@@ -665,6 +830,7 @@ def run(params, run_=subprocess.run, popen=subprocess.Popen):
             shutil.rmtree(work, ignore_errors=True)
     enhance_s = time.time() - t0
     info, crops, stills = extras(p, out, crop, stem, run=run_)
+    q = quality(p, src, out, info, run=run_) if p.get("quality", True) else None
     return dict(
         path=out,
         width=info["width"],
@@ -680,6 +846,7 @@ def run(params, run_=subprocess.run, popen=subprocess.Popen):
         enhance_s=round(enhance_s, 3),
         fps_enhance=round(info["frames"] / enhance_s, 3) if enhance_s > 0 else None,
         peak_vram_mb=round(peak, 1),
+        quality=q,
     )
 
 

@@ -6,7 +6,7 @@ metrics = ["judged", "latency_s", "failed"]
 judge = true                 # judged on the regions: grain on flat areas and faces, against detail kept (text, stripes, hair) and smearing on motion
 similarity = "video"
 
-# Luma only (the colour is the chroma-cleanup eval's). Spatial-temporal hqdn3d at two strengths, ffmpeg's adaptive temporal average
+# Luma only (the colour is the chroma-cleanup eval's): cleanup planes = "luma" keeps the colour planes bit-identical. Spatial-temporal hqdn3d at two strengths, ffmpeg's adaptive temporal average
 # (atadenoise) and non-local means (nlmeans, spatial). The usual best for VHS grain is a motion-compensated temporal denoise (SMDegrain /
 # MDegrain, or QTGMC's own), which averages the same detail across frames instead of blurring it: it needs VapourSynth plugins
 # (mvtools, havsfunc) not installed on omarchy yet, and joins this eval as a candidate when they are. Same lanczos to 1440 x 1080 after.
@@ -24,23 +24,23 @@ note = "as captured"
 [[candidates]]
 name = "hqdn3d-light"
 model = "video-lanczos"
-params = { cleanup = { filters = "hqdn3d=2:0:3:0" } }
+params = { cleanup = { filters = "hqdn3d=2:2:3:3", planes = "luma" } }
 note = "ffmpeg hqdn3d on luma, light (spatial 2, temporal 3)"
 
 [[candidates]]
 name = "hqdn3d-medium"
 model = "video-lanczos"
-params = { cleanup = { filters = "hqdn3d=4:0:6:0" } }
+params = { cleanup = { filters = "hqdn3d=4:4:6:6", planes = "luma" } }
 note = "the same, medium (spatial 4, temporal 6)"
 
 [[candidates]]
 name = "atadenoise"
 model = "video-lanczos"
-params = { cleanup = { filters = "atadenoise=0a=0.02:0b=0.04:s=9:p=1" } }
+params = { cleanup = { filters = "atadenoise=0a=0.02:0b=0.04:s=9", planes = "luma" } }
 note = "ffmpeg adaptive temporal averaging over 9 frames, luma plane only"
 
 [[candidates]]
 name = "nlmeans"
 model = "video-lanczos"
-params = { cleanup = { filters = "nlmeans=s=2.5:p=7:r=11:pc=0:rc=0" } }
-note = "ffmpeg non-local means, spatial (ffmpeg's nlmeans has no plane choice: colour is denoised too)"
+params = { cleanup = { filters = "nlmeans=s=2.5:p=7:r=11", planes = "luma" } }
+note = "ffmpeg non-local means, spatial"

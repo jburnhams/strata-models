@@ -6,8 +6,10 @@ metrics = ["judged", "latency_s", "peak_vram_gb", "failed"]
 judge = true                 # judged on the regions: colour on flat walls and skin (noise), colour edges (bleed), and that detail is kept
 similarity = "video"
 
-# Colour only: luma (the detail) is left alone. ffmpeg's hqdn3d with luma strengths 0, at two strengths; then the 1x models made for VHS
+# Colour only: luma (the detail) is left bit-identical (cleanup planes = "chroma": hqdn3d reads a strength of 0 as its default, so the
+# filter runs on a copy and only its colour planes are kept). hqdn3d at two strengths; then the 1x models made for VHS
 # colour (OpenModelDB, run by the cleanup stage's `model` on the prepared 768 x 576 frames; downloaded by scripts/setup_worker_venv.sh video).
+# The 1x models run on video-lanczos-cleanup (the same lanczos, registered with VRAM so the scheduler puts them on the card).
 # Users report BleedOut can shift colours: the judging shows whether it does here. Every candidate is the same lanczos to 1440 x 1080 after.
 [decision]
 primary = "judged"
@@ -23,29 +25,29 @@ note = "as captured"
 [[candidates]]
 name = "hqdn3d-chroma-light"
 model = "video-lanczos"
-params = { cleanup = { filters = "hqdn3d=0:3:0:4" } }
+params = { cleanup = { filters = "hqdn3d=3:3:4:4", planes = "chroma" } }
 note = "ffmpeg hqdn3d on the colour planes only, light (spatial 3, temporal 4)"
 
 [[candidates]]
 name = "hqdn3d-chroma-strong"
 model = "video-lanczos"
-params = { cleanup = { filters = "hqdn3d=0:6:0:9" } }
+params = { cleanup = { filters = "hqdn3d=6:6:9:9", planes = "chroma" } }
 note = "the same, strong (spatial 6, temporal 9): smoother colour, risk of colour lagging on motion"
 
 [[candidates]]
 name = "bleedout"
-model = "video-lanczos"
+model = "video-lanczos-cleanup"
 params = { cleanup = { model = "1x-BleedOut-Compact.pth" } }
 note = "1x BleedOut Compact (zarxrax, WTFPL): colour bleed and heavy colour noise on VHS"
 
 [[candidates]]
 name = "baldrick"
-model = "video-lanczos"
+model = "video-lanczos-cleanup"
 params = { cleanup = { model = "1x-BaldrickVHSFixV0-2.pth" } }
 note = "1x BaldrickVHSFix v0.2 (nimrodzorg, CC-BY-NC-SA-4.0): minor VHS colour and pattern noise, deinterlaced sources"
 
 [[candidates]]
 name = "broadcast-to-studio"
-model = "video-lanczos"
+model = "video-lanczos-cleanup"
 params = { cleanup = { model = "1x-BroadcastToStudioLite.pth" } }
 note = "1x BroadcastToStudio Lite (saurusx, CC-BY-NC-SA-4.0): colour blur, dot crawl, rainbows; can make halos stand out"

@@ -3,6 +3,8 @@ engines' own CLIs, a fake /proc. The real thing (spandrel on the card, the diffu
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import types
@@ -52,6 +54,13 @@ class FakeRun:
             )
         if self.fail and any(self.fail in str(a) for a in cmd):
             return subprocess.CompletedProcess(cmd, 1, b"", b"Error while filtering")
+        if cmd[-1] == "-":  # a measuring run: ffmpeg's ssim/psnr/signalstats log, or a raw frame
+            if "rawvideo" in cmd:
+                w, h = (int(v) for v in re.search(r"scale=(\d+):(\d+)", cmd[cmd.index("-vf") + 1]).groups())
+                return subprocess.CompletedProcess(cmd, 0, bytes(i * 37 % 251 for i in range(w * h * 3)), b"")
+            log = "[Parsed_ssim_4] SSIM Y:0.96 U:0.97 V:0.97 All:0.9650 (14.5)\n[Parsed_psnr_5] PSNR y:33.1 u:40.2 v:40.0 average:34.20 min:30\n"
+            log += "".join(f"lavfi.signalstats.YAVG={v}\n" for v in (99, 4.0, 6.0))
+            return subprocess.CompletedProcess(cmd, 0, b"", log.encode())
         with open(cmd[-1], "wb") as f:
             f.write(b"x")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
@@ -150,7 +159,13 @@ def test_extras_crop_each_region_nearest_neighbour_and_keep_stills_inside_the_cl
     ]  # the second is outside the crop: no file
     face = run.calls[1]
     assert face[face.index("-vf") + 1] == "crop=540:370:386:170,scale=960:658:flags=neighbor,setsar=1,format=yuv420p"
-    assert crops[0] == dict(id="face", label="Face", box=[200, 90, 260, 195], path=str(tmp_path / "video-1.face.mp4"))
+    assert crops[0] == dict(
+        id="face",
+        label="Face",
+        box=[200, 90, 260, 195],
+        path=str(tmp_path / "video-1.face.mp4"),
+        stills=[str(tmp_path / "video-1.face.3s.png")],
+    )  # 6 s is past the end
     assert [os.path.basename(s) for s in stills] == [
         "video-1.still1s.png",
         "video-1.still3s.png",
@@ -513,7 +528,9 @@ def fake_model(scale, device="cpu"):
 def test_cleanup_model_is_loaded_once_and_must_keep_the_size(monkeypatch, tmp_path):
     loads = []
     monkeypatch.setattr(
-        V, "load_spandrel", lambda f, models_dir, half=True: loads.append(f) or fake_model(2 if "x2" in f else 1)
+        V,
+        "load_spandrel",
+        lambda f, models_dir, half=True, cpu=False: loads.append(f) or fake_model(2 if "x2" in f else 1),
     )
     V.E.clear()
     V.E.update(models_dir=str(tmp_path))
@@ -610,3 +627,128 @@ def test_cli_engine_cleans_the_prepared_clip_with_the_model(monkeypatch, tmp_pat
     assert (
         enc[-1].endswith("prep.mp4") and enc[enc.index("-qp") + 1] == "0" and r["peak_vram_mb"] == 1024.0
     )  # the cleanup's peak beats the CLI's
+
+
+def test_quality_measures_fidelity_flicker_sharpness_and_noise(tmp_path, clip):
+    run = FakeRun()
+    res = str(tmp_path / "video-q.mp4")
+    open(res, "wb").close()
+    q = V.quality(
+        P(path=clip, crop=[14, 0, 692, 568], cleanup=dict(filters="hqdn3d")), SRC, res, dict(seconds=8.0), run=run
+    )
+    assert q["ssim"] == 0.965 and q["psnr"] == 34.2 and q["flicker"] == 5.0 and q["flicker_ratio"] == 1.0
+    assert q["sharpness"] > 0 and q["luma_noise"] > 0 and q["chroma_noise"] > 0
+    fid = next(c for c in run.calls if "-filter_complex" in c)
+    assert "hqdn3d" not in fid[fid.index("-filter_complex") + 1]  # measured against the tape as it is, not as cleaned
+    assert len([c for c in run.calls if "rawvideo" in c]) == 4  # a still at each of 1, 3, 5, 7 s
+
+
+def test_quality_copes_with_what_ffmpeg_does_not_say(tmp_path, clip, monkeypatch):
+    with pytest.raises(RuntimeError, match="ffmpeg failed"):
+        V._ffmpeg_log(
+            ["-i", "x"], run=lambda cmd, capture_output=True: subprocess.CompletedProcess(cmd, 1, b"", b"Invalid data")
+        )
+    monkeypatch.setattr(V, "_ffmpeg_log", lambda args, run=None: "PSNR y:inf average:inf")
+    monkeypatch.setattr(V, "frames_at", lambda *a, **k: [])
+    q = V.quality(P(path=clip), SRC, "r.mp4", dict(seconds=8.0))
+    assert q == dict(ssim=None, psnr=99.0, flicker=None, flicker_source=None, flicker_ratio=None)
+
+
+def test_noise_and_sharpness_read_planes():
+    import numpy as np
+
+    flat = np.full((20, 20), 100, np.uint8)
+    rng = np.random.default_rng(0)
+    noisy = np.clip(100 + rng.normal(0, 8, (64, 64)), 0, 255).astype(np.uint8)
+    assert V.noise_sigma(flat) == 0.0 and 6 < V.noise_sigma(noisy) < 10 and V.noise_sigma(np.zeros((2, 2))) == 0.0
+    assert V.sharpness(flat) == 0.0 and V.sharpness(noisy) > 100
+    assert (
+        V.frames_at(
+            "x.mp4", [1], (8, 6), run=lambda cmd, capture_output=True: subprocess.CompletedProcess(cmd, 1, b"", b"")
+        )
+        == []
+    )
+
+
+def test_cleanup_on_one_kind_of_plane_merges_the_others_from_the_original():
+    f = V.cleanup_filters(dict(filters="hqdn3d=4:4:6:6", planes="chroma"))
+    assert f == [
+        "format=yuv420p,split[cl_orig][cl_in];[cl_in]hqdn3d=4:4:6:6[cl_out];[cl_orig][cl_out]mergeplanes=map0s=0:map0p=0:map1s=1:map1p=1:map2s=1:map2p=2:format=yuv420p"
+    ]
+    luma = V.cleanup_filters(dict(chroma_shift=[-2, 0, -2, 0], filters="nlmeans", planes="luma"))
+    assert luma[-1].startswith("format=yuv444p,split") and luma[-1].endswith(
+        "mergeplanes=map0s=1:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:format=yuv444p"
+    )
+    assert V.cleanup_filters(dict(filters="hqdn3d", planes="all")) == ["hqdn3d"]
+    with pytest.raises(protocol.ParamError, match="planes is all, luma or chroma"):
+        V.cleanup_filters(dict(filters="hqdn3d", planes="red"))
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="needs ffmpeg on the PATH to filter a real picture (CI runners may not have it)",
+)
+@pytest.mark.parametrize(("planes", "kept", "changed"), [("chroma", "y", "u"), ("luma", "u", "y")])
+def test_cleanup_leaves_the_untouched_planes_bit_identical(planes, kept, changed):
+    src = "testsrc2=s=64x48:d=0.4,noise=alls=20:allf=t,format=yuv420p"
+    vf = V.cleanup_filters(dict(filters="hqdn3d=4:4:6:6", planes=planes))[0]
+
+    def plane(chain, pl):
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            src,
+            "-vf",
+            f"{chain}extractplanes={pl}",
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+        return subprocess.run(cmd, capture_output=True, check=True).stdout
+
+    assert plane(f"{vf},", kept) == plane("", kept)
+    assert plane(f"{vf},", changed) != plane("", changed)
+
+
+def test_a_model_given_no_vram_keeps_its_cleanup_model_off_the_card(monkeypatch, tmp_path, ffmpeg_on_path):
+    seen = []
+    monkeypatch.setattr(
+        V, "load_spandrel", lambda f, models_dir, half=True, cpu=False: seen.append(cpu) or fake_model(1)
+    )
+    V.load(dict(key="video-lanczos", vram_gb=0.0, options=dict(engine="ffmpeg")), str(tmp_path))
+    V.cleanup_model(P(cleanup=dict(model="a.pth")))
+    V.load(dict(key="video-lanczos-cleanup", vram_gb=1.5, options=dict(engine="ffmpeg")), str(tmp_path))
+    V.cleanup_model(P(cleanup=dict(model="a.pth")))
+    assert seen == [True, False]
+
+
+def test_load_spandrel_on_the_cpu_when_asked(monkeypatch, tmp_path):
+    (tmp_path / "spandrel").mkdir()
+    (tmp_path / "spandrel" / "c.pth").write_bytes(b"x")
+
+    class Net:
+        def eval(self):
+            return self
+
+        def to(self, dev):
+            self.dev = dev
+            return self
+
+    desc = types.SimpleNamespace(
+        model=Net(), scale=1, supports_half=True, architecture=types.SimpleNamespace(name="Compact")
+    )
+    monkeypatch.setitem(
+        sys.modules, "torch", types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spandrel",
+        types.SimpleNamespace(ModelLoader=lambda: types.SimpleNamespace(load_from_file=lambda p: desc)),
+    )
+    m = V.load_spandrel("c.pth", str(tmp_path), cpu=True)
+    assert m["device"] == "cpu" and not m["half"] and desc.model.dev == "cpu"

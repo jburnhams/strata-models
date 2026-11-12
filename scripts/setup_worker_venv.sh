@@ -39,13 +39,13 @@ case $name in
     ;;
   seedvr2)
     src=$models/src/seedvr2; checkout https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler "$src" 4490bd1f482e026674543386bb2a4d176da245b9   # v2.5.24
-    VIRTUAL_ENV=$venv uv pip install --index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch torchvision -r "$src/requirements.txt"
+    VIRTUAL_ENV=$venv uv pip install --index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch torchvision spandrel -r "$src/requirements.txt"   # spandrel: a cleanup stage's 1x model before the engine
     d=$models/seedvr2   # the CLI's --model_dir (workers/video.py passes it); it would download these itself, slowly, on the first run
     for f in seedvr2_ema_3b_fp8_e4m3fn.safetensors ema_vae_fp16.safetensors; do fetch "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/$f" "$d/$f"; done
     ;;
   flashvsr-plus)
     src=$models/src/flashvsr-plus; checkout https://github.com/OpenImagingLab/FlashVSR_Plus "$src" b548a2cc2c929d3d4676f2973abe27876ec4dee7
-    VIRTUAL_ENV=$venv uv pip install --index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX "torch>=2.5,<2.8" -r "$src/requirements.txt"
+    VIRTUAL_ENV=$venv uv pip install --index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX "torch>=2.5,<2.8" spandrel -r "$src/requirements.txt"   # spandrel: a cleanup stage's 1x model
     VIRTUAL_ENV=$venv uv pip install --no-deps -e "$src"
     for f in TCDecoder.ckpt turbo/dit.safetensors turbo/lq_proj_in.safetensors base/dit.safetensors base/lq_proj_in.safetensors; do   # into the repo's ckpts/, where the CLI looks
       fetch "https://huggingface.co/ruchangyao/FlashVSR_plus/resolve/main/$f" "$src/ckpts/$f"
