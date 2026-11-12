@@ -33,3 +33,14 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
 - Judge tab: two pictures are a blind `Compare` (side by side, swipe, fade, blink, difference; one zoom and pan; full screen) named X and Y only. Answers are buttons and keys `[` (X), `]` (Y), `t` (about the same), shown in a `KeysLegend`: not `x`/`y` or digits, which `Compare` binds for its views. Clicking a picture no longer answers (a click there pans and zooms). Spoken outputs play in `MediaPlayer` (speech rates, no page keys, so two players do not fight over Space). A failed answer is an inline `Alert`.
 - Outputs tab: candidates with a picture are one `CompareGrid` (same zoom for all, full screen, a pipeline's steps under its tile); failures and text stay cards. `j`/`k` step through items.
 - Elsewhere: errors are `Alert`s, the reference picture is a `FileButton` (keyboard reachable), and `index.html` inlines `colorSchemeScript()` so dark mode does not flash light.
+
+## 2026-11-12: even pace for narration (speak)
+- Jonathan heard the speak-narration clips vary a lot in pace, with some long pauses. Measured on the 360 clips: the same text with the same
+  params gives the same clip (seed 0), so the variation is line to line. Kokoro (a duration predictor) keeps each line within about +-10 % of
+  its median rate. Chatterbox and Qwen3-TTS sample their timing token by token and spread about twice as much (CV 0.15 to 0.24), with
+  short lines at half or double speed. Chatterbox leaves pauses of up to 3.9 s and about 0.5 s of silence at the ends.
+- workers/pacing.py measures rate in syllables of the words as said (numbers and capital abbreviations read out), shown as words a minute
+  at 1.4 syllables a word, so short and long words even out. Every clip now has pauses over max_pause (0.45 s) cut and 0.05 s kept at each
+  end. `wpm` or `fit_s` sets a target: Kokoro re-speaks at the speed that lands on it, and sampled models make `tries` takes and keep the
+  nearest. A pitch-keeping stretch (0.75 to 1.35x) then closes the rest, and `fit` says when it could not.
+- Eval speak-pace (primary pace_spread, baseline unpaced kokoro-lewis) asks whether 160 wpm evens the lines without hurting them.

@@ -13,7 +13,12 @@ params (every engine): text (required); voice (a preset name, or the path of a r
 reference's words, or voice_text_file); instruct (how to speak, or for qwen3-design what the voice is); speed (1.0 = the model's own pace; native on kokoro, else a
 pitch-keeping time stretch after); language (kokoro: en-gb / en-us, qwen3: English...); seed (default 0: the same params give the same
 audio); temperature, top_p, exaggeration, cfg_weight (engine knobs; ignored where they do not apply); out_dir (added by the runtime).
-Result: {path, duration_s, sample_rate, seconds, engine, voice}.
+Pace (workers/pacing.py): wpm (speak at this many words a minute, counted in syllables so short and long words even out) or fit_s (the
+clip lasts this long); Kokoro says it again at the speed that lands there, the sampled models make `tries` takes (seeds seed..seed+tries-1)
+and keep the nearest, then a pitch-keeping stretch (0.75 to 1.35x) closes the rest. max_pause (default 0.45 s; 0 keeps every pause) cuts
+longer pauses between words to that, and edge (default 0.05 s) is the silence kept before and after the speech; both apply to every clip.
+Result: {path, duration_s, sample_rate, seconds, engine, voice, seed, speech_s, rate_wpm, max_pause_s, long_pauses}, and with a target
+{target_s, stretch, fit: ok | long | short (more than 5 % off), speed (Kokoro)}.
 
 A model entry can carry the settings an eval chose as options.defaults ({voice = ..., speed = ...}): the role then speaks with them unless a job
 says otherwise, so apps ask the role for speech and get the chosen voice."""
@@ -26,6 +31,7 @@ import uuid
 E = {}
 
 
+import pacing  # noqa: E402  (pace and pauses, workers/pacing.py: shared with the eval metrics)
 from protocol import ParamError, serve  # noqa: E402  (the shared JSON-lines loop, workers/protocol.py)
 
 
@@ -173,6 +179,15 @@ def stretch(path, speed):
     os.replace(tmp, path)
 
 
+def _render(p, max_pause, edge):
+    """One synthesis, its long pauses cut (pacing.tighten): (samples, sample rate, voice, speed applied natively)."""
+    import numpy as np
+
+    x, sr, voice, native = speak(p)
+    x = np.clip(x, -1, 1)
+    return pacing.tighten(x, sr, max_pause, edge), sr, voice, native
+
+
 def run(p):
     import numpy as np
     import soundfile as sf
@@ -184,28 +199,84 @@ def run(p):
     text = p.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ParamError("give text")
+    text = text.strip()
     speed = float(p.get("speed") or 1.0)
     if not 0.5 <= speed <= 2.0:
         raise ParamError("speed is between 0.5 and 2.0")
-    _seed(int(p.get("seed") or 0))
+    wpm, fit_s = p.get("wpm"), p.get("fit_s")
+    if wpm is not None and not 60 <= float(wpm) <= 300:
+        raise ParamError("wpm is between 60 and 300")
+    if fit_s is not None and float(fit_s) <= 0:
+        raise ParamError("fit_s is a length in seconds")
+    max_pause = None if p.get("max_pause", 0.45) in (None, 0, False) else float(p.get("max_pause", 0.45))
+    edge = float(p.get("edge", 0.05))
+    tries = max(1, min(int(p.get("tries") or 1), 8))
+    seed = int(p.get("seed") or 0)
+    target = (
+        (float(fit_s) - 2 * edge)
+        if fit_s is not None
+        else pacing.target_seconds(text, wpm)
+        if wpm is not None
+        else None
+    )
     t0 = time.perf_counter()
-    x, sr, voice, native = speak(dict(p, text=text.strip()))
-    x = np.clip(x, -1, 1)
+
+    def once(params, s):
+        _seed(s)
+        x, sr, voice, native = _render(dict(params, text=text), max_pause, edge)
+        a, b, _ = pacing.pauses(x, sr)
+        return x, sr, voice, native, max(b - a, 1e-3)
+
+    x, sr, voice, native, got = once(p, seed)
+    if (
+        target is not None and native
+    ):  # Kokoro: say it again at the speed that lands on the target (its pace is near linear in speed)
+        speed = min(max(speed * got / target, 0.5), 2.0)
+        x, sr, voice, native, got = once(dict(p, speed=speed), seed)
+    elif (
+        target is not None
+    ):  # sampled models: their timing differs by seed; keep the take nearest the target, stretch the rest
+        for k in range(1, tries):
+            cand = once(p, seed + k)
+            if abs(np.log(cand[4] / target)) < abs(np.log(got / target)):
+                x, sr, voice, native, got = cand
+                seed = seed + k
     out_dir = p.get("out_dir") or "."
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"tts-{uuid.uuid4().hex[:12]}.wav")
     sf.write(path, x, sr, subtype="PCM_16")
-    if not native and abs(speed - 1.0) > 1e-3:
+    factor = 1.0
+    if target is not None:
+        factor = min(
+            max(got / target, 0.75), 1.35
+        )  # a pitch-keeping stretch beyond this sounds processed: the fit is then reported off
+        if abs(factor - 1.0) > 0.02:
+            stretch(path, factor)
+    elif not native and abs(speed - 1.0) > 1e-3:
         stretch(path, speed)
-    dur = sf.info(path).duration
-    return dict(
+    y, sr2 = sf.read(path, dtype="float32")
+    m = pacing.measure(text, y, sr2)
+    dur = len(y) / sr2
+    res = dict(
         path=path,
         duration_s=round(dur, 3),
         sample_rate=sr,
         seconds=round(time.perf_counter() - t0, 3),
         engine=E["engine"],
         voice=voice,
+        seed=seed,
+        **m,
     )
+    if target is not None:
+        err = m["speech_s"] / target - 1
+        res.update(
+            target_s=round(target, 3),
+            stretch=round(factor, 3),
+            fit="ok" if abs(err) <= 0.05 else "long" if err > 0 else "short",
+        )
+        if native:
+            res["speed"] = round(speed, 3)
+    return res
 
 
 if __name__ == "__main__":

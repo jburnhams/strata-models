@@ -1,0 +1,59 @@
+name = "speak-pace"
+question = "Does asking for a pace (160 words a minute) with long pauses cut make narration even from line to line, without making it harder to follow?"
+role = "speak"
+dataset = "narration-40"         # the same 40 Legends narration lines as speak-narration
+metrics = ["pace_spread", "long_pauses", "max_pause_s", "fit_err", "tts_wer", "rtf", "failed"]
+judge = true                     # listen: a paced clip must still sound natural (the stretch, the cut pauses)
+
+[decision]
+primary = "pace_spread"          # line-to-line spread of the speaking rate (std / mean): what made the voice-over uneven
+baseline = "kokoro-lewis"        # strata-360's voice today, unpaced: also the evenest of the unpaced voices (about 10 %)
+min_effect = 0.03                # three points less spread
+guards = { tts_wer = 1.5, failed = 1.0, rtf = 4.0 }
+
+[score]
+role = "transcribe"
+model = "whisper-large-v3-turbo"
+params = { language = "en", word_timestamps = false, beam_size = 5 }
+
+# 160 words a minute (1.4 syllables a word, workers/pacing.py): between Kokoro's own pace (about 175) and a calm narrator's.
+# The unpaced candidates repeat speak-narration's params exactly, so their clips are reused, not made again.
+
+[[candidates]]
+name = "kokoro-lewis"
+model = "kokoro-v1"
+params = { voice = "bm_lewis" }
+note = "today, unpaced"
+
+[[candidates]]
+name = "kokoro-lewis-160"
+model = "kokoro-v1"
+params = { voice = "bm_lewis", wpm = 160 }
+note = "Kokoro says it again at the speed that lands on 160"
+
+[[candidates]]
+name = "chatterbox-runner"
+model = "chatterbox"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
+note = "unpaced, as in speak-narration"
+
+[[candidates]]
+name = "chatterbox-runner-160"
+model = "chatterbox"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5, wpm = 160, tries = 3 }
+note = "3 takes, the nearest to 160 kept, then stretched"
+
+[[candidates]]
+name = "chatterbox-turbo-runner-160"
+model = "chatterbox-turbo"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", wpm = 160, tries = 3 }
+
+[[candidates]]
+name = "qwen3-design-narrator-160"
+model = "qwen3-tts-design"
+params = { instruct = "A British man in his forties, warm and calm, telling his own story as a documentary narrator, unhurried", wpm = 160, tries = 2 }
+
+[[candidates]]
+name = "qwen3-clone-runner-160"
+model = "qwen3-tts-clone"
+params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", voice_text_file = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.txt", wpm = 160, tries = 2 }
