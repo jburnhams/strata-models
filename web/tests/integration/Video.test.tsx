@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../src/App'
+import { VideoCompare, type VideoSide } from '../../src/components/VideoCompare'
 import { mock, server, http, HttpResponse, evalFixtures } from '../utils/server'
 import { act, screen, setup, waitFor, within } from '../utils/render'
 
@@ -31,49 +32,23 @@ const video = (k: string) => ({ path: `/g/${k}.mp4`, width: 1440, height: 1080, 
 const reference = { note: 'tape', preview: '/m/c.source.mp4', crops: [{ id: 'face', label: 'Face', path: '/m/c.source.face.mp4' }, { id: 'text', label: 'Card text', path: '/m/c.source.text.mp4' }] }
 
 describe('Judging video', () => {
-  it('plays X, Y and the source on one clock, by region, and answers by key', async () => {
-    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { similarity: 0.1, item_id: 'c', input: { crop: [14, 0, 692, 568] }, has_media: true, reference, x: video('x'), y: video('y'), token: 't' }, remaining: 4 })))
-    const { user, container } = setup(<App />, { route: '/evals/vhs?tab=judge' })
-    const cmp = await screen.findByLabelText('Item c, two outputs')
-    const vids = () => Array.from(container.querySelectorAll('video'))
-    expect(vids().map(v => v.getAttribute('src'))).toEqual(['/api/images/file?path=%2Fg%2Fx.mp4', '/api/images/file?path=%2Fg%2Fy.mp4', '/api/evals/vhs/media/c?file=%2Fm%2Fc.source.mp4'])
-    expect(within(cmp).getByText('Source')).toBeInTheDocument()
-    expect(within(cmp).queryByText(/x\.mp4|turbo/)).not.toBeInTheDocument() // blind: X and Y only
+  it('compares X and Y blind in CompareVideo with the item\'s regions, keeps a loop for the item, shows the tape apart, and answers by key', async () => {
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { similarity: 0.1, item_id: 'c', input: { crop: [14, 0, 692, 568], regions: [{ id: 'face', label: 'Face', box: [200, 90, 260, 195] }, { id: 'out', label: 'Outside', box: [710, 0, 10, 10] }, { id: 'bad' }] }, has_media: true, reference, x: video('x'), y: video('y'), token: 't' }, remaining: 4 })))
+    const { user } = setup(<App />, { route: '/evals/vhs?tab=judge' })
+    const vx = await screen.findByLabelText('Video X')
+    expect(vx).toHaveAttribute('src', '/api/images/file?path=%2Fg%2Fx.mp4')
+    expect(screen.getByLabelText('Video Y')).toHaveAttribute('src', '/api/images/file?path=%2Fg%2Fy.mp4')
+    expect(screen.queryByText(/x\.mp4|turbo/)).not.toBeInTheDocument() // blind: X and Y only
     expect(screen.queryByRole('button', { name: /Play the phrase/ })).not.toBeInTheDocument() // no phrase player for a video item
-    load(vids())
-    await user.click(within(cmp).getByRole('radio', { name: 'Face' }))
-    expect(vids()[0].getAttribute('src')).toBe('/api/images/file?path=%2Fg%2Fx.face.mp4')
-    expect(vids()[2].getAttribute('src')).toBe('/api/evals/vhs/media/c?file=%2Fm%2Fc.source.face.mp4')
-    await user.keyboard('g') // next region
-    await waitFor(() => expect(vids()[1].getAttribute('src')).toBe('/api/images/file?path=%2Fg%2Fy.text.mp4'))
-    load(vids())
-    await user.click(within(cmp).getByRole('button', { name: 'Play' }))
-    expect(vids().every(v => of(v).playing)).toBe(true)
-    of(vids()[0]).t = 2.0; of(vids()[1]).t = 1.0; of(vids()[2]).t = 2.01
-    tick()
-    expect(of(vids()[1]).t).toBe(2.0) // a follower that drifted is pulled back to the leader
-    expect(of(vids()[2]).t).toBe(2.01) // within a frame: left alone
-    of(vids()[0]).ended = true
-    tick()
-    expect(vids().map(v => of(v).t)).toEqual([0, 0, 0]) // the end loops back to the start
-    await user.click(within(cmp).getByRole('button', { name: 'Pause' }))
-    expect(vids().some(v => of(v).playing)).toBe(false)
-    await user.click(within(cmp).getByRole('button', { name: /forward one frame/i }))
-    expect(vids().map(v => of(v).t)).toEqual([0.02, 0.02, 0.02])
-    await user.selectOptions(within(cmp).getByRole('combobox', { name: 'Playback speed' }), '0.25')
-    expect(vids().every(v => of(v).rate === 0.25)).toBe(true)
-    ;(document.activeElement as HTMLElement).blur() // keys typed into the speed menu are the menu's
-    await user.keyboard('v') // flip view: one frame, every video stacked, one shown
-    const showing = await within(cmp).findByRole('radiogroup', { name: 'Showing' })
-    load(vids())
-    expect(vids().filter(v => !v.className.includes('invisible'))).toHaveLength(1)
-    expect(vids().every(v => of(v).t === 0.02)).toBe(true) // a remounted video is put back on the clock
-    await user.keyboard('b')
-    expect(within(showing).getByRole('radio', { name: 'Y' })).toBeChecked()
-    await user.click(within(showing).getByRole('radio', { name: 'Source' }))
-    expect(vids()[2].className).not.toContain('invisible')
+    expect(screen.getByRole('radio', { name: 'Face' })).toBeInTheDocument() // the region inside the crop, not the one outside it
+    expect(screen.queryByRole('radio', { name: 'Outside' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('X is better').length).toBeGreaterThan(0) // the answers in the video's own legend and footer
+    await user.click(screen.getByRole('button', { name: /The tape itself/ }))
+    expect(screen.getByLabelText('The source')).toHaveAttribute('src', '/api/evals/vhs/media/c?file=%2Fm%2Fc.source.mp4')
+    ;(document.activeElement as HTMLElement).blur()
     await user.keyboard(']')
     await waitFor(() => expect(mock.calls).toContain('judge y'))
+    expect(await screen.findByText('Last pair (c): X was turbo, Y was large-v3; you chose y')).toBeInTheDocument()
   })
 })
 
@@ -105,5 +80,49 @@ describe('Video outputs', () => {
     await user.click(await screen.findByRole('button', { name: 'X is better' }))
     await user.click(await screen.findByText(/Last pair \(u1\)/))
     expect(await screen.findByLabelText('turbo', { selector: 'video' })).toHaveAttribute('controls')
+  })
+})
+
+describe('VideoCompare (the Outputs grid until strata-react ships CompareVideoGrid)', () => {
+  const side = (k: string, label: string): VideoSide => ({ id: k, label, whole: `/v/${k}.mp4`, regions: { face: `/v/${k}.face.mp4`, text: `/v/${k}.text.mp4` } })
+  it('keeps every video on one clock, by region, flipped or side by side', async () => {
+    const { user, container } = setup(<VideoCompare label="Three videos" sides={[side('x', 'X'), side('y', 'Y'), { ...side('s', 'Source'), note: 'the tape' }]} regionLabels={{ face: 'Face', text: 'Card text' }} fps={50} />)
+    const cmp = screen.getByLabelText('Three videos')
+    const vids = () => Array.from(container.querySelectorAll('video'))
+    expect(vids().map(v => v.getAttribute('src'))).toEqual(['/v/x.mp4', '/v/y.mp4', '/v/s.mp4'])
+    expect(within(cmp).getByText('· the tape')).toBeInTheDocument()
+    load(vids())
+    await user.click(within(cmp).getByRole('radio', { name: 'Face' }))
+    expect(vids()[0].getAttribute('src')).toBe('/v/x.face.mp4')
+    await user.keyboard('g')
+    await waitFor(() => expect(vids()[1].getAttribute('src')).toBe('/v/y.text.mp4'))
+    load(vids())
+    await user.click(within(cmp).getByRole('button', { name: 'Play' }))
+    expect(vids().every(v => of(v).playing)).toBe(true)
+    of(vids()[0]).t = 2.0; of(vids()[1]).t = 1.0; of(vids()[2]).t = 2.01
+    tick()
+    expect(of(vids()[1]).t).toBe(2.0) // a follower that drifted is pulled back to the leader
+    expect(of(vids()[2]).t).toBe(2.01) // within a frame: left alone
+    of(vids()[0]).ended = true
+    tick()
+    expect(vids().map(v => of(v).t)).toEqual([0, 0, 0]) // the end loops back to the start
+    await user.click(within(cmp).getByRole('button', { name: 'Pause' }))
+    expect(vids().some(v => of(v).playing)).toBe(false)
+    await user.click(within(cmp).getByRole('button', { name: /forward one frame/i }))
+    expect(vids().map(v => of(v).t)).toEqual([0.02, 0.02, 0.02])
+    await user.selectOptions(within(cmp).getByRole('combobox', { name: 'Playback speed' }), '0.25')
+    expect(vids().every(v => of(v).rate === 0.25)).toBe(true)
+    ;(document.activeElement as HTMLElement).blur() // keys typed into the speed menu are the menu's
+    await user.keyboard('v')
+    const showing = await within(cmp).findByRole('radiogroup', { name: 'Showing' })
+    load(vids())
+    expect(vids().filter(v => !v.className.includes('invisible'))).toHaveLength(1)
+    expect(vids().every(v => of(v).t === 0.02)).toBe(true) // a remounted video is put back on the clock
+    await user.keyboard('b')
+    expect(within(showing).getByRole('radio', { name: 'Y' })).toBeChecked()
+    await user.click(within(showing).getByRole('radio', { name: 'Source' }))
+    expect(vids()[2].className).not.toContain('invisible')
+    await user.keyboard('{Home}')
+    expect(vids().every(v => of(v).t === 0)).toBe(true)
   })
 })

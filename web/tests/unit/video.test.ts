@@ -33,3 +33,13 @@ describe('video outputs', () => {
     expect(regionLabels({ crops: [{ id: 'face', label: 'Face' }, { id: 'x' }] }, null, 'x', { crops: [{ id: 'text', label: 'Text' }] })).toEqual({ face: 'Face', text: 'Text' })
   })
 })
+
+describe('regions for CompareVideo', () => {
+  it('moves source-pixel boxes into the cropped frame, clipped, and leaves out what is outside', async () => {
+    const { regionsOf } = await import('../../src/components/EvalPage')
+    expect(regionsOf({ crop: [14, 0, 692, 568], regions: [{ id: 'face', label: 'Face', box: [200, 90, 260, 195] }, { id: 'edge', box: [0, 500, 100, 200] }, { id: 'out', box: [710, 0, 10, 10] }, { box: [1, 2, 3, 4] }, null] }))
+      .toEqual([{ id: 'face', label: 'Face', box: [186, 90, 260, 195], of: [692, 568] }, { id: 'edge', label: 'edge', box: [0, 500, 86, 68], of: [692, 568] }])
+    expect(regionsOf({ regions: [{ id: 'face', box: [0, 0, 10, 10] }] })).toEqual([]) // no crop: the source's size is not known
+    expect(regionsOf({ crop: [0, 0, 720, 576] })).toEqual([])
+  })
+})
