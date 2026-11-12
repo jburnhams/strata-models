@@ -129,6 +129,47 @@ def _rtf(item, output, error):
     return float(output.get("seconds") or item.get("_run_s") or 0) / float(output["duration_s"])
 
 
+def pace_of(item, output, error):
+    """{rate_wpm, max_pause_s, long_pauses, speech_s} of a speech output: from the output when the worker measured it, else measured here from
+    its file (outputs made before the worker measured pace) with the same code (stratamodels.workers.pacing)."""
+    if error or not isinstance(output, dict):
+        return None
+    if output.get("rate_wpm") is not None:
+        return output
+    path, text = output.get("path"), (item.get("input") or {}).get("text")
+    if not isinstance(path, str) or not text:
+        return None
+    from stratamodels.workers import pacing
+
+    try:
+        x, sr = pacing.read_wav(path)
+    except (OSError, EOFError, ValueError):
+        return None
+    return pacing.measure(text, x, sr)
+
+
+def _pace_spread(items, outputs):
+    """Coefficient of variation of the speaking rate across the items (spread / mean): 0 is every line at the same pace."""
+    r = [m["rate_wpm"] for it, (o, e) in zip(items, outputs) if (m := pace_of(it, o, e))]
+    return float(np.std(r) / np.mean(r)) if len(r) > 1 and np.mean(r) > 0 else float("nan")
+
+
+def _long_pauses(item, output, error):
+    m = pace_of(item, output, error)
+    return None if m is None else float(m["long_pauses"])
+
+
+def _max_pause(item, output, error):
+    m = pace_of(item, output, error)
+    return None if m is None else float(m["max_pause_s"])
+
+
+def _fit_err(item, output, error):
+    if error or not isinstance(output, dict) or not output.get("target_s"):
+        return None
+    return abs(float(output["speech_s"]) / float(output["target_s"]) - 1)
+
+
 # ---- faces --------------------------------------------------------------------------------------------------------------------------------
 def iou(a, b):
     """Intersection over union of two [x1, y1, x2, y2] boxes."""
@@ -387,6 +428,17 @@ def _peak_vram(item, output, error):
     return None if not v else v / 1024
 
 
+def _quality(key):
+    """A reading the video worker measured on its result (output.quality), for the video evals: fidelity, flicker, sharpness, noise."""
+
+    def score(item, output, error):
+        q = output.get("quality") if isinstance(output, dict) and not error else None
+        v = q.get(key) if isinstance(q, dict) else None
+        return float(v) if isinstance(v, (int, float)) else None
+
+    return score
+
+
 METRICS = {
     m.name: m
     for m in [
@@ -399,6 +451,54 @@ METRICS = {
             _wer,
         ),
         Metric("cer", "ratio", "lower", "Character error rate, the same on characters", "%", _cer),
+        Metric(
+            "fidelity_ssim",
+            "mean",
+            "higher",
+            "SSIM of the video, resized back to the prepared size, against the tape (the same deinterlace and crop): low means invented or lost detail, or colour drift",
+            "",
+            _quality("ssim"),
+        ),
+        Metric(
+            "fidelity_psnr",
+            "mean",
+            "higher",
+            "PSNR of the video, resized back, against the tape",
+            "dB",
+            _quality("psnr"),
+        ),
+        Metric(
+            "flicker_ratio",
+            "mean",
+            "lower",
+            "Frame-to-frame luma change of the video over the tape's own: over 1 shimmers or flickers more than the tape (per-frame models), under 1 is steadier",
+            "",
+            _quality("flicker_ratio"),
+        ),
+        Metric(
+            "sharpness",
+            "mean",
+            "higher",
+            "Variance of the luma Laplacian on stills at the prepared size: falls when detail is blurred (read it with luma_noise: noise raises it too)",
+            "",
+            _quality("sharpness"),
+        ),
+        Metric(
+            "luma_noise",
+            "mean",
+            "lower",
+            "Luma noise (Immerkaer sigma) on stills at the prepared size: grain",
+            "",
+            _quality("luma_noise"),
+        ),
+        Metric(
+            "chroma_noise",
+            "mean",
+            "lower",
+            "Colour noise (Immerkaer sigma of Cb and Cr) on stills at the prepared size: VHS's blotchy colour",
+            "",
+            _quality("chroma_noise"),
+        ),
         Metric(
             "faces_missed",
             "ratio",
@@ -477,6 +577,32 @@ METRICS = {
             "Real-time factor: seconds to make the audio over the audio's length (under 1 is faster than speaking it)",
             "",
             _rtf,
+        ),
+        Metric(
+            "pace_spread",
+            "dataset",
+            "lower",
+            "How much the speaking rate varies from line to line: standard deviation over mean of each clip's rate (syllables of the words as said, over the speech's length; workers/pacing.py)",
+            "%",
+            None,
+            _pace_spread,
+        ),
+        Metric(
+            "long_pauses",
+            "mean",
+            "lower",
+            "Pauses over 0.6 s between the first and last sound, per clip",
+            "",
+            _long_pauses,
+        ),
+        Metric("max_pause_s", "mean", "lower", "The longest pause between words in a clip", "s", _max_pause),
+        Metric(
+            "fit_err",
+            "mean",
+            "lower",
+            "How far the speech's length is from the length asked for (wpm or fit_s), as a share",
+            "%",
+            _fit_err,
         ),
         Metric(
             "judged",

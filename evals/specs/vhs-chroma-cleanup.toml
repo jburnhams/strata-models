@@ -1,0 +1,78 @@
+name = "vhs-chroma-cleanup"
+question = "Which cleanup of the tape's colour bleed and colour noise should run before any upscaler?"
+role = "video-enhance"
+dataset = "vhs-clips-8"
+metrics = ["judged", "latency_s", "peak_vram_gb", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
+judge = true                 # judged on the regions: colour on flat walls and skin (noise), colour edges (bleed), and that detail is kept
+similarity = "video"
+
+# Colour only: luma (the detail) is left bit-identical (cleanup planes = "chroma": hqdn3d reads a strength of 0 as its default, so the
+# filter runs on a copy and only its colour planes are kept). hqdn3d at two strengths; then the 1x models made for VHS
+# colour (OpenModelDB, run by the cleanup stage's `model` on the prepared 768 x 576 frames; downloaded by scripts/setup_worker_venv.sh video).
+# The 1x models run on video-lanczos-cleanup (the same lanczos, registered with VRAM so the scheduler puts them on the card).
+# Users report BleedOut can shift colours: the judging shows whether it does here. Every candidate is the same lanczos to 1440 x 1080 after.
+[decision]
+primary = "judged"
+baseline = "none"
+min_effect = 0.1
+guards = { latency_s = 20.0, failed = 1.0 }
+
+[[candidates]]
+name = "none"
+model = "video-lanczos"
+note = "as captured"
+
+[[candidates]]
+name = "hqdn3d-chroma-light"
+model = "video-lanczos"
+params = { cleanup = { filters = "hqdn3d=3:3:4:4", planes = "chroma" } }
+note = "ffmpeg hqdn3d on the colour planes only, light (spatial 3, temporal 4)"
+
+[[candidates]]
+name = "hqdn3d-chroma-strong"
+model = "video-lanczos"
+params = { cleanup = { filters = "hqdn3d=6:6:9:9", planes = "chroma" } }
+note = "the same, strong (spatial 6, temporal 9): smoother colour, risk of colour lagging on motion"
+
+[[candidates]]
+name = "bleedout"
+model = "video-lanczos-cleanup"
+params = { cleanup = { model = "1x-BleedOut-Compact.pth" } }
+note = "1x BleedOut Compact (zarxrax, WTFPL): colour bleed and heavy colour noise on VHS"
+
+[[candidates]]
+name = "baldrick"
+model = "video-lanczos-cleanup"
+params = { cleanup = { model = "1x-BaldrickVHSFixV0-2.pth" } }
+note = "1x BaldrickVHSFix v0.2 (nimrodzorg, CC-BY-NC-SA-4.0): minor VHS colour and pattern noise, deinterlaced sources"
+
+[[candidates]]
+name = "broadcast-to-studio"
+model = "video-lanczos-cleanup"
+params = { cleanup = { model = "1x-BroadcastToStudioLite.pth" } }
+note = "1x BroadcastToStudio Lite (saurusx, CC-BY-NC-SA-4.0): colour blur, dot crawl, rainbows; can make halos stand out"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two versions X and Y with its colour cleaned in different ways. Prefer the one with clean, even colour on flat areas (no blotchy or crawling colour noise), colour that stays within object edges (no bleed), and colours true to the tape (no shifted hue, no washed-out or over-saturated colour), with the detail (brightness) unchanged."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+

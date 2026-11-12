@@ -33,3 +33,32 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
 - Judge tab: two pictures are a blind `Compare` (side by side, swipe, fade, blink, difference; one zoom and pan; full screen) named X and Y only. Answers are buttons and keys `[` (X), `]` (Y), `t` (about the same), shown in a `KeysLegend`: not `x`/`y` or digits, which `Compare` binds for its views. Clicking a picture no longer answers (a click there pans and zooms). Spoken outputs play in `MediaPlayer` (speech rates, no page keys, so two players do not fight over Space). A failed answer is an inline `Alert`.
 - Outputs tab: candidates with a picture are one `CompareGrid` (same zoom for all, full screen, a pipeline's steps under its tile); failures and text stay cards. `j`/`k` step through items.
 - Elsewhere: errors are `Alert`s, the reference picture is a `FileButton` (keyboard reachable), and `index.html` inlines `colorSchemeScript()` so dark mode does not flash light.
+
+## 2026-11-12: even pace for narration (speak)
+- Jonathan heard the speak-narration clips vary a lot in pace, with some long pauses. Measured on the 360 clips: the same text with the same
+  params gives the same clip (seed 0), so the variation is line to line. Kokoro (a duration predictor) keeps each line within about +-10 % of
+  its median rate. Chatterbox and Qwen3-TTS sample their timing token by token and spread about twice as much (CV 0.15 to 0.24), with
+  short lines at half or double speed. Chatterbox leaves pauses of up to 3.9 s and about 0.5 s of silence at the ends.
+- workers/pacing.py measures rate in syllables of the words as said (numbers and capital abbreviations read out), shown as words a minute
+  at 1.4 syllables a word, so short and long words even out. Every clip now has pauses over max_pause (0.45 s) cut and 0.05 s kept at each
+  end. `wpm` or `fit_s` sets a target: Kokoro re-speaks at the speed that lands on it, and sampled models make `tries` takes and keep the
+  nearest. A pitch-keeping stretch (0.75 to 1.35x) then closes the rest, and `fit` says when it could not.
+- Eval speak-pace (primary pace_spread, baseline unpaced kokoro-lewis) asks whether 160 wpm evens the lines without hurting them.
+
+## 2026-11-12: video enhancement for digitised VHS
+- The tape (H.264 10 Mb/s in MP4) is PAL 720x576 at 25 fps, SAR 787:720 (4:3 from the 702-pixel active line), coded
+  interlaced; ffmpeg idet on 3 x 1000 frames: 100 % TFF. The file's own field order says nothing, so the worker forces it. Active picture: about
+  4 px of black on the left, 10 on the right and 8 head-switching lines at the bottom: crop 692x568 at (14, 0), which is 4:3 at 1440 x 1080.
+- The classical baseline (bwdif, hqdn3d, lanczos) runs at ~20 s per 8 s clip on the CPU. The worker's CPU-only engines were run end to end on
+  a scratch instance (SQLite, scratch data and models folders): deinterlace-vhs 16 outputs, video-enhance-vhs's two ffmpeg candidates.
+- FlashVSR (v1/v1.1) needs Block-Sparse-Attention built from source; FlashVSR+ (Oct 2026, same lab, Apache-2.0) has a Triton kernel and a
+  PyTorch SDPA fallback, and output sides must be multiples of 128 (1536 x 1152 for 4:3). SeedVR2 runs through numz's standalone CLI
+  (v2.5.24): 3B FP8 with block swap for the 12 GB card; FP8 is upcast on Ampere (the RTX 3060 has no FP8 units).
+- VapourSynth R80 is installed on omarchy with only its core plugins: QTGMC needs havsfunc (or vsjetpack), mvtools, nnedi3/znedi3, fmtconv,
+  misc, rgvs/zsmooth and a source filter; not attempted.
+- Guards are ratios to the baseline: against plain lanczos (no GPU) peak VRAM cannot be a guard, so the spec guards run time (100x) and failures.
+- VHS cleanup (2026-11-12, later): the chroma offset could not be measured. A correlation of chroma gradients against luma gradients
+  (luma blurred to chroma's bandwidth, sub-pixel peak) on 7 clips found peaks of 0.02-0.15 that disagree from clip to clip: the colour is too
+  soft for its edges to locate. vhs-chroma-shift therefore tries both directions. ffmpeg's nlmeans has no plane choice (it denoises colour
+  too); atadenoise's `p` selects planes.
+

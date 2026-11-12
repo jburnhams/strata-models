@@ -14,6 +14,8 @@ Kinds (picked from the outputs' shape by `kind_of`, or named in a spec as `simil
             length               shorter duration / longer: pace and pauses
             timbre               cosine similarity of the two recordings' mean log spectrum in 48 bands (PCM WAV, read with the standard
                                  library): the same voice and recording colour score near 1, a different voice lower
+  video   enhanced or generated clips (video-enhance): the mean image similarity of the clips' `stills`, frame for frame (the worker keeps PNG
+          frames at the same times in every candidate), so no video is decoded while judging; 0 when either has none
   json    anything else: 1 when the outputs are the same JSON (timings left out), else the text similarity of their JSON.
 Images are read with Pillow (installed with the GPU stack); without it the image kind falls back to comparing the files' bytes."""
 
@@ -32,6 +34,8 @@ VOLATILE = (
     "path",
     "scores",
     "scored",
+    "crops",
+    "stills",
 )  # never a difference in themselves (for images the picture behind `path` is compared; the [score] pass's readings are not the output)
 IMAGE_EXT = re.compile(r"\.(png|jpe?g|webp)$", re.I)
 
@@ -190,11 +194,31 @@ def audio_similarity(a, b):
     return float((length + max(cos, 0.0)) / 2)
 
 
+VIDEO_EXT = re.compile(r"\.(mp4|webm|mov|mkv)$", re.I)
+
+
+def video_path(o):
+    p = o.get("path") if isinstance(o, dict) else None
+    return p if isinstance(p, str) and VIDEO_EXT.search(p) else None
+
+
+def video_similarity(x, y):
+    """Mean image similarity of the two clips' stills, taken in order (the same times in both); 0 when either has none."""
+    sa = [p for p in (x.get("stills") or []) if isinstance(p, str)] if isinstance(x, dict) else []
+    sb = [p for p in (y.get("stills") or []) if isinstance(p, str)] if isinstance(y, dict) else []
+    n = min(len(sa), len(sb))
+    if not n:
+        return 0.0
+    return float(sum(image_similarity(a, b) for a, b in zip(sa[:n], sb[:n], strict=True)) / n)
+
+
 def kind_of(x, y):
-    """'text', 'image', 'audio' or 'json', from the two outputs."""
+    """'text', 'image', 'audio', 'video' or 'json', from the two outputs."""
     if isinstance(x, dict) and isinstance(y, dict):
         if "segments" in x and "segments" in y:
             return "text"
+        if video_path(x) and video_path(y):
+            return "video"
         if image_path(x) and image_path(y):
             return "image"
         if audio_path(x) and audio_path(y):
@@ -232,10 +256,12 @@ def similarity(x, y, kind=None):
     if kind == "audio":
         pa, pb = audio_path(x), audio_path(y)
         return audio_similarity(pa, pb) if pa and pb else 0.0
+    if kind == "video":
+        return video_similarity(x, y)
     if kind != "json":
-        raise ValueError(f"no similarity {kind!r} (known: text, image, audio, json)")
+        raise ValueError(f"no similarity {kind!r} (known: text, image, audio, video, json)")
     a, b = json.dumps(_strip(x), sort_keys=True), json.dumps(_strip(y), sort_keys=True)
     return 1.0 if a == b else text_similarity(a, b)
 
 
-KINDS = ("text", "image", "audio", "json")
+KINDS = ("text", "image", "audio", "video", "json")

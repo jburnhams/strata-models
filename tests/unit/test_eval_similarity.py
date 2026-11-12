@@ -81,7 +81,7 @@ def test_json_and_kinds():
         S.kind_of(tx("a"), tx("b")) == "text" and S.kind_of("a", "b") == "text" and S.kind_of(dict(a=1), [1]) == "json"
     )
     with pytest.raises(ValueError, match="no similarity"):
-        S.similarity("a", "b", "video")
+        S.similarity("a", "b", "smell")
 
 
 def _wav(path, freqs, seconds=1.0, sr=24000):
@@ -133,4 +133,30 @@ def test_text_similarity_reads_answers_and_captions_not_only_transcripts():
         and S.as_text("hi") == "hi"
         and S.as_text(dict(a=1)) == ""
         and S.as_text(tx("hello")) == "hello"
+    )
+
+
+def test_video_similarity_compares_the_stills_frame_for_frame(tmp_path):
+    from PIL import Image
+
+    def png(name, colour):
+        p = tmp_path / name
+        Image.new("RGB", (64, 48), colour).save(p)
+        return str(p)
+
+    a = dict(
+        path="/g/video-a.mp4",
+        stills=[png("a1.png", (200, 30, 30)), png("a2.png", (30, 30, 200))],
+        crops=[dict(id="face", path="/g/a.face.mp4")],
+        peak_vram_mb=1.0,
+    )
+    same = dict(path="/g/video-b.mp4", stills=list(a["stills"]), crops=[], peak_vram_mb=9.0)
+    other = dict(path="/g/video-c.mp4", stills=[png("c1.png", (30, 200, 30))])
+    assert S.kind_of(a, same) == "video" and S.video_similarity(a, same) == 1.0
+    assert S.similarity(a, same) == 1.0 and S.similarity(a, other) < S.similarity(
+        a, same
+    )  # only the first stills are compared: the shorter list decides
+    assert S.similarity(a, dict(path="/g/v.mp4")) == 0.0 and S.video_similarity("x", a) == 0.0
+    assert (
+        S.video_path(dict(path="x.MOV")) == "x.MOV" and S.video_path(dict(path="x.png")) is None and "video" in S.KINDS
     )

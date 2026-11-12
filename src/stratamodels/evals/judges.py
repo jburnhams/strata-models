@@ -203,6 +203,31 @@ def shown(output):
     return json.dumps({k: v for k, v in o.items() if k not in HIDDEN}, ensure_ascii=False, indent=1)
 
 
+def _video_stills(item, x, y):
+    """For a pair of videos (video-enhance), what a vision judge can see: per region both outputs have, the tape's crop (the item's reference)
+    and X's and Y's at the same moments, as (caption, [pictures]) in that order; with no regions, X's and Y's whole-frame stills. Empty unless
+    both outputs are videos."""
+    from stratamodels.evals import similarity as SIM
+
+    if not (SIM.video_path(x) and SIM.video_path(y)):
+        return []
+    ref = {c.get("id"): c for c in ((item.get("reference") or {}).get("crops") or []) if isinstance(c, dict)}
+    cy = {c.get("id"): c for c in (y.get("crops") or []) if isinstance(c, dict)}
+    out = []
+    for c in x.get("crops") or []:
+        if not isinstance(c, dict) or c.get("id") not in cy:
+            continue
+        xs, ys = list(c.get("stills") or []), list(cy[c["id"]].get("stills") or [])
+        src = list(ref.get(c["id"], {}).get("stills") or [])
+        for i in range(min(len(xs), len(ys))):
+            pics = ([src[i]] if i < len(src) else []) + [xs[i], ys[i]]
+            out.append((f"Region {c.get('label') or c['id']}, moment {i + 1}", [str(p) for p in pics], i < len(src)))
+    if not out:
+        for i, (a, b) in enumerate(zip(x.get("stills") or [], y.get("stills") or [], strict=False)):
+            out.append((f"Whole frame, moment {i + 1}", [str(a), str(b)], False))
+    return out
+
+
 def prompt(spec, j, item, x, y):
     """(system, text, images) for one verdict: the task, the item's input (and reference, if it has one), answers X and Y, and the pictures
     (the item's, then X's and Y's when the answers are pictures)."""
@@ -214,10 +239,21 @@ def prompt(spec, j, item, x, y):
         parts.append(f"The input picture{'s are' if len(imgs) > 1 else ' is'} attached first ({len(imgs)}).")
     if inp:
         parts.append("Input:\n" + json.dumps(inp, ensure_ascii=False, indent=1))
-    if item.get("reference"):
+    vid = _video_stills(item, C.without_pipeline(x), C.without_pipeline(y)) if vision else []
+    if (
+        item.get("reference") and not vid
+    ):  # a video item's reference is the tape itself, shown as pictures below, not a right answer
         parts.append(
             "Reference (what a correct answer says):\n" + json.dumps(item["reference"], ensure_ascii=False, indent=1)
         )
+    if vid:  # videos: the judge reads stills of the same crops, the tape's first when there is one
+        for caption, pics, has_src in vid:
+            n = len(imgs)
+            imgs += pics
+            names = (["the tape (source, enlarged without enhancement)"] if has_src else []) + ["X", "Y"]
+            parts.append(f"{caption}: " + ", ".join(f"picture {n + k + 1} is {nm}" for k, nm in enumerate(names)) + ".")
+        parts.append('Which output is better? Reply with JSON: {"reason": "...", "winner": "X" | "Y" | "tie"}.')
+        return SYSTEM, "\n\n".join(parts), imgs
     for label, o in (("X", x), ("Y", y)):
         p = (C.without_pipeline(o) or {}).get("path") if isinstance(o, dict) else None
         if vision and _is_image(p):

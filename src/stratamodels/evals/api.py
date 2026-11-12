@@ -13,6 +13,8 @@ GET  /api/evals/{name}/pair                  a blind pair to judge: one item, tw
 GET  /api/evals/{name}/outputs[?item_id=]    every candidate's full output per item, a pipeline's every step (what it was sent, what it answered)
 POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
 GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names
+     ?file=PATH                              instead one of the item's reference media (`reference.preview`, `reference.crops[].path`: the
+                                             source made playable, e.g. a VHS clip deinterlaced and enlarged nearest-neighbour), never another file
 GET  /api/evals/{name}/verdicts/{item_id}    every judgment of an item, people's and model judges' (shown once a person has judged it)
 POST /api/evals/{name}/judges/{judge}/run    a model judge judges what it has still to judge (?limit=N), in the background (evals.judges)
 GET  /api/evals/{name}/judges/status         those runs' progress
@@ -83,6 +85,18 @@ MEDIA_TYPES = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
 }
+
+
+def reference_media(it):
+    """The files an item's reference names for viewing: `preview` and each of `crops[].path` (a dataset builder's playable copies of the source)."""
+    ref = it.get("reference") if isinstance(it.get("reference"), dict) else {}
+    out = {ref["preview"]} if isinstance(ref.get("preview"), str) else set()
+    for c in ref.get("crops") or []:
+        if isinstance(c, dict) and isinstance(c.get("path"), str):
+            out.add(c["path"])
+    return out
+
+
 PAIR_SCORE_S = 1.0  # at most this long scoring new pairs in one /pair request (the scores are kept, the rest scored in the background): the most different of those scored is shown
 CONTEXT_S = 2.0  # seconds either side of a phrase in a ?cut=1 answer
 
@@ -430,9 +444,16 @@ def mount(app, scheduler):
         return finite(dict(candidates=[c.to_json() for c in s.candidates], items=items))
 
     @app.get("/api/evals/{name}/media/{item_id}")
-    def get_media(name: str, item_id: str, cut: bool = False):
+    def get_media(name: str, item_id: str, cut: bool = False, file: str | None = None):
         s = spec_or_404(name)
         it = next((x for x in C.load_dataset(s.dataset, engine=engine()).items if x["id"] == item_id), None)
+        if file is not None:
+            if not it or file not in reference_media(it) or not os.path.isfile(file):
+                raise HTTPException(404, "no such file for this item")
+            ext = os.path.splitext(file)[1].lower()
+            return FileResponse(
+                file, media_type=MEDIA_TYPES.get(ext) or mimetypes.guess_type(file)[0] or "application/octet-stream"
+            )
         p = it and it["input"].get("path")
         if not isinstance(p, str) or not os.path.isfile(p):
             raise HTTPException(404, "no file for this item")
