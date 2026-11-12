@@ -122,8 +122,9 @@ def mount(app, scheduler):
             st["finished_at"] = time.time()
             summaries.refresh(s.name)
 
+        started = dict(st, log=[])  # a snapshot: a run with nothing to judge can finish before the response is written
         threading.Thread(target=go, name=f"judge-{s.name}-{judge}", daemon=True).start()
-        return st
+        return started
 
     def analysis(s):
         """The analysis as kept in the database, worked out in the background when what it reads changes (evals.summaries)."""
