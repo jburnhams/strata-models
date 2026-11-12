@@ -19,8 +19,9 @@ case $name in
   seedvr2) pkgs="" ;;                                    # SeedVR2 through numz/ComfyUI-SeedVR2_VideoUpscaler's CLI (Apache-2.0), cloned into <models>/src/seedvr2
   flashvsr-plus) pkgs=""; py=3.10 ;;                     # FlashVSR+ (OpenImagingLab, Apache-2.0), cloned into <models>/src/flashvsr-plus; wants Python 3.10 and torch <2.8
   # VapourSynth R82 and its plugins as PyPI wheels (no system packages, no sudo) with vsjetpack (MIT): QTGMC (vsdeinterlace.QTempGaussMC)
-  # and SMDegrain-style motion-compensated denoise (vsdenoise.mc_degrain) for workers/video.py's VapourSynth stage, which runs its vspipe
-  vapoursynth) py=3.13; pkgs="vapoursynth vsjetpack vapoursynth-mvtools vapoursynth-znedi3 vapoursynth-zsmooth vapoursynth-bestsource vapoursynth-bwdif vapoursynth-resize2 vapoursynth-akarin vapoursynth-vszip numpy" ;;
+  # and SMDegrain-style motion-compensated denoise (vsdenoise.mc_degrain, on mvutensils: vsjetpack 3 calls core.mvu) for workers/video.py's
+  # VapourSynth stage, which runs its vspipe
+  vapoursynth) py=3.13; pkgs="vapoursynth vsjetpack vapoursynth-mvtools vapoursynth-mvutensils vapoursynth-znedi3 vapoursynth-zsmooth vapoursynth-bestsource vapoursynth-bwdif vapoursynth-resize2 vapoursynth-akarin vapoursynth-vszip numpy" ;;
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
 mkdir -p "$models/venvs"; uv venv -q -p $py "$venv"
@@ -56,6 +57,8 @@ case $name in
     ;;
   *) VIRTUAL_ENV=$venv uv pip install $pkgs ;;
 esac
+# a pip VapourSynth finds its Python through ~/.config/vapoursynth/vapoursynth.toml, keyed by this venv's own libvsscript (a system install keeps its entry)
+if [ "$name" = vapoursynth ]; then "$venv/bin/vapoursynth" config; fi
 if [ "$name" = kokoro ]; then
   mkdir -p "$models/tts/kokoro"; cd "$models/tts/kokoro"
   for f in kokoro-v1.0.onnx voices-v1.0.bin; do [ -f $f ] || { curl -sSL -o $f.part https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f && mv $f.part $f; }; done
