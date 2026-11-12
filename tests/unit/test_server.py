@@ -138,6 +138,9 @@ def test_settings_roundtrip_and_main(client, scheduler, tmp_path, monkeypatch):
         and scheduler.models_dir == str(tmp_path / "w")
     )
     assert client.get("/api/settings").json() == r
+    assert client.put("/api/settings", json=dict(gpu_jobs=40)).status_code == 400
+    r = client.put("/api/settings", json=dict(gpu_jobs=3, cpu_jobs=6)).json()
+    assert (r["gpu_jobs"], r["cpu_jobs"]) == (3, 6) and (scheduler.gpu_jobs, scheduler.cpu_jobs) == (3, 6)
     runs = []
     monkeypatch.setattr(uvicorn, "run", lambda app, host, port, log_level: runs.append((host, port)))
     monkeypatch.setattr(gpu, "query", lambda *a, **k: None)

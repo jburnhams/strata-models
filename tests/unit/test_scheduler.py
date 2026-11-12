@@ -259,7 +259,7 @@ def test_the_worker_survives_an_error_in_a_step(scheduler, monkeypatch):
         calls.append(1)
         raise RuntimeError("db away")
 
-    monkeypatch.setattr(scheduler, "step", boom)
+    monkeypatch.setattr(scheduler, "dispatch", boom)
     stop = scheduler.start()
     deadline = time.time() + 5
     while not any("worker error" in e["text"] for e in scheduler.events) and time.time() < deadline:
@@ -407,3 +407,223 @@ def test_a_resident_model_whose_runtime_or_options_were_edited_is_reloaded(sched
     scheduler.submit("echo", {}, "a")
     scheduler.step()
     assert scheduler.resident["small"].handle is not old and any("were edited" in e["text"] for e in scheduler.events)
+
+
+# ---- running several jobs at once ------------------------------------------------------------------------------------------------------
+def _cloud(scheduler):
+    """A zero-VRAM model serving `echo` (a cloud CLI, recorded outputs): it runs in the CPU lane."""
+    from stratamodels.registry import Model
+
+    scheduler.registry.models["cloud"] = Model(key="cloud", runtime="fake", name="", roles=("echo",), vram_gb=0.0)
+
+
+def test_a_cloud_job_runs_beside_a_gpu_job_and_through_an_exclusive_lease(scheduler):
+    _cloud(scheduler)
+    g = scheduler.submit("echo", {}, "a")
+    c = scheduler.submit("echo", {}, "b", model="cloud")
+    tg = scheduler.dispatch()
+    tc = scheduler.dispatch()  # the GPU job has not finished: the cloud one starts anyway
+    assert (tg["job"]["id"], tg["lane"]) == (g["id"], "gpu") and (tc["job"]["id"], tc["lane"]) == (c["id"], "cpu")
+    st = scheduler.status()
+    assert [j["id"] for j in st["running"]] == [g["id"], c["id"]] and st["current"]["id"] == g["id"]
+    assert st["budget"]["pending_mb"] == 2048  # `small` is loading: its estimate is promised
+    assert scheduler.execute(tc)["status"] == "done" and scheduler.execute(tg)["status"] == "done"
+    lease = scheduler.lease("stills")
+    assert scheduler.step()["id"] == lease["id"]
+    c2 = scheduler.submit("echo", {}, "b", model="cloud")
+    g2 = scheduler.submit("echo", {}, "a")
+    assert scheduler.step()["id"] == c2["id"] and scheduler.step() is None  # the lease holds the card, not the CPU lane
+    assert scheduler.store.get(g2["id"])["status"] == "queued" and "cloud" in scheduler.resident
+
+
+def test_gpu_jobs_on_different_models_run_together_up_to_the_slots(scheduler):
+    a = scheduler.submit("echo", {}, "a")
+    a2 = scheduler.submit("echo", {}, "a")  # same model: waits for it
+    b = scheduler.submit("other", {}, "b")
+    c = scheduler.submit("echo", {}, "c", model="big")
+    ta, tb = scheduler.dispatch(), scheduler.dispatch()
+    assert ta["job"]["id"] == a["id"] and tb["job"]["id"] == b["id"]  # a2 waits for `small`, b passes it
+    assert scheduler.dispatch() is None  # 2 GPU slots, both taken (big would fit: 2 + 2 + 6 of 10.5 GB)
+    assert scheduler.execute(tb)["status"] == "done"
+    tc = scheduler.dispatch()
+    assert tc["job"]["id"] == c["id"]
+    scheduler.execute(ta)
+    assert scheduler.step()["id"] == a2["id"]
+    scheduler.execute(tc)
+    assert {"small", "big"} <= set(scheduler.resident) and scheduler.busy == {} and scheduler.running == {}
+
+
+def test_a_gpu_job_that_does_not_fit_beside_running_ones_waits_and_nothing_passes_it(scheduler):
+    scheduler.probe.other_mb = 5000  # 12 - 4.9 - 1 = 6.1 GB for models
+    s = scheduler.submit("echo", {}, "a")
+    big = scheduler.submit("echo", {}, "b", model="big")
+    other = scheduler.submit("other", {}, "c")  # would fit beside `small`, but must not pass the big job
+    ts = scheduler.dispatch()
+    assert ts["job"]["id"] == s["id"] and scheduler.dispatch() is None and scheduler.dispatch() is None
+    assert sum("waits for 6 GB" in e["text"] for e in scheduler.events) == 1
+    assert scheduler.store.get(other["id"])["status"] == "queued"
+    scheduler.execute(ts)
+    assert scheduler.step()["id"] == big["id"] and "small" not in scheduler.resident  # the idle model made room
+    assert scheduler.step()["id"] == other["id"]
+
+
+def test_a_running_model_is_never_evicted_and_its_growth_is_promised(scheduler):
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    scheduler.resident["small"].held_mb = 512  # measured little at load, like sd-cpp, which allocates per job
+    s = scheduler.submit("echo", {}, "a")
+    ts = scheduler.dispatch()
+    assert ts["job"]["id"] == s["id"] and scheduler.pending_mb() == 1536
+    scheduler.request("unload", "small")
+    scheduler.dispatch()
+    assert "small" in scheduler.resident and list(scheduler.control) == [("unload", "small")]  # waits for its job
+    scheduler._make_room(50_000)
+    assert "small" in scheduler.resident
+    scheduler.execute(ts)
+    assert scheduler.pending_mb() == 0
+    scheduler.step()
+    assert "small" not in scheduler.resident and not scheduler.control
+
+
+def test_an_exclusive_lease_waits_for_the_gpu_jobs_running(scheduler):
+    _cloud(scheduler)
+    j = scheduler.submit("echo", {}, "a")
+    t = scheduler.dispatch()
+    lease = scheduler.lease("stills")
+    later = scheduler.submit("other", {}, "b")
+    c = scheduler.submit("echo", {}, "c", model="cloud")
+    tc = scheduler.dispatch()
+    assert (
+        tc["job"]["id"] == c["id"] and scheduler.execute(tc)["status"] == "done"
+    )  # the lease waits; the CPU lane does not
+    assert scheduler.dispatch() is None and any(
+        "jobs running on it finish first" in e["text"] for e in scheduler.events
+    )
+    assert scheduler.store.get(later["id"])["status"] == "queued"
+    assert scheduler.execute(t)["id"] == j["id"]
+    assert scheduler.step()["id"] == lease["id"] and scheduler.resident == {"cloud": scheduler.resident["cloud"]}
+
+
+def test_a_sized_lease_waits_while_running_jobs_hold_the_room(scheduler):
+    scheduler.probe.other_mb = 5000
+    t = scheduler.dispatch() if scheduler.submit("echo", {}, "a", model="big") else None
+    lease = scheduler.lease("stills", vram_gb=4)
+    assert scheduler.dispatch() is None and any(
+        "running jobs and other programs" in e["text"] for e in scheduler.events
+    )
+    scheduler.execute(t)
+    assert scheduler.step()["id"] == lease["id"] and "big" not in scheduler.resident
+
+
+def test_a_load_from_the_models_page_runs_like_a_job_and_waits_for_a_busy_model(scheduler):
+    scheduler.submit("echo", {}, "a")
+    t = scheduler.dispatch()
+    scheduler.request("load", "small")  # already being loaded by the job
+    scheduler.request("load", "other")
+    tl = scheduler.dispatch()
+    assert tl["job"] is None and tl["key"] == "other" and list(scheduler.control) == [("load", "small")]
+    assert scheduler.execute(tl) is None and "other" in scheduler.resident
+    scheduler.execute(t)
+    assert scheduler.dispatch() is None and not scheduler.control  # small is loaded now: nothing to do
+
+
+def test_a_load_waits_for_room_held_by_running_jobs(scheduler, monkeypatch):
+    scheduler.probe.other_mb = 5000
+    scheduler.submit("echo", {}, "a", model="big")
+    t = scheduler.dispatch()
+    scheduler.request("load", "small")
+    assert scheduler.dispatch() is None and list(scheduler.control) == [("load", "small")]
+    scheduler.execute(t)
+    monkeypatch.setattr(fake, "load", lambda m, d: (_ for _ in ()).throw(OSError("disk")))
+    assert scheduler.step() is None and any("could not load small" in e["text"] for e in scheduler.events)
+
+
+def test_a_load_measured_beside_other_gpu_work_keeps_its_estimate(scheduler, monkeypatch):
+    t = scheduler.dispatch() if scheduler.submit("echo", {}, "a") else None
+    real = fake.load
+    monkeypatch.setattr(
+        fake, "load", lambda m, d: (real(m, d), fake.LOADED.append(dict(model="big")))[0]
+    )  # big's 6 GB appear meanwhile
+    scheduler.submit("other", {}, "b")
+    scheduler.execute(scheduler.dispatch())
+    r = scheduler.resident["other"]
+    assert (
+        r.vram_mb == 2048 and r.held_mb is None
+    )  # not 8 GB: `small` was busy, so the card's change was not all its own
+    monkeypatch.undo()
+    fake.LOADED.pop()
+    s2 = scheduler.submit("other", {}, "b")
+    t2 = scheduler.dispatch()
+    assert (
+        t2["job"]["id"] == s2["id"] and scheduler.pending_mb() == 2048 + 2048
+    )  # small loading, other unknown: both estimates promised
+    scheduler.execute(t2)
+    scheduler.execute(t)
+
+
+def test_the_worker_threads_run_a_cloud_job_while_a_gpu_job_is_still_running(scheduler, monkeypatch):
+    _cloud(scheduler)
+    gate = threading.Event()
+    real = fake.run
+    monkeypatch.setattr(fake, "run", lambda h, p: (gate.wait(10) if p.get("hold") else None, real(h, p))[1])
+    stop = scheduler.start()
+    try:
+        g = scheduler.submit("echo", dict(hold=True), "a")
+        c = scheduler.submit("echo", {}, "b", model="cloud")
+        assert scheduler.wait(c["id"], 10)["status"] == "done"
+        assert scheduler.store.get(g["id"])["status"] == "running"
+        gate.set()
+        assert scheduler.wait(g["id"], 10)["status"] == "done"
+    finally:
+        gate.set()
+        stop.set()
+
+
+def test_slots_are_at_least_one_and_a_job_for_an_unknown_model_fails_in_the_cpu_lane(scheduler):
+    from stratamodels.scheduler import Scheduler
+
+    s = Scheduler(scheduler.store, scheduler.registry, "/m", gpu_jobs=0, cpu_jobs=-1)
+    assert (s.gpu_jobs, s.cpu_jobs) == (1, 1)
+    j = scheduler.store.add(kind="run", role="echo", model="gone", app="a", priority="batch")
+    assert scheduler._lane(j) == "cpu" and "no longer served" in scheduler.step()["error"]
+
+
+def test_a_model_that_allocates_per_job_keeps_its_estimate_promised_while_it_runs(scheduler, monkeypatch):
+    real = fake.load
+
+    def load(m, d):  # like sd-cpp: nothing on the card at load (the fake card counts this handle as the 0 GB `cloud`)
+        h = real(m, d)
+        if m.key == "big":
+            h["model"] = "cloud"
+        return h
+
+    monkeypatch.setattr(fake, "load", load)
+    _cloud(scheduler)
+    scheduler.submit("echo", {}, "a", model="big")
+    scheduler.step()
+    r = scheduler.resident["big"]
+    assert r.held_mb == 0 and r.vram_mb == 6144 and r.frees_mb == 0
+    scheduler.probe.other_mb = 3000  # 12 - 2.9 - 1 = 8.1 GB for models
+    t = scheduler.dispatch() if scheduler.submit("echo", {}, "a", model="big") else None
+    assert scheduler.pending_mb() == 6144
+    scheduler.submit("other", {}, "b")  # 2 GB beside sd-cpp's 6 GB to come: 8 of 8.1, fits
+    t2 = scheduler.dispatch()
+    assert t2["job"]["role"] == "other"
+    scheduler.submit("echo", {}, "c")  # another 2 GB would not
+    assert scheduler.dispatch() is None
+    scheduler.execute(t2)
+    scheduler.execute(t)
+
+
+def test_a_model_reloaded_with_edited_options_reserves_its_estimate_while_it_loads(scheduler):
+    import dataclasses
+
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    m = scheduler.registry.models["small"]
+    scheduler.registry.models["small"] = dataclasses.replace(m, options=dict(ctx=4096))
+    scheduler.submit("echo", {}, "a")
+    t = scheduler.dispatch()
+    assert scheduler.loading == {"small": 2048}
+    scheduler.execute(t)
+    assert scheduler.loading == {} and scheduler.resident["small"].model.options == dict(ctx=4096)

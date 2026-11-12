@@ -19,14 +19,21 @@ const processColumns: Column<GpuProcess>[] = [
 ]
 
 function Now({ s }: { s: S }) {
-  const j = s.lease ?? s.current
-  if (!j) return <p className="type-body text-muted-foreground">Nothing is running.</p>
-  const since = j.started_at ? seconds(Date.now() / 1000 - j.started_at) : '–'
+  const running = s.running ?? (s.current ? [s.current] : [])
+  const jobs = s.lease && s.lease.vram_gb === null ? [s.lease] : [...(s.lease ? [s.lease] : []), ...running]
+  if (!jobs.length) return <p className="type-body text-muted-foreground">Nothing is running.</p>
   return (
-    <p className="type-body">
-      {j.kind === 'lease' ? <>Lent to <strong>{j.app}</strong>{j.note ? ` for ${j.note}` : ''}, for {since} so far{j.vram_gb !== null ? `, asking for ${j.vram_gb} GB` : ', the whole card'}.</>
-        : <>Running <strong>{j.role}</strong> on {j.model} for <strong>{j.app}</strong>, for {since} so far.</>}
-    </p>
+    <ul className="grid gap-1">
+      {jobs.map(j => {
+        const since = j.started_at ? seconds(Date.now() / 1000 - j.started_at) : '–'
+        return (
+          <li key={j.id} className="type-body">
+            {j.kind === 'lease' ? <>Lent to <strong>{j.app}</strong>{j.note ? ` for ${j.note}` : ''}, for {since} so far{j.vram_gb !== null ? `, asking for ${j.vram_gb} GB` : ', the whole card'}.</>
+              : <>Running <strong>{j.role}</strong> on {j.model} for <strong>{j.app}</strong>, for {since} so far{'lane' in j && j.lane === 'cpu' ? ' (no GPU needed)' : ''}.</>}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

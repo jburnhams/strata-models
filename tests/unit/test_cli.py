@@ -57,6 +57,14 @@ def test_status_jobs_and_registry_read_the_service(capsys, monkeypatch):
         and "queued   #8 lease arena for stills" in out
     )
     assert cli.main(["status", "--json"]) == 0 and json.loads(capsys.readouterr().out)["current"]["id"] == 7
+    status["running"] = [
+        dict(id=7, role="faces", app="bh", model="buffalo_l", lane="gpu"),
+        dict(id=9, role="text", app="x", model="cloud", lane="cpu"),
+    ]
+    assert cli.main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "running  #7 faces for bh (buffalo_l, gpu lane)" in out and "running  #9 text for x (cloud, cpu lane)" in out
+    del status["running"]
     assert cli.main(["jobs"]) == 0 and "#7" in capsys.readouterr().out
     assert cli.main(["jobs", "--json"]) == 0 and json.loads(capsys.readouterr().out)["items"][0]["id"] == 7
     status["gpu"] = None

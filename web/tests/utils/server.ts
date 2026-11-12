@@ -61,7 +61,7 @@ export const evalFixtures = {
   pair: (): Pair => ({ similarity: 0.62, item_id: 'u1', input: { language: 'en', clip: [14.4, 16.2] }, has_media: true, reference: { text: 'ask not' }, x: { segments: [{ text: ' ask not' }] }, y: { segments: [{ text: ' ask knot' }] }, token: 'tok' }),
 }
 
-const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1 }
+const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1, gpu_jobs: 2, cpu_jobs: 4 }
 
 export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
 export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }

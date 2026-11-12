@@ -45,8 +45,10 @@ export function finding(s: Status): string {
   const waiting = s.queued.length ? `, ${s.queued.length} waiting` : ''
   if (s.lease && s.lease.vram_gb === null) return `The GPU is lent to ${s.lease.app}${s.lease.note ? ` (${s.lease.note})` : ''}${waiting}.`
   const shared = (s.leases ?? []).filter(l => l.vram_gb !== null).map(l => `${l.vram_gb}\u00a0GB to ${l.app}`).join(', ')
-  if (shared && !s.current) return `Lent ${shared}; the rest is free for other work${waiting}.`
-  if (s.current) return `Running ${describeJob(s.current)}${waiting}.`
+  const running = s.running ?? (s.current ? [s.current] : [])
+  if (shared && !running.length) return `Lent ${shared}; the rest is free for other work${waiting}.`
+  if (running.length > 2) return `Running ${running.length} jobs: ${describeJob(running[0])} and ${running.length - 1} more${waiting}.`
+  if (running.length) return `Running ${running.map(describeJob).join(' and ')}${waiting}.`
   if (s.queued.length) return `${s.queued.length} waiting for the GPU.`
   const free = s.budget ? gb(s.budget.free_for_models_mb) : 0
   return s.resident.length ? `Idle, with ${s.resident.length === 1 ? s.resident[0].model : `${s.resident.length} models`} loaded and ${free.toFixed(1)} GB free for more.` : `Idle, nothing loaded: ${free.toFixed(1)} GB free for models.`

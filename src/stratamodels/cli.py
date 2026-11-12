@@ -62,8 +62,9 @@ def cmd_status(args):
     )
     for r in d["resident"]:
         print(f"  loaded   {r['model']:28} {r['vram_mb'] / 1024:5.1f} GB  {r['jobs']} job(s)")
-    if d["current"]:
-        print(f"  running  #{d['current']['id']} {d['current']['role']} for {d['current']['app']}")
+    for j in d.get("running") or ([d["current"]] if d["current"] else []):
+        where = ", ".join(str(x) for x in (j.get("model"), j.get("lane") and f"{j['lane']} lane") if x)
+        print(f"  running  #{j['id']} {j['role']} for {j['app']}" + (f" ({where})" if where else ""))
     for j in d["queued"]:
         print(f"  queued   #{j['id']} {j['kind']} {j['role'] or j['note'] or ''} for {j['app']} ({j['priority']})")
     return 0
@@ -275,7 +276,8 @@ def main(argv=None):
     e.add_argument("--json", action="store_true")
     e.set_defaults(fn=cmd_eval)
     s = sub.add_parser(
-        "set", help='show or change a setting (data_dir, models_dir, vram_reserve_gb); value "default" resets it'
+        "set",
+        help='show or change a setting (data_dir, models_dir, vram_reserve_gb, gpu_jobs, cpu_jobs); value "default" resets it',
     )
     s.add_argument("key")
     s.add_argument("value", nargs="?")

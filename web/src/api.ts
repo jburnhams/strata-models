@@ -4,8 +4,8 @@ import { fetchJson } from 'strata-react'
 export interface Health { ok: boolean; version: string; gpu: boolean }
 export interface GpuProcess { pid: number; used_mb: number; command: string; ours: boolean }
 export interface Gpu { name: string; total_mb: number; used_mb: number; free_mb: number; util_pct: number | null; temp_c: number | null; power_w: number | null; power_limit_w: number | null; processes: GpuProcess[] }
-export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; reserved_mb?: number; free_for_models_mb: number }
-export interface Resident { model: string; runtime: string; roles: string[]; vram_mb: number; load_s: number; loaded_at: number; last_used: number; jobs: number }
+export interface Budget { total_mb: number; used_mb: number; own_mb: number; other_mb: number; reserve_mb: number; reserved_mb?: number; pending_mb?: number; free_for_models_mb: number }
+export interface Resident { model: string; runtime: string; roles: string[]; vram_mb: number; load_s: number; loaded_at: number; last_used: number; jobs: number; busy?: boolean }
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'expired'
 export interface Job {
   id: number; kind: 'run' | 'lease'; app: string; priority: 'interactive' | 'batch'; status: JobStatus; submitted_at: number
@@ -13,7 +13,9 @@ export interface Job {
   vram_gb: number | null; ttl_s: number | null; started_at: number | null; finished_at: number | null; heartbeat_at: number | null; load_s: number | null; run_s: number | null; wait_s?: number
 }
 export interface ServiceEvent { at: number; text: string }
-export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; lease: Job | null; leases?: Job[]; queued: Job[]; events: ServiceEvent[] }
+/** A job running now, and its lane: `gpu`, or `cpu` for zero-VRAM models (recorded outputs, CPU models, cloud CLIs), which never wait for the card. */
+export type RunningJob = Job & { lane?: 'gpu' | 'cpu' }
+export interface Status { gpu: Gpu | null; budget: Budget | null; resident: Resident[]; current: Job | null; running?: RunningJob[]; slots?: { gpu: number; cpu: number }; lease: Job | null; leases?: Job[]; queued: Job[]; events: ServiceEvent[] }
 export interface Sample { at: number; util_pct: number | null; used_mb: number; own_mb: number }
 export interface History { every_s: number | null; samples: Sample[] }
 export interface Role { key: string; description: string; model: string }
@@ -25,7 +27,7 @@ export interface Registry { roles: Role[]; models: Model[] }
 export interface JobPage { items: Job[]; next: number | null }
 export interface UsageRow { app: string; kind: 'run' | 'lease'; role: string | null; jobs: number; failed: number; gpu_s: number }
 export interface Usage { hours: number; rows: UsageRow[] }
-export interface Settings { data_dir: string; models_dir: string; vram_reserve_gb: number }
+export interface Settings { data_dir: string; models_dir: string; vram_reserve_gb: number; gpu_jobs: number; cpu_jobs: number }
 export interface JobFilters { status?: string; app?: string; role?: string; kind?: string }
 
 // Where the app is served from: '' at the server's own root, '/subpath' behind a reverse proxy at that path. From the page's own URL (vite base './'), so one build works in both places.

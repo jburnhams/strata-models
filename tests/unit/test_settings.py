@@ -37,6 +37,19 @@ def test_save_load_reset_and_refusals():
         settings.save(dict(vram_reserve_gb=100))
 
 
+def test_job_slots_default_validate_and_come_from_the_environment(monkeypatch):
+    assert settings.all_settings()["gpu_jobs"] == 2 and settings.jobs("cpu_jobs") == 4
+    assert settings.save(dict(gpu_jobs=" 3 "))["gpu_jobs"] == "3" and settings.jobs("gpu_jobs") == 3
+    with pytest.raises(ValueError, match="whole number"):
+        settings.save(dict(cpu_jobs="many"))
+    with pytest.raises(ValueError, match="between 1 and 16"):
+        settings.save(dict(gpu_jobs=0))
+    monkeypatch.setenv("STRATAMODELS_CPU_JOBS", "8")
+    assert settings.jobs("cpu_jobs") == 8
+    monkeypatch.setenv("STRATAMODELS_GPU_JOBS", "lots")
+    assert settings.jobs("gpu_jobs") == 2  # a bad value falls back to the default
+
+
 def test_corrupt_or_non_dict_settings_file():
     os.makedirs(settings.home(), exist_ok=True)
     p = os.path.join(settings.home(), "settings.json")

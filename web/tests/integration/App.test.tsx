@@ -31,6 +31,16 @@ describe('Overview', () => {
     expect(await screen.findByText('No NVIDIA GPU found: models run on the CPU.')).toBeInTheDocument()
     expect(screen.getByText('Nothing is running.')).toBeInTheDocument()
   })
+  it('lists every job running at once, and a lease beside them', async () => {
+    const s = fixtures.status()
+    const cloud = { ...s.current!, id: 42, role: 'text', model: 'gemini-cli', app: 'evals', started_at: Date.now() / 1000 - 5, lane: 'cpu' as const }
+    const sized = { ...s.queued[1], status: 'running' as const, vram_gb: 4, started_at: Date.now() / 1000 - 60 }
+    mock.status = { ...s, running: [{ ...s.current!, started_at: Date.now() / 1000 - 10, lane: 'gpu' }, cloud], lease: sized, leases: [sized] }
+    setup(<App />)
+    expect(await screen.findByText(/on gemini-cli for/)).toHaveTextContent('(no GPU needed)')
+    expect(screen.getByText(/on whisper-large-v3 for/)).not.toHaveTextContent('no GPU needed')
+    expect(screen.getByText(/asking for 4 GB/)).toBeInTheDocument()
+  })
 })
 
 describe('Models', () => {
@@ -92,6 +102,13 @@ describe('Usage and Settings', () => {
     await user.clear(reserve); await user.type(reserve, '2')
     await user.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(mock.settings.vram_reserve_gb).toBe(2))
+    const gpuJobs = screen.getByLabelText('GPU jobs at once')
+    await user.clear(gpuJobs); await user.type(gpuJobs, '3')
+    const cpuJobs = screen.getByLabelText('Jobs without the GPU at once')
+    await user.clear(cpuJobs); await user.type(cpuJobs, '6')
+    await user.click(screen.getByRole('button', { name: /Save settings|Saved/ }))
+    await waitFor(() => expect(mock.settings.gpu_jobs).toBe(3))
+    expect(mock.settings.cpu_jobs).toBe(6)
     const folder = screen.getByLabelText('Models folder')
     await user.clear(folder); await user.type(folder, 'relative')
     await user.click(screen.getByRole('button', { name: /Save settings|Saved/ }))

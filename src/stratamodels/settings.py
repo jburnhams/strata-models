@@ -5,17 +5,30 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
   data_dir        where the service keeps its own files (registry override, logs). Default: `data/` in this repository (gitignored).
   models_dir      where model weights are downloaded and read from, shared by every runtime. Default: `~/models`.
   vram_reserve_gb VRAM left for the desktop and for processes outside the service, on top of what they already use. Default: 1.0.
+  gpu_jobs        GPU jobs that may run at once (on different models, when they fit in the budget together). Default: 2. 1 is one at a time.
+  cpu_jobs        jobs for zero-VRAM models (recorded outputs, CPU models, cloud CLIs) that may run at once, beside the GPU's. Default: 4.
 
-Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB. The database is chosen by omarchy-db:
+Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
+STRATAMODELS_CPU_JOBS. The database is chosen by omarchy-db:
 STRATAMODELS_DATABASE_URL, else OMARCHY_DB_URL, else schema `stratamodels` of the shared `omarchy` database over the local socket."""
 
 import json
 import os
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULTS = dict(data_dir=os.path.join(REPO, "data"), models_dir=os.path.join("~", "models"), vram_reserve_gb="1.0")
+DEFAULTS = dict(
+    data_dir=os.path.join(REPO, "data"),
+    models_dir=os.path.join("~", "models"),
+    vram_reserve_gb="1.0",
+    gpu_jobs="2",
+    cpu_jobs="4",
+)
 ENV = dict(
-    data_dir="STRATAMODELS_DATA", models_dir="STRATAMODELS_MODELS", vram_reserve_gb="STRATAMODELS_VRAM_RESERVE_GB"
+    data_dir="STRATAMODELS_DATA",
+    models_dir="STRATAMODELS_MODELS",
+    vram_reserve_gb="STRATAMODELS_VRAM_RESERVE_GB",
+    gpu_jobs="STRATAMODELS_GPU_JOBS",
+    cpu_jobs="STRATAMODELS_CPU_JOBS",
 )
 KNOWN = tuple(DEFAULTS)
 
@@ -101,6 +114,8 @@ def save(changes):
             raise KeyError(f"unknown setting {k!r}")
         if k == "vram_reserve_gb" and v is not None:
             _reserve(v)  # refuse a bad number before it is written
+        if k in ("gpu_jobs", "cpu_jobs") and v is not None:
+            v = _slots(k, v)
         if v is None:
             d.pop(k, None)
         else:
@@ -170,5 +185,29 @@ def vram_reserve_gb():
         return float(DEFAULTS["vram_reserve_gb"])
 
 
+def _slots(key, v):
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a whole number of jobs, not {v!r}")
+    if not 1 <= n <= 16:
+        raise ValueError(f"{key} must be between 1 and 16")
+    return n
+
+
+def jobs(key):
+    """How many jobs of a lane (`gpu_jobs` or `cpu_jobs`) the scheduler runs at once."""
+    try:
+        return _slots(key, _raw(key))
+    except ValueError:
+        return int(DEFAULTS[key])
+
+
 def all_settings():
-    return dict(data_dir=data_dir(), models_dir=models_dir(), vram_reserve_gb=vram_reserve_gb())
+    return dict(
+        data_dir=data_dir(),
+        models_dir=models_dir(),
+        vram_reserve_gb=vram_reserve_gb(),
+        gpu_jobs=jobs("gpu_jobs"),
+        cpu_jobs=jobs("cpu_jobs"),
+    )

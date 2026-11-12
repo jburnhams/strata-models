@@ -7,7 +7,7 @@ The inventory and proposal behind this (2026-11-09) are in the project's doc "Lo
 
 ## Architecture
 - `registry.py` + `models.toml`: roles -> models (runtime, name, VRAM estimate, licence, which apps use it). Models whose runtime is not implemented are listed as "not served yet".
-- `scheduler.py`: one worker thread. Picks the next job (interactive first; loaded model first unless it would pass a lease or the oldest job has waited `max_skip_s`); makes room by freeing least recently used models; measures each model's real VRAM with nvidia-smi on load; grants leases (exclusive, heartbeat or expire).
+- `scheduler.py`: one dispatcher thread, each job on a thread of its own, in two lanes (GPU, and CPU for zero-VRAM models; `gpu_jobs`/`cpu_jobs` at once, one job per model; a running model is never evicted and its estimate beyond what it measured stays promised while it runs). Picks the next job (interactive first; loaded model first unless it would pass a lease or the oldest job has waited `max_skip_s`); makes room by freeing least recently used models; measures each model's real VRAM with nvidia-smi on load; grants leases (exclusive, heartbeat or expire).
 - `store.py` / `db/models.py`: one `jobs` table (runs and leases), the queue and the history. omarchy-db migrations, run at start.
 - `runtimes/`: `faces` (insightface), `worker` (venv-worker: a model in a venv of its own, run by a script in `workers/` over JSON lines: Whisper on CUDA 12, TTS), `fake` (tests). The service's own venv is CUDA 13 throughout.
 - `gpu.py`: nvidia-smi parsing, processes with their command lines, an hour of samples.
