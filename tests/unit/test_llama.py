@@ -245,3 +245,21 @@ def test_recorded_replays_by_key(tmp_path, monkeypatch):
         )
     recorded.unload(h)
     assert h == {}
+
+
+def test_recorded_can_match_on_several_params(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRATAMODELS_DATA", str(tmp_path))
+    key = json.dumps(["/a.wav", [1.0, 2.5]])
+    (tmp_path / "r.jsonl").write_text(json.dumps(dict(key=key, output=dict(text="hi"))) + "\n")
+    m = Model(
+        key="f",
+        runtime="recorded",
+        name="f",
+        roles=("transcribe",),
+        vram_gb=0,
+        options=dict(file="r.jsonl", by=["path", "clip"]),
+    )
+    h = recorded.load(m, str(tmp_path))
+    assert recorded.run(h, dict(path="/a.wav", clip=[1.0, 2.5], language="en"))["text"] == "hi"
+    with pytest.raises(RunError, match="nothing recorded"):
+        recorded.run(h, dict(path="/a.wav"))  # the whole file is another key than a clip of it

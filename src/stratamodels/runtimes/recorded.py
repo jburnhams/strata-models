@@ -3,7 +3,7 @@ then stand in an eval beside the local candidates, on the same items, in the bli
 
 options:
   file   a JSON lines file of {"key": ..., "output": {...}} (absolute, or relative to the data folder)
-  by     the job param the key is matched on (default "image")
+  by     the job param the key is matched on (default "image"), or a list of them (["path", "clip"]): the key is then their JSON list
 A job whose key was not recorded fails, so a missing record counts against the baseline rather than vanishing. Uses no GPU."""
 
 import json
@@ -31,7 +31,8 @@ def load(model, models_dir):
 
 
 def run(handle, params):
-    k = params.get(handle["by"])
+    by = handle["by"]
+    k = json.dumps([params.get(b) for b in by]) if isinstance(by, list) else params.get(by)
     if k is None:
         raise RunError(f"give {handle['by']}: recorded outputs are found by it")
     if str(k) not in handle["outputs"]:
