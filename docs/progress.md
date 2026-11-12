@@ -44,3 +44,16 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
   end. `wpm` or `fit_s` sets a target: Kokoro re-speaks at the speed that lands on it, and sampled models make `tries` takes and keep the
   nearest. A pitch-keeping stretch (0.75 to 1.35x) then closes the rest, and `fit` says when it could not.
 - Eval speak-pace (primary pace_spread, baseline unpaced kokoro-lewis) asks whether 160 wpm evens the lines without hurting them.
+
+## 2026-11-12: video enhancement for digitised VHS
+- The tape (H.264 10 Mb/s in MP4) is PAL 720x576 at 25 fps, SAR 787:720 (4:3 from the 702-pixel active line), coded
+  interlaced; ffmpeg idet on 3 x 1000 frames: 100 % TFF. The file's own field order says nothing, so the worker forces it. Active picture: about
+  4 px of black on the left, 10 on the right and 8 head-switching lines at the bottom: crop 692x568 at (14, 0), which is 4:3 at 1440 x 1080.
+- The classical baseline (bwdif, hqdn3d, lanczos) runs at ~20 s per 8 s clip on the CPU. The worker's CPU-only engines were run end to end on
+  a scratch instance (SQLite, scratch data and models folders): deinterlace-vhs 16 outputs, video-enhance-vhs's two ffmpeg candidates.
+- FlashVSR (v1/v1.1) needs Block-Sparse-Attention built from source; FlashVSR+ (Oct 2026, same lab, Apache-2.0) has a Triton kernel and a
+  PyTorch SDPA fallback, and output sides must be multiples of 128 (1536 x 1152 for 4:3). SeedVR2 runs through numz's standalone CLI
+  (v2.5.24): 3B FP8 with block swap for the 12 GB card; FP8 is upcast on Ampere (the RTX 3060 has no FP8 units).
+- VapourSynth R80 is installed on omarchy with only its core plugins: QTGMC needs havsfunc (or vsjetpack), mvtools, nnedi3/znedi3, fmtconv,
+  misc, rgvs/zsmooth and a source filter; not attempted.
+- Guards are ratios to the baseline: against plain lanczos (no GPU) peak VRAM cannot be a guard, so the spec guards run time (100x) and failures.
