@@ -37,7 +37,8 @@ params:
   cleanup        a VHS cleanup stage before any engine (see cleanup_filters): {chroma_shift = [cb_h, cb_v, cr_h, cr_v], filters = "...",
                  model = "1x model file under <models>/spandrel/", tile = 0}; the same stage can go before every upscaler, so a cleanup eval
                  picks it once with lanczos and the winner then chains
-  quality        measure the result (default true): see quality()
+  quality        measure the result (default true): see quality(); readings that cannot be taken are left out and `quality.skipped`
+                 says why (no numpy: only the ffmpeg readings), and never fail the job
   out_dir        added by the runtime
 Result: {path, width, height, fps, frames, seconds, engine, model, crops: [{id, label, box, path, stills}], stills: [paths], enhance_s, fps_enhance,
 peak_vram_mb (the engine's processes on the card, at their highest), quality {ssim, psnr, flicker, flicker_source, flicker_ratio,
@@ -520,6 +521,11 @@ def quality(p, src, result, info, run=subprocess.run):
         flicker=f_out, flicker_source=f_src, flicker_ratio=(f_out / f_src) if f_out is not None and f_src else None
     )
     times = [t for t in (p.get("stills") or []) if isinstance(t, (int, float)) and 0 <= t < info["seconds"]]
+    try:
+        import numpy  # noqa: F401  (the stills' readings need it; a venv without it still gets the ffmpeg readings above)
+    except ImportError:
+        q["skipped"] = "sharpness, luma_noise and chroma_noise: numpy is not installed in this worker's venv"
+        return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in q.items()}
     frames = frames_at(result, times, (pw, ph), run=run)
     if frames:
         q.update(
@@ -955,7 +961,12 @@ def _run(p, src, crop, tape, tape_src, stem, out, fps, audio, t0, vs_work, run_,
         "deinterlace": "bwdif" if tape["deinterlace"] in VS_DEINTERLACERS else tape["deinterlace"],
         "cleanup": None,
     }
-    q = quality(plain, tape_src, out, info, run=run_) if tape.get("quality", True) else None
+    q = None
+    if tape.get("quality", True):
+        try:
+            q = quality(plain, tape_src, out, info, run=run_)
+        except Exception as e:  # the readings are context: a reading that cannot be taken never fails the job (its metrics read as not measured)
+            q = dict(skipped=f"{type(e).__name__}: {e}"[:300])
     return dict(
         path=out,
         width=info["width"],

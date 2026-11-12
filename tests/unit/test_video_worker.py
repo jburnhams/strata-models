@@ -848,3 +848,38 @@ def test_qtgmc_runs_the_vapoursynth_stage_then_the_engine_on_its_intermediate(
 
     with pytest.raises(RuntimeError, match="VapourSynth stage failed"):
         V.run(dict(path=clip, out_dir=str(out), deinterlace="qtgmc"), run_=FakeRun(), popen=failing)
+
+
+def test_quality_without_numpy_keeps_the_ffmpeg_readings_and_says_what_was_skipped(monkeypatch, tmp_path, clip):
+    import builtins
+
+    real = builtins.__import__
+
+    def no_numpy(name, *a, **k):
+        if name == "numpy" or name.startswith("numpy."):
+            raise ImportError("No module named 'numpy'")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_numpy)
+    q = V.quality(P(path=clip, crop=[14, 0, 692, 568]), SRC, str(tmp_path / "r.mp4"), dict(seconds=8.0), run=FakeRun())
+    assert q["ssim"] == 0.965 and q["flicker_ratio"] == 1.0 and "sharpness" not in q and "luma_noise" not in q
+    assert "numpy is not installed" in q["skipped"]
+
+
+def test_a_reading_that_fails_never_fails_the_job(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    from stratamodels.evals import metrics as M
+
+    V.load(dict(key="video-lanczos", options=dict(engine="ffmpeg")), str(tmp_path))
+
+    def broken(*a, **k):
+        raise RuntimeError("ffmpeg failed: no ssim")
+
+    monkeypatch.setattr(V, "quality", broken)
+    r = V.run(dict(path=clip, out_dir=str(tmp_path / "out")), run_=FakeRun())
+    assert r["path"].endswith(".mp4") and r["quality"] == dict(skipped="RuntimeError: ffmpeg failed: no ssim")
+    assert (
+        M.METRICS["sharpness"].score({}, r, None) is None and M.METRICS["fidelity_ssim"].score({}, r, None) is None
+    )  # not measured, not a failure
+    assert M.METRICS["failed"].score({}, r, None) is False
+    r2 = V.run(dict(path=clip, out_dir=str(tmp_path / "out"), quality=False), run_=FakeRun())
+    assert r2["quality"] is None
