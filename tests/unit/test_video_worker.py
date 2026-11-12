@@ -100,7 +100,7 @@ def test_prep_filter_deinterlaces_with_the_field_order_forced_crops_and_makes_sq
     ("kw", "match"),
     [
         (dict(field_order="auto"), "field_order"),
-        (dict(deinterlace="qtgmc"), "deinterlace"),
+        (dict(deinterlace="nnedi"), "deinterlace"),
         (dict(crop=[0, 0, 800, 576]), "not inside"),
         (dict(crop=[0, 0, 720]), r"\[x, y, w, h\]"),
         (dict(crop=[0, 0, 0, 576]), "not inside"),
@@ -752,3 +752,99 @@ def test_load_spandrel_on_the_cpu_when_asked(monkeypatch, tmp_path):
     )
     m = V.load_spandrel("c.pth", str(tmp_path), cpu=True)
     assert m["device"] == "cpu" and not m["half"] and desc.model.dev == "cpu"
+
+
+def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
+    q = V.vs_script(P(deinterlace="qtgmc"), "/t/c.mkv")
+    assert "c = core.bs.VideoSource(source='/t/c.mkv')" in q and "c = core.std.SetFieldBased(c, 2)" in q
+    assert (
+        "c = QTempGaussMC().deinterlace(c, tff=True)" in q and q.endswith("c.set_output()\n") and "mc_degrain" not in q
+    )
+    d = V.vs_script(
+        P(field_order="bff", cleanup=dict(vs=dict(degrain=dict(tr=3, thsad=400)), planes="luma")), "/t/c.mkv"
+    )
+    assert "c = core.bwdif.Bwdif(c, field=2)" in d and "c = mc_degrain(c, tr=3, thsad=400, blksize=16, planes=0)" in d
+    n = V.vs_script(P(deinterlace="none", cleanup=dict(vs=dict(degrain={}), planes="chroma")), "/t/c.mkv")
+    assert "SetFieldBased" not in n and "planes=[1, 2]" in n and "tr=2, thsad=300" in n
+    assert (
+        V.needs_vs(P(deinterlace="qtgmc")) and V.needs_vs(P(cleanup=dict(vs=dict(degrain={})))) and not V.needs_vs(P())
+    )
+
+
+@pytest.mark.parametrize(
+    ("kw", "match"),
+    [
+        (dict(deinterlace="yadif", cleanup=dict(vs=dict(degrain={}))), "use bwdif, qtgmc or none"),
+        (dict(cleanup=dict(vs="smdegrain")), "cleanup vs is"),
+        (dict(cleanup=dict(vs=dict(degrain=dict(tr=0)))), "whole numbers"),
+        (dict(cleanup=dict(vs=dict(degrain=dict(radius=2)))), "whole numbers"),
+        (dict(cleanup=dict(vs=dict(degrain={}), planes="red")), "planes is all, luma or chroma"),
+    ],
+)
+def test_vs_script_refuses_bad_stages(kw, match):
+    with pytest.raises(protocol.ParamError, match=match):
+        V.vs_script(P(**kw), "/t/c.mkv")
+
+
+def test_vspipe_comes_from_the_vapoursynth_venv(tmp_path):
+    with pytest.raises(RuntimeError, match="setup_worker_venv.sh vapoursynth"):
+        V.vspipe_of(str(tmp_path), {})
+    exe = tmp_path / "venvs" / "vapoursynth" / "bin" / "vspipe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert V.vspipe_of(str(tmp_path), {}) == str(exe) and V.vspipe_of("/none", dict(vspipe=str(exe))) == str(exe)
+
+
+def test_qtgmc_runs_the_vapoursynth_stage_then_the_engine_on_its_intermediate(
+    monkeypatch, tmp_path, clip, ffmpeg_on_path
+):
+    vspipe = tmp_path / "vspipe"
+    vspipe.write_text("")
+    V.load(dict(key="video-lanczos", options=dict(engine="ffmpeg", vspipe=str(vspipe))), str(tmp_path))
+    monkeypatch.setattr(V, "quality", lambda p, src, out, info, run=None: dict(seen=p["deinterlace"], path=p["path"]))
+    procs = []
+
+    def popen(cmd, stdout=None, stdin=None, **kw):
+        if cmd[0] == "ffmpeg":
+            open(cmd[-1], "wb").write(b"ffv1")
+        p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), wait=lambda: 0)
+        procs.append(p)
+        return p
+
+    run = FakeRun()
+    out = tmp_path / "out"
+    r = V.run(
+        dict(
+            path=clip,
+            out_dir=str(out),
+            crop=[14, 0, 692, 568],
+            deinterlace="qtgmc",
+            cleanup=dict(vs=dict(degrain={}), planes="luma", filters="hqdn3d=1"),
+        ),
+        run_=run,
+        popen=popen,
+    )
+    vsp, enc = procs
+    assert (
+        vsp.cmd[:3] == [str(vspipe), "-c", "y4m"]
+        and enc.cmd[enc.cmd.index("-c:v") + 1] == "ffv1"
+        and enc.cmd[-1].endswith("vs.mkv")
+    )
+    main = next(
+        c
+        for c in run.calls
+        if c[0] == "ffmpeg" and c[-1].endswith(".mp4") and "-vf" in c and "scale=1440:1080" in c[c.index("-vf") + 1]
+    )
+    vf = main[main.index("-vf") + 1]
+    assert (
+        main[main.index("-i") + 1].endswith("vs.mkv") and not vf.startswith(("bwdif", "yadif")) and "hqdn3d=1" in vf
+    )  # deinterlaced already; the ffmpeg cleanup still runs
+    assert main[main.index("-r") + 1] == "25"  # the intermediate's own rate (the fake probe says 25): not doubled again
+    assert r["quality"] == dict(seen="bwdif", path=clip)  # measured against the tape, deinterlaced the plain way
+    assert not [d for d in os.listdir(out) if d.startswith("video-vs-")]  # the intermediate is gone
+
+    def failing(cmd, stdout=None, stdin=None, **kw):
+        return types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), wait=lambda: 1)
+
+    with pytest.raises(RuntimeError, match="VapourSynth stage failed"):
+        V.run(dict(path=clip, out_dir=str(out), deinterlace="qtgmc"), run_=FakeRun(), popen=failing)

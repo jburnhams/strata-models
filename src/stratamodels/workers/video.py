@@ -132,8 +132,8 @@ def prep_filter(p, src):
         f.append(f"bwdif=mode=send_field:parity={fo}:deint=all")
     elif di == "yadif":
         f.append(f"yadif=mode=send_field:parity={fo}:deint=all")
-    elif di != "none":
-        raise ParamError(f"deinterlace is bwdif, yadif or none, not {di!r}")
+    elif di not in ("none", *VS_DEINTERLACERS):  # qtgmc is done by the VapourSynth stage before ffmpeg sees the clip
+        raise ParamError(f"deinterlace is bwdif, yadif, qtgmc or none, not {di!r}")
     x, y, w, h = crop_box(p, src)
     if (x, y, w, h) != (0, 0, src["width"], src["height"]):
         f.append(f"crop={w}:{h}:{x}:{y}")
@@ -143,7 +143,109 @@ def prep_filter(p, src):
     return ",".join(f)
 
 
-CLEANUP_KEYS = ("chroma_shift", "filters", "planes", "model", "tile")
+CLEANUP_KEYS = ("chroma_shift", "filters", "planes", "vs", "model", "tile")
+
+
+# ---- the VapourSynth stage: QTGMC and motion-compensated denoise (vsjetpack), before everything else -------------------------------------
+VS_DEINTERLACERS = ("qtgmc",)
+VS_PLANES = dict(all=None, luma=0, chroma=[1, 2])
+
+
+def needs_vs(p):
+    return p.get("deinterlace") in VS_DEINTERLACERS or bool((p.get("cleanup") or {}).get("vs"))
+
+
+def vs_script(p, path):
+    """A VapourSynth script (text) for the stage: the clip through bestsource with its field order set, deinterlaced (qtgmc: vsjetpack's
+    QTempGaussMC; bwdif: the bwdif plugin, double rate) and denoised by cleanup.vs = {degrain = {tr, thsad, blksize}} (vsjetpack's
+    mc_degrain: SMDegrain's motion-compensated temporal average, on the cleanup's `planes`). The output is progressive at the field rate."""
+    tff = p["field_order"] == "tff"
+    di = p["deinterlace"]
+    lines = ["import vapoursynth as vs", "from vapoursynth import core", f"c = core.bs.VideoSource(source={path!r})"]
+    if di != "none":
+        lines.append(f"c = core.std.SetFieldBased(c, {2 if tff else 1})")
+    if di == "qtgmc":
+        lines += ["from vsdeinterlace import QTempGaussMC", f"c = QTempGaussMC().deinterlace(c, tff={tff})"]
+    elif di == "bwdif":
+        lines.append(f"c = core.bwdif.Bwdif(c, field={3 if tff else 2})")
+    elif di != "none":
+        raise ParamError(f"deinterlace {di!r} with a VapourSynth cleanup: use bwdif, qtgmc or none")
+    c = p.get("cleanup") or {}
+    v = c.get("vs")
+    if v:
+        if not isinstance(v, dict) or set(v) - {"degrain"}:
+            raise ParamError(f"cleanup vs is {{degrain = {{tr, thsad, blksize}}}}, not {v!r}")
+        d = v["degrain"] or {}
+        if (
+            not isinstance(d, dict)
+            or set(d) - {"tr", "thsad", "blksize"}
+            or not all(isinstance(x, int) and x > 0 for x in d.values())
+        ):
+            raise ParamError(f"degrain takes whole numbers tr, thsad, blksize, not {d!r}")
+        planes = VS_PLANES.get(c.get("planes", "all"), "bad")
+        if planes == "bad":
+            raise ParamError(f"cleanup planes is all, luma or chroma, not {c.get('planes')!r}")
+        lines += [
+            "from vsdenoise import mc_degrain",
+            f"c = mc_degrain(c, tr={d.get('tr', 2)}, thsad={d.get('thsad', 300)}, blksize={d.get('blksize', 16)}, planes={planes!r})",
+        ]
+    lines.append("c.set_output()")
+    return "\n".join(lines) + "\n"
+
+
+def vspipe_of(models_dir, options):
+    """vspipe of the VapourSynth venv (scripts/setup_worker_venv.sh vapoursynth), or options.vspipe."""
+    exe = options.get("vspipe") or os.path.join(models_dir, "venvs", "vapoursynth", "bin", "vspipe")
+    if not os.path.isfile(exe):
+        raise RuntimeError(
+            f"no {exe}: run scripts/setup_worker_venv.sh vapoursynth (QTGMC and motion-compensated denoise need it)"
+        )
+    return exe
+
+
+def run_vs(p, work, popen=subprocess.Popen):
+    """The VapourSynth stage into a lossless intermediate (FFV1, the source's audio copied), and the params to run the rest on it: the
+    deinterlacing is done (deinterlace "none") and the stage's denoise with it (cleanup.vs dropped)."""
+    script = os.path.join(work, "stage.vpy")
+    with open(script, "w") as f:
+        f.write(vs_script(p, p["path"]))
+    inter = os.path.join(work, "vs.mkv")
+    vsp = popen([vspipe_of(E["models_dir"], E["options"]), "-c", "y4m", script, "-"], stdout=subprocess.PIPE)
+    enc = popen(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "yuv4mpegpipe",
+            "-i",
+            "-",
+            "-i",
+            p["path"],
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0?",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-c:a",
+            "copy",
+            inter,
+        ],
+        stdin=vsp.stdout,
+    )
+    vsp.stdout.close()  # ffmpeg holds the pipe now: vspipe gets SIGPIPE if ffmpeg dies
+    rc_e, rc_v = enc.wait(), vsp.wait()
+    if rc_v != 0 or rc_e != 0:
+        raise RuntimeError(
+            f"the VapourSynth stage failed (vspipe exit {rc_v}, ffmpeg exit {rc_e}): see the worker's log"
+        )
+    c = {k: v for k, v in (p.get("cleanup") or {}).items() if k != "vs"}
+    return {**p, "path": inter, "deinterlace": "none", "cleanup": c or None}
 
 
 # mergeplanes inputs: 0 the original, 1 the filtered copy; output planes Y, U, V
@@ -774,11 +876,28 @@ def run(params, run_=subprocess.run, popen=subprocess.Popen):
     src = probe(p["path"], run=run_)
     crop = crop_box(p, src)
     prep_filter(p, src)  # checks the params before any work
+    tape, tape_src = p, src  # what quality() measures against: the tape, deinterlaced the plain way
+    if needs_vs(p):
+        vs_script(p, p["path"])  # checks the stage's params too
     stem = os.path.join(out_dir, f"video-{uuid.uuid4().hex[:12]}")
     out = stem + ".mp4"
     fps = src["fps"] * (2 if p["deinterlace"] != "none" else 1)
     audio = p["path"] if src["audio"] else None
     t0 = time.time()
+    vs_work = tempfile.mkdtemp(prefix="video-vs-", dir=out_dir) if needs_vs(p) else None
+    try:
+        return _run(p, src, crop, tape, tape_src, stem, out, fps, audio, t0, vs_work, run_, popen)
+    finally:
+        if vs_work:
+            shutil.rmtree(vs_work, ignore_errors=True)
+
+
+def _run(p, src, crop, tape, tape_src, stem, out, fps, audio, t0, vs_work, run_, popen):
+    if vs_work:  # the VapourSynth stage first; everything after reads its intermediate (progressive, at the field rate, with the audio)
+        p = run_vs(p, vs_work, popen=popen)
+        src = probe(p["path"], run=run_)
+        fps, audio = src["fps"], (p["path"] if src["audio"] else None)
+    out_dir = os.path.dirname(out)
     eng = E["engine"]
     cm = cleanup_model(p)
     if eng == "ffmpeg":
@@ -830,7 +949,13 @@ def run(params, run_=subprocess.run, popen=subprocess.Popen):
             shutil.rmtree(work, ignore_errors=True)
     enhance_s = time.time() - t0
     info, crops, stills = extras(p, out, crop, stem, run=run_)
-    q = quality(p, src, out, info, run=run_) if p.get("quality", True) else None
+    # measured against the tape as bwdif deinterlaces it, whatever this candidate did, so every candidate is held to the same reference
+    plain = {
+        **tape,
+        "deinterlace": "bwdif" if tape["deinterlace"] in VS_DEINTERLACERS else tape["deinterlace"],
+        "cleanup": None,
+    }
+    q = quality(plain, tape_src, out, info, run=run_) if tape.get("quality", True) else None
     return dict(
         path=out,
         width=info["width"],

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Make the venv a venv-worker model runs in: <models>/venvs/NAME (models dir: STRATAMODELS_MODELS, default ~/models). Needs uv (and git, curl).
-#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|video|seedvr2|flashvsr-plus
+#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|video|seedvr2|flashvsr-plus|vapoursynth
 # Each pins what its model needs; they are kept apart from the service's venv on purpose (Chatterbox wants torch 2.6, for one).
 set -euo pipefail
-name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, video, seedvr2 or flashvsr-plus}
+name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, video, seedvr2, flashvsr-plus or vapoursynth}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 TORCH_INDEX=https://download.pytorch.org/whl/cu128   # CUDA 12.8 wheels: they bring their own CUDA libraries, any recent driver runs them
 py=3.12
@@ -18,6 +18,9 @@ case $name in
   video) pkgs="torch spandrel numpy" ;;                  # workers/video.py, engines ffmpeg and spandrel; weights below, into <models>/spandrel/
   seedvr2) pkgs="" ;;                                    # SeedVR2 through numz/ComfyUI-SeedVR2_VideoUpscaler's CLI (Apache-2.0), cloned into <models>/src/seedvr2
   flashvsr-plus) pkgs=""; py=3.10 ;;                     # FlashVSR+ (OpenImagingLab, Apache-2.0), cloned into <models>/src/flashvsr-plus; wants Python 3.10 and torch <2.8
+  # VapourSynth R82 and its plugins as PyPI wheels (no system packages, no sudo) with vsjetpack (MIT): QTGMC (vsdeinterlace.QTempGaussMC)
+  # and SMDegrain-style motion-compensated denoise (vsdenoise.mc_degrain) for workers/video.py's VapourSynth stage, which runs its vspipe
+  vapoursynth) py=3.13; pkgs="vapoursynth vsjetpack vapoursynth-mvtools vapoursynth-znedi3 vapoursynth-zsmooth vapoursynth-bestsource vapoursynth-bwdif vapoursynth-resize2 vapoursynth-akarin vapoursynth-vszip numpy" ;;
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
 mkdir -p "$models/venvs"; uv venv -q -p $py "$venv"

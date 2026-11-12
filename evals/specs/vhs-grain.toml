@@ -8,8 +8,8 @@ similarity = "video"
 
 # Luma only (the colour is the chroma-cleanup eval's): cleanup planes = "luma" keeps the colour planes bit-identical. Spatial-temporal hqdn3d at two strengths, ffmpeg's adaptive temporal average
 # (atadenoise) and non-local means (nlmeans, spatial). The usual best for VHS grain is a motion-compensated temporal denoise (SMDegrain /
-# MDegrain, or QTGMC's own), which averages the same detail across frames instead of blurring it: it needs VapourSynth plugins
-# (mvtools, havsfunc) not installed on omarchy yet, and joins this eval as a candidate when they are. Same lanczos to 1440 x 1080 after.
+# MDegrain), which averages the same detail across frames instead of blurring it: vsjetpack's mc_degrain in the worker's VapourSynth stage
+# (scripts/setup_worker_venv.sh vapoursynth), on luma only, at two strengths. Same lanczos to 1440 x 1080 after.
 [decision]
 primary = "judged"
 baseline = "none"
@@ -44,6 +44,18 @@ name = "nlmeans"
 model = "video-lanczos"
 params = { cleanup = { filters = "nlmeans=s=2.5:p=7:r=11", planes = "luma" } }
 note = "ffmpeg non-local means, spatial"
+
+[[candidates]]
+name = "smdegrain"
+model = "video-lanczos"
+params = { cleanup = { vs = { degrain = { tr = 2, thsad = 300 } }, planes = "luma" } }
+note = "motion-compensated temporal denoise (vsjetpack mc_degrain, SMDegrain's method): 2 frames each side, thSAD 300, luma"
+
+[[candidates]]
+name = "smdegrain-strong"
+model = "video-lanczos"
+params = { cleanup = { vs = { degrain = { tr = 3, thsad = 500 } }, planes = "luma" } }
+note = "the same, stronger: 3 frames each side, thSAD 500"
 
 # Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
 # agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
