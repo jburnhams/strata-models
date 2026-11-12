@@ -4,7 +4,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
-**VHS cleanup: a stage before any upscaler, and one eval per cleanup problem (branch `claude/project-thread-rea1ol`)**
+**VHS cleanup: a stage before any upscaler, and one eval per cleanup problem (branch `claude/vhs-cleanup-evals`)**
 Jonathan asked for VHS-specific noise removal, as separate evals for the different cleanup options.
 
 - `workers/video.py`: params `cleanup = { chroma_shift = [cb_h, cb_v, cr_h, cr_v], filters = "...", model = "1x file", tile }`, the same for every engine. The shift and filters run on the deinterlaced, cropped picture in the tape's own pixels (before the resize); the 1x model (spandrel) runs on the prepared frames, then the engine (lanczos, an upscaler, or the prepared file a CLI engine reads). So the winners chain in front of any upscaler. `pipe_frames` puts frames through any list of spandrel models (cleanup, then upscaler) and kills both ffmpegs on a failure.
