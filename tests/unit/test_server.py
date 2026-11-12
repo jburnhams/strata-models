@@ -20,12 +20,16 @@ def client(scheduler):
 
 
 def worker(scheduler, n=1):
-    """Run `n` steps on a thread shortly after, as the real worker would, so a waiting request sees the job finish."""
+    """Handle `n` jobs or leases on a thread, as the real worker would, so a waiting request sees the job finish. It keeps stepping until
+    each has turned up (up to 30 s): a fixed sleep raced a slow runner's request, which then waited forever for a step already taken."""
 
     def go():
-        for _ in range(n):
-            time.sleep(0.05)
-            scheduler.step()
+        end = time.monotonic() + 30
+        done = 0
+        while done < n and time.monotonic() < end:
+            time.sleep(0.02)
+            if scheduler.step() is not None:
+                done += 1
 
     t = threading.Thread(target=go)
     t.start()
