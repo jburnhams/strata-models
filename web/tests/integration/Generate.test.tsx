@@ -24,7 +24,7 @@ describe('Generate', () => {
     await user.type(screen.getByLabelText('Seed'), '42')
     const file = new File(['png'], 'ref.png', { type: 'image/png' })
     await user.upload(document.querySelector('input[type=file]') as HTMLInputElement, file)
-    expect(await screen.findByText('1 reference picture added')).toBeInTheDocument()
+    expect(await screen.findByText(/1\sreference picture added/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Clear references' }))
     expect(screen.getByText('Add a reference picture')).toBeInTheDocument()
   })
