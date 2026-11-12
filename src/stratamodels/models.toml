@@ -161,35 +161,26 @@ options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 
 # Cloud models on Jonathan's subscriptions (no API credits), recorded through the vendors' own CLIs by scripts/evals/record_cloud.py with the
 # same preset and context as the local candidates (--like qwen3.5-9b). Not models this service runs: replayed by picture for the evals.
-[models."gemini-4-argon-photos-v1"]
+# Smallest tier first (Jonathan, 2026-11-12): a bigger cloud model is tried only where the local models beat the small one.
+[models."gemini-3.8-flash-photos-v1"]
 runtime = "recorded"
-name = "Gemini 4 Argon (medium) via Antigravity CLI, photo-describe-v1"
+name = "Gemini 3.8 Flash (low) via Antigravity CLI, photo-describe-v1"
 roles = ["vision-language"]
 vram_gb = 0.0
-licence = "outputs recorded from Google AI Pro (agy -p --model gemini-4-argon-medium)"
+licence = "outputs recorded from Google AI Pro (agy -p --model gemini-3.8-flash-low)"
 source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli agy"
 used_by = []
-options = { file = "evals/recorded/gemini-4-argon-medium-photo-describe-v1.jsonl", by = "image" }
+options = { file = "evals/recorded/gemini-3.8-flash-low-photo-describe-v1.jsonl", by = "image" }
 
-[models."gpt-6.1-terra-photos-v1"]
+[models."gpt-6-luna-photos-v1"]
 runtime = "recorded"
-name = "GPT-6.1 Terra via Codex CLI, photo-describe-v1"
+name = "GPT-6 Luna via Codex CLI, photo-describe-v1"
 roles = ["vision-language"]
 vram_gb = 0.0
-licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-terra)"
+licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6-luna)"
 source = "scripts/evals/record_cloud.py describe-photos --like qwen3.5-9b --cli codex"
 used_by = []
-options = { file = "evals/recorded/gpt-6.1-terra-photo-describe-v1.jsonl", by = "image" }
-
-[models."gpt-6.1-sol-photos-v1"]
-runtime = "recorded"
-name = "GPT-6.1 Sol via Codex CLI, photo-describe-v1 (the 20 judged pictures: Sol's Plus allowance is small)"
-roles = ["vision-language"]
-vram_gb = 0.0
-licence = "outputs recorded from ChatGPT Plus (codex exec -m gpt-6.1-sol)"
-source = "scripts/evals/record_cloud.py describe-photos-slow --like qwen3.5-9b --cli codex"
-used_by = []
-options = { file = "evals/recorded/gpt-6.1-sol-photo-describe-v1.jsonl", by = "image" }
+options = { file = "evals/recorded/gpt-6-luna-photo-describe-v1.jsonl", by = "image" }
 
 [models.ast-audioset]
 runtime = "transformers"
