@@ -85,6 +85,8 @@ nearest-neighbour) and `stills` (PNG frames at fixed times, for `similarity = "v
 also writes the source enlarged the same way, as the item's reference, so the Judge tab shows X, Y and the Source on one clock, and the region
 chips switch all three to the face, the text or the stripes, where an upscaler's gains and inventions show; the whole frame is one chip away.
 Every engine gets the same deinterlaced, cropped, square-pixel clip and the same finish, so a pair differs only in the enhancement.
+Cleanup evals (`vhs-chroma-shift`, `vhs-chroma-cleanup`, `vhs-grain`) hold the upscale fixed (lanczos) and vary only the worker's `cleanup`
+stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate.
 
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.

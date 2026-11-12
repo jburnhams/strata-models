@@ -1,0 +1,45 @@
+name = "vhs-chroma-shift"
+question = "Is the tape's colour offset from its detail, and which shift puts it back?"
+role = "video-enhance"
+dataset = "vhs-clips-8"
+metrics = ["judged", "latency_s", "failed"]
+judge = true                 # judged on the regions: colour edges against detail (a red book, a jumper on a striped sofa, a face)
+similarity = "video"
+
+# VHS records colour at a fraction of the detail's bandwidth and often a few pixels late. A gradient correlation of chroma against
+# luma on 7 clips found no offset clear of the noise (the colour is too soft), so both directions are tried and the eye decides. Only the
+# cleanup differs: every candidate is the same lanczos to 1440 x 1080 after (model video-lanczos), and the shift is in the tape's own pixels.
+[decision]
+primary = "judged"
+baseline = "none"
+min_effect = 0.1
+guards = { latency_s = 3.0, failed = 1.0 }
+
+[[candidates]]
+name = "none"
+model = "video-lanczos"
+note = "as captured"
+
+[[candidates]]
+name = "left-2"
+model = "video-lanczos"
+params = { cleanup = { chroma_shift = [-2, 0, -2, 0] } }
+note = "both colour planes 2 px left (the usual VHS lag)"
+
+[[candidates]]
+name = "left-4"
+model = "video-lanczos"
+params = { cleanup = { chroma_shift = [-4, 0, -4, 0] } }
+note = "4 px left"
+
+[[candidates]]
+name = "right-2"
+model = "video-lanczos"
+params = { cleanup = { chroma_shift = [2, 0, 2, 0] } }
+note = "2 px right: a control, in case the capture leads"
+
+[[candidates]]
+name = "up-1"
+model = "video-lanczos"
+params = { cleanup = { chroma_shift = [0, -1, 0, -1] } }
+note = "1 line up: colour a line low is the other common offset"

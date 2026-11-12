@@ -33,6 +33,9 @@ params:
   stills         times in seconds of the frames kept as PNG (default [1, 3, 5, 7], those past the end left out)
   crf            x264 quality of the result (default 14; the regions get crf - 2)
   seed           for the diffusion engines (default 42)
+  cleanup        a VHS cleanup stage before any engine (see cleanup_filters): {chroma_shift = [cb_h, cb_v, cr_h, cr_v], filters = "...",
+                 model = "1x model file under <models>/spandrel/", tile = 0}; the same stage can go before every upscaler, so a cleanup eval
+                 picks it once with lanczos and the winner then chains
   out_dir        added by the runtime
 Result: {path, width, height, fps, frames, seconds, engine, model, crops: [{id, label, box, path}], stills: [paths], enhance_s, fps_enhance,
 peak_vram_mb (the engine's processes on the card, at their highest)}."""
@@ -130,9 +133,36 @@ def prep_filter(p, src):
     x, y, w, h = crop_box(p, src)
     if (x, y, w, h) != (0, 0, src["width"], src["height"]):
         f.append(f"crop={w}:{h}:{x}:{y}")
+    f += cleanup_filters(p.get("cleanup"))
     pw, ph = _pair(p["prep_size"], "prep_size")
     f.append(f"scale={pw}:{ph}:flags=lanczos,setsar=1")
     return ",".join(f)
+
+
+CLEANUP_KEYS = ("chroma_shift", "filters", "model", "tile")
+
+
+def cleanup_filters(c):
+    """The ffmpeg part of a `cleanup` stage, run on the deinterlaced, cropped picture at its own pixels (before the resize, so a shift is in
+    the tape's pixels): chroma_shift [cb_h, cb_v, cr_h, cr_v] (chroma moved against luma; negative is left or up; edges smeared), then
+    `filters` (any ffmpeg filters, e.g. a chroma-only hqdn3d "hqdn3d=0:4:0:6"). Its `model` (a 1x spandrel model) runs after the resize."""
+    if not c:
+        return []
+    if not isinstance(c, dict) or set(c) - set(CLEANUP_KEYS):
+        raise ParamError(f"cleanup is a table of {', '.join(CLEANUP_KEYS)}, not {c!r}")
+    f = []
+    cs = c.get("chroma_shift")
+    if cs is not None:
+        if not (
+            isinstance(cs, (list, tuple)) and len(cs) == 4 and all(isinstance(v, int) and abs(v) <= 32 for v in cs)
+        ):
+            raise ParamError(f"chroma_shift is [cb_h, cb_v, cr_h, cr_v] in whole pixels, not {cs!r}")
+        f += ["format=yuv444p", "chromashift=cbh={}:cbv={}:crh={}:crv={}:edge=smear".format(*cs)]
+    if c.get("filters"):
+        if not isinstance(c["filters"], str):
+            raise ParamError("cleanup filters is a string of ffmpeg filters")
+        f.append(c["filters"])
+    return f
 
 
 def crop_box(p, src):
@@ -342,21 +372,9 @@ def load(model, models_dir):
     if eng == "ffmpeg":
         return dict(engine=eng)
     if eng == "spandrel":
-        import torch
-        from spandrel import ModelLoader
-
-        f = o.get("file") or model.get("name")
-        path = f if os.path.isabs(str(f)) else os.path.join(models_dir, "spandrel", str(f))
-        if not os.path.isfile(path):
-            raise RuntimeError(f"missing {path}: run scripts/setup_worker_venv.sh video (it downloads the weights)")
-        d = ModelLoader().load_from_file(path)
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-        half = bool(o.get("half", True)) and dev == "cuda" and d.supports_half
-        m = d.model.eval().to(dev)
-        if half:
-            m = m.half()
-        E.update(model=m, scale=d.scale, device=dev, half=half, torch=torch)
-        return dict(engine=eng, scale=d.scale, architecture=d.architecture.name, half=half, device=dev)
+        m = load_spandrel(o.get("file") or model.get("name"), models_dir, bool(o.get("half", True)))
+        E.update(m)
+        return dict(engine=eng, scale=m["scale"], architecture=m["architecture"], half=m["half"], device=m["device"])
     if eng in ("seedvr2", "flashvsr"):
         repo = o.get("repo") or os.path.join(models_dir, "src", "seedvr2" if eng == "seedvr2" else "flashvsr-plus")
         if not os.path.isdir(repo):
@@ -368,6 +386,37 @@ def load(model, models_dir):
     raise RuntimeError(f"unknown engine {eng!r} (ffmpeg, spandrel, seedvr2, flashvsr)")
 
 
+def load_spandrel(f, models_dir, half=True):
+    """A model spandrel loads (an upscaler, or a 1x cleanup model), on the card in half precision when it can: {model, scale, device, half, torch, architecture}."""
+    import torch
+    from spandrel import ModelLoader
+
+    path = f if os.path.isabs(str(f)) else os.path.join(models_dir, "spandrel", str(f))
+    if not os.path.isfile(path):
+        raise RuntimeError(f"missing {path}: run scripts/setup_worker_venv.sh video (it downloads the weights)")
+    d = ModelLoader().load_from_file(path)
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    half = half and dev == "cuda" and d.supports_half
+    m = d.model.eval().to(dev)
+    if half:
+        m = m.half()
+    return dict(model=m, scale=d.scale, device=dev, half=half, torch=torch, architecture=d.architecture.name)
+
+
+def cleanup_model(p):
+    """The cleanup stage's 1x model, loaded once and kept beside the engine's own (None when the stage has none)."""
+    c = p.get("cleanup") or {}
+    f = c.get("model")
+    if not f:
+        return None
+    cache = E.setdefault("cleanups", {})
+    if f not in cache:
+        cache[f] = load_spandrel(f, E["models_dir"])
+    if cache[f]["scale"] != 1:
+        raise ParamError(f"a cleanup model keeps the size (1x); {f} is {cache[f]['scale']}x")
+    return cache[f]
+
+
 def _tiles(n, tile, overlap):
     """Start offsets that cover 0..n in tiles of `tile` with at least `overlap` between them."""
     if tile <= 0 or n <= tile:
@@ -377,13 +426,14 @@ def _tiles(n, tile, overlap):
     return sorted(set(starts))
 
 
-def upscale_frame(frame, tile=0, overlap=16):
-    """One RGB frame (H x W x 3 uint8 numpy) through the loaded spandrel model, whole or in overlapping tiles."""
+def upscale_frame(frame, tile=0, overlap=16, mm=None):
+    """One RGB frame (H x W x 3 uint8 numpy) through a loaded spandrel model (`mm`, default the engine's), whole or in overlapping tiles."""
     import numpy as np
 
-    torch, m, s = E["torch"], E["model"], E["scale"]
-    dt = torch.float16 if E["half"] else torch.float32
-    x = torch.from_numpy(np.ascontiguousarray(frame)).to(E["device"]).permute(2, 0, 1)[None].to(dt) / 255.0
+    mm = mm or E
+    torch, m, s = mm["torch"], mm["model"], mm["scale"]
+    dt = torch.float16 if mm["half"] else torch.float32
+    x = torch.from_numpy(np.ascontiguousarray(frame)).to(mm["device"]).permute(2, 0, 1)[None].to(dt) / 255.0
     h, w = frame.shape[:2]
     with torch.inference_mode():
         if tile <= 0 or (h <= tile and w <= tile):
@@ -400,11 +450,20 @@ def upscale_frame(frame, tile=0, overlap=16):
         return (y.clamp(0, 1) * 255).round().to(torch.uint8)[0].permute(1, 2, 0).cpu().numpy()
 
 
-def enhance_spandrel(p, src, out, popen=subprocess.Popen):
-    """Decode the prepared frames, upscale each, pipe them into the finishing encoder. Returns peak VRAM (MB)."""
+def raw_input(w, h, fps):
+    """ffmpeg input arguments for RGB frames written to its stdin."""
+    return ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", f"{fps:g}", "-i", "-"]
+
+
+def pipe_frames(p, src, models, encode, popen=subprocess.Popen):
+    """Decode the prepared frames, put each through `models` in turn ([(model dict, tile)]: a cleanup model, an upscaler), and write them to
+    the encoder `encode(width, height)` gives the arguments of. Returns peak VRAM (MB)."""
+    import numpy as np
+
     pw, ph = _pair(p["prep_size"], "prep_size")
-    s = E["scale"]
-    fps = src["fps"] * (2 if p["deinterlace"] != "none" else 1)
+    scale = 1
+    for mm, _ in models:
+        scale *= mm["scale"]
     dec = popen(
         [
             "ffmpeg",
@@ -424,27 +483,10 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen):
         ],
         stdout=subprocess.PIPE,
     )
-    enc = popen(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-v",
-            "error",
-            "-y",
-            *finish_args(
-                ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{pw * s}x{ph * s}", "-r", f"{fps:g}", "-i", "-"],
-                p,
-                out,
-                fps,
-                p["path"] if src["audio"] else None,
-            ),
-        ],
-        stdin=subprocess.PIPE,
-    )
-    import numpy as np
-
-    torch = E["torch"]
-    if E["device"] == "cuda":
+    enc = popen(["ffmpeg", "-nostdin", "-v", "error", "-y", *encode(pw * scale, ph * scale)], stdin=subprocess.PIPE)
+    torch = models[0][0]["torch"]
+    cuda = any(mm["device"] == "cuda" for mm, _ in models)
+    if cuda:
         torch.cuda.reset_peak_memory_stats()
     n, size, done = 0, pw * ph * 3, False
     try:
@@ -452,12 +494,14 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen):
             buf = dec.stdout.read(size)
             if len(buf) < size:
                 break
-            y = upscale_frame(np.frombuffer(buf, np.uint8).reshape(ph, pw, 3), int(E["options"].get("tile", 0)))
+            y = np.frombuffer(buf, np.uint8).reshape(ph, pw, 3)
+            for mm, tile in models:
+                y = upscale_frame(y, tile, mm=mm)
             enc.stdin.write(y.tobytes())
             n += 1
         done = True
     finally:
-        if not done:  # the model failed (out of VRAM...): a decoder blocked on its full pipe would never exit, so stop both before waiting
+        if not done:  # a model failed (out of VRAM...): a decoder blocked on its full pipe would never exit, so stop both before waiting
             for proc in (dec, enc):
                 with contextlib.suppress(OSError):
                     proc.kill()
@@ -466,12 +510,39 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen):
         rc_e, rc_d = enc.wait(), dec.wait()
     if rc_d != 0 or rc_e != 0 or n == 0:
         raise RuntimeError(f"ffmpeg failed (decode exit {rc_d}, encode exit {rc_e}, {n} frames)")
-    return torch.cuda.max_memory_reserved() / 2**20 if E["device"] == "cuda" else 0.0
+    return torch.cuda.max_memory_reserved() / 2**20 if cuda else 0.0
 
 
-def prepare_file(p, src, work, run=subprocess.run):
-    """The prepared clip as a file, for engines with a CLI of their own: lossless x264 (every reader opens it), the source's audio left out."""
+def enhance_spandrel(p, src, out, popen=subprocess.Popen, cleanup=None):
+    """The engine's upscaler on every prepared frame (after the cleanup model, when there is one), into the finishing encoder."""
+    fps = src["fps"] * (2 if p["deinterlace"] != "none" else 1)
+    models = ([(cleanup, int((p.get("cleanup") or {}).get("tile", 0)))] if cleanup else []) + [
+        (E, int(E["options"].get("tile", 0)))
+    ]
+    audio = p["path"] if src["audio"] else None
+    return pipe_frames(p, src, models, lambda w, h: finish_args(raw_input(w, h, fps), p, out, fps, audio), popen=popen)
+
+
+def prepare_file(p, src, work, run=subprocess.run, cleanup=None, popen=subprocess.Popen):
+    """The prepared clip as a file, for engines with a CLI of their own: lossless x264 (every reader opens it), the source's audio left out.
+    With a cleanup model the frames go through it on the way. Returns (path, peak VRAM in MB)."""
     path = os.path.join(work, "prep.mp4")
+    if cleanup:
+        fps = src["fps"] * (2 if p["deinterlace"] != "none" else 1)
+        tile = int((p.get("cleanup") or {}).get("tile", 0))
+        enc = lambda w, h: [
+            *raw_input(w, h, fps),
+            "-vf",
+            "format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-qp",
+            "0",
+            path,
+        ]
+        return path, pipe_frames(p, src, [(cleanup, tile)], enc, popen=popen)
     ffmpeg(
         [
             "-i",
@@ -489,7 +560,7 @@ def prepare_file(p, src, work, run=subprocess.run):
         ],
         run=run,
     )
-    return path
+    return path, 0.0
 
 
 def engine_cmd(p, prep, up):
@@ -544,22 +615,33 @@ def run(params, run_=subprocess.run, popen=subprocess.Popen):
     audio = p["path"] if src["audio"] else None
     t0 = time.time()
     eng = E["engine"]
+    cm = cleanup_model(p)
     if eng == "ffmpeg":
         extra = E["options"].get("filters")
-        vf = prep_filter(p, src) + (f",{extra}" if extra else "")
-        ffmpeg(finish_args(["-i", p["path"]], p, out, fps, audio, prefilter=vf), run=run_)
-        peak = 0.0
+        if cm:
+            tile = int((p.get("cleanup") or {}).get("tile", 0))
+            peak = pipe_frames(
+                p,
+                src,
+                [(cm, tile)],
+                lambda w, h: finish_args(raw_input(w, h, fps), p, out, fps, audio, prefilter=extra),
+                popen=popen,
+            )
+        else:
+            vf = prep_filter(p, src) + (f",{extra}" if extra else "")
+            ffmpeg(finish_args(["-i", p["path"]], p, out, fps, audio, prefilter=vf), run=run_)
+            peak = 0.0
     elif eng == "spandrel":
-        peak = enhance_spandrel(p, src, out, popen=popen)
+        peak = enhance_spandrel(p, src, out, popen=popen, cleanup=cm)
     else:
         work = tempfile.mkdtemp(prefix="video-", dir=out_dir)
         try:
-            prep = prepare_file(p, src, work, run=run_)
+            prep, prep_peak = prepare_file(p, src, work, run=run_, cleanup=cm, popen=popen)
             up = os.path.join(work, "up.mp4")
             cmd, cwd = engine_cmd(p, prep, up)
             log = open(os.path.join(work, "engine.log"), "w")
             try:
-                peak = run_cli(cmd, cwd, log, popen=popen)
+                peak = max(run_cli(cmd, cwd, log, popen=popen), prep_peak)
             finally:
                 log.close()
                 with open(os.path.join(work, "engine.log"), errors="replace") as f:

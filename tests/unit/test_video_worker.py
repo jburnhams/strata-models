@@ -408,7 +408,9 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
     V.E.update(
         engine="spandrel", key="video-realesrgan-x2plus", scale=2, device="cuda", torch=torch, options=dict(tile=0)
     )
-    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0: np.zeros((f.shape[0] * 2, f.shape[1] * 2, 3), np.uint8))
+    monkeypatch.setattr(
+        V, "upscale_frame", lambda f, tile=0, mm=None: np.zeros((f.shape[0] * 2, f.shape[1] * 2, 3), np.uint8)
+    )
     r = V.run(dict(path=clip, out_dir=str(tmp_path)), run_=FakeRun(), popen=popen)
     _dec, enc = procs
     assert (
@@ -416,7 +418,7 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
     )  # the half frame at the end is dropped
     assert r["peak_vram_mb"] == 3072.0 and resets == [1]
     procs.clear()
-    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0: f)
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: f)
 
     def none(cmd, stdout=None, stdin=None):
         p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(b""), stdin=Pipe(), wait=lambda: 0)
@@ -428,9 +430,10 @@ def test_run_spandrel_engine_pipes_frames_through_the_model(monkeypatch, tmp_pat
 
 def test_prepare_file_writes_a_lossless_clip_without_audio(tmp_path, clip):
     run = FakeRun()
-    path = V.prepare_file(P(path=clip), SRC, str(tmp_path), run=run)
+    path, peak = V.prepare_file(P(path=clip), SRC, str(tmp_path), run=run)
     assert (
         path == str(tmp_path / "prep.mp4")
+        and peak == 0.0
         and "-an" in run.calls[0]
         and run.calls[0][run.calls[0].index("-qp") + 1] == "0"
     )
@@ -460,7 +463,7 @@ def test_spandrel_engine_stops_ffmpeg_when_the_model_fails(monkeypatch, tmp_path
         procs.append(Proc(cmd))
         return procs[-1]
 
-    def oom(f, tile=0):
+    def oom(f, tile=0, mm=None):
         raise MemoryError("CUDA out of memory")
 
     torch = types.SimpleNamespace(cuda=types.SimpleNamespace(reset_peak_memory_stats=lambda: None))
@@ -472,3 +475,138 @@ def test_spandrel_engine_stops_ffmpeg_when_the_model_fails(monkeypatch, tmp_path
     with pytest.raises(MemoryError):
         V.run(dict(path=clip, out_dir=str(tmp_path)), run_=FakeRun(), popen=popen)
     assert len(procs) == 2 and all(p.killed for p in procs)
+
+
+def test_cleanup_filters_run_on_the_tapes_own_pixels_before_the_resize():
+    f = V.prep_filter(
+        P(crop=[14, 0, 692, 568], cleanup=dict(chroma_shift=[-2, 0, -2, 0], filters="hqdn3d=0:4:0:6")), SRC
+    )
+    assert f == (
+        "bwdif=mode=send_field:parity=tff:deint=all,crop=692:568:14:0,format=yuv444p,"
+        "chromashift=cbh=-2:cbv=0:crh=-2:crv=0:edge=smear,hqdn3d=0:4:0:6,scale=768:576:flags=lanczos,setsar=1"
+    )
+    assert V.cleanup_filters(None) == [] and V.cleanup_filters(dict(model="m.pth")) == []
+
+
+@pytest.mark.parametrize(
+    ("c", "match"),
+    [
+        (dict(sharpen=1), "cleanup is a table"),
+        ("hqdn3d", "cleanup is a table"),
+        (dict(chroma_shift=[1, 2]), "chroma_shift"),
+        (dict(chroma_shift=[1, 2, 3, 99]), "chroma_shift"),
+        (dict(filters=3), "string of ffmpeg filters"),
+    ],
+)
+def test_cleanup_refuses_bad_stages(c, match):
+    with pytest.raises(protocol.ParamError, match=match):
+        V.prep_filter(P(cleanup=c), SRC)
+
+
+def fake_model(scale, device="cpu"):
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(reset_peak_memory_stats=lambda: None, max_memory_reserved=lambda: 2**30)
+    )
+    return dict(model=object(), scale=scale, device=device, half=False, torch=torch, architecture="Compact")
+
+
+def test_cleanup_model_is_loaded_once_and_must_keep_the_size(monkeypatch, tmp_path):
+    loads = []
+    monkeypatch.setattr(
+        V, "load_spandrel", lambda f, models_dir, half=True: loads.append(f) or fake_model(2 if "x2" in f else 1)
+    )
+    V.E.clear()
+    V.E.update(models_dir=str(tmp_path))
+    assert V.cleanup_model(P()) is None
+    m = V.cleanup_model(P(cleanup=dict(model="1x_BleedOut.pth")))
+    assert V.cleanup_model(P(cleanup=dict(model="1x_BleedOut.pth"))) is m and loads == ["1x_BleedOut.pth"]
+    with pytest.raises(protocol.ParamError, match="keeps the size"):
+        V.cleanup_model(P(cleanup=dict(model="x2.pth")))
+
+
+class Pipe:
+    def __init__(self, data=b""):
+        self.data, self.written = data, []
+
+    def read(self, n):
+        out, self.data = self.data[:n], self.data[n:]
+        return out
+
+    def write(self, b):
+        self.written.append(len(b))
+
+    def close(self):
+        pass
+
+
+def frames_popen(procs, n=1):
+    import numpy as np
+
+    frame = np.zeros((576, 768, 3), np.uint8).tobytes()
+
+    def popen(cmd, stdout=None, stdin=None, **kw):
+        p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(frame * n), stdin=Pipe(), wait=lambda: 0, pid=1)
+        procs.append(p)
+        return p
+
+    return popen
+
+
+def test_ffmpeg_engine_with_a_cleanup_model_pipes_frames_through_it(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    V.load(dict(key="video-lanczos", options=dict(engine="ffmpeg", filters="hqdn3d=1")), str(tmp_path))
+    cm = fake_model(1)
+    seen = []
+    monkeypatch.setattr(V, "cleanup_model", lambda p: cm)
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: seen.append((mm is cm, tile)) or f)
+    procs = []
+    r = V.run(
+        dict(path=clip, out_dir=str(tmp_path), cleanup=dict(model="1x.pth", tile=128)),
+        run_=FakeRun(),
+        popen=frames_popen(procs, 2),
+    )
+    _dec, enc = procs
+    assert seen == [(True, 128)] * 2 and enc.cmd[enc.cmd.index("-s") + 1] == "768x576"
+    assert enc.cmd[enc.cmd.index("-vf") + 1].startswith("hqdn3d=1,scale=1440:1080") and r["peak_vram_mb"] == 0.0
+
+
+def test_spandrel_engine_chains_the_cleanup_model_before_the_upscaler(monkeypatch, tmp_path, clip):
+    import numpy as np
+
+    cm = fake_model(1, "cuda")
+    V.E.clear()
+    V.E.update(fake_model(2, "cuda"), engine="spandrel", key="x2", options=dict(tile=0), models_dir=str(tmp_path))
+    order = []
+
+    def up(f, tile=0, mm=None):
+        order.append(mm["scale"])
+        return np.zeros((f.shape[0] * mm["scale"], f.shape[1] * mm["scale"], 3), np.uint8)
+
+    monkeypatch.setattr(V, "cleanup_model", lambda p: cm)
+    monkeypatch.setattr(V, "upscale_frame", up)
+    procs = []
+    r = V.run(
+        dict(path=clip, out_dir=str(tmp_path), cleanup=dict(model="1x.pth")), run_=FakeRun(), popen=frames_popen(procs)
+    )
+    assert order == [1, 2] and procs[1].cmd[procs[1].cmd.index("-s") + 1] == "1536x1152" and r["peak_vram_mb"] == 1024.0
+
+
+def test_cli_engine_cleans_the_prepared_clip_with_the_model(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    (tmp_path / "src" / "flashvsr-plus").mkdir(parents=True)
+    V.load(dict(key="video-flashvsr-plus-turbo", options=dict(engine="flashvsr")), str(tmp_path))
+    monkeypatch.setattr(V, "cleanup_model", lambda p: fake_model(1, "cuda"))
+    monkeypatch.setattr(V, "upscale_frame", lambda f, tile=0, mm=None: f)
+    monkeypatch.setattr(V, "gpu_mb", lambda pids, run=None: 500.0)
+    procs = []
+    base = frames_popen(procs)
+
+    def popen(cmd, cwd=None, stdout=None, stderr=None, stdin=None):
+        if cmd[0] == "ffmpeg":
+            return base(cmd, stdout=stdout, stdin=stdin)
+        out = cmd[cmd.index("--output") + 1]
+        return types.SimpleNamespace(pid=2, wait=lambda: open(out, "wb").write(b"up") and 0)
+
+    r = V.run(dict(path=clip, out_dir=str(tmp_path / "out"), cleanup=dict(model="1x.pth")), run_=FakeRun(), popen=popen)
+    enc = procs[1].cmd
+    assert (
+        enc[-1].endswith("prep.mp4") and enc[enc.index("-qp") + 1] == "0" and r["peak_vram_mb"] == 1024.0
+    )  # the cleanup's peak beats the CLI's

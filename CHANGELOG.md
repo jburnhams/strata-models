@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**VHS cleanup: a stage before any upscaler, and one eval per cleanup problem (branch `claude/project-thread-rea1ol`)**
+Jonathan asked for VHS-specific noise removal, as separate evals for the different cleanup options.
+
+- `workers/video.py`: params `cleanup = { chroma_shift = [cb_h, cb_v, cr_h, cr_v], filters = "...", model = "1x file", tile }`, the same for every engine. The shift and filters run on the deinterlaced, cropped picture in the tape's own pixels (before the resize); the 1x model (spandrel) runs on the prepared frames, then the engine (lanczos, an upscaler, or the prepared file a CLI engine reads). So the winners chain in front of any upscaler. `pipe_frames` puts frames through any list of spandrel models (cleanup, then upscaler) and kills both ffmpegs on a failure.
+- `scripts/setup_worker_venv.sh video`: also the 1x models from OpenModelDB, checked by sha256: BleedOut Compact (WTFPL), BaldrickVHSFix v0.2 and BroadcastToStudio Lite (CC-BY-NC-SA-4.0).
+- `evals/specs/vhs-chroma-shift.toml` (none, left 2 and 4 px, right 2, up 1 line), `vhs-chroma-cleanup.toml` (none, colour-only hqdn3d light and strong, BleedOut, BaldrickVHSFix, BroadcastToStudio) and `vhs-grain.toml` (none, luma hqdn3d light and medium, atadenoise, nlmeans; a motion-compensated denoise joins when its VapourSynth plugins are installed). Each judged blind against no cleanup, with the same lanczos after, so only the cleanup differs.
+
 **Video enhancement: role `video-enhance`, VHS evals with crops, video in the Judge and Outputs tabs (branch `claude/project-thread-rea1ol`)**
 Jonathan digitised a PAL VHS tape (720x576i TFF) and wants it upscaled and enhanced; the right model is to be chosen by eye, on crops where the differences show.
 

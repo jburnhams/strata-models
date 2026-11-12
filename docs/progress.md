@@ -57,3 +57,8 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
 - VapourSynth R80 is installed on omarchy with only its core plugins: QTGMC needs havsfunc (or vsjetpack), mvtools, nnedi3/znedi3, fmtconv,
   misc, rgvs/zsmooth and a source filter; not attempted.
 - Guards are ratios to the baseline: against plain lanczos (no GPU) peak VRAM cannot be a guard, so the spec guards run time (100x) and failures.
+- VHS cleanup (2026-11-12, later): the chroma offset could not be measured. A correlation of chroma gradients against luma gradients
+  (luma blurred to chroma's bandwidth, sub-pixel peak) on 7 clips found peaks of 0.02-0.15 that disagree from clip to clip: the colour is too
+  soft for its edges to locate. vhs-chroma-shift therefore tries both directions. ffmpeg's nlmeans has no plane choice (it denoises colour
+  too); atadenoise's `p` selects planes.
+
