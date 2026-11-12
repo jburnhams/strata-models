@@ -25,39 +25,39 @@ params = { highpass = 80, atten_lim_db = 18, finish = "strata360", lufs = -14 }
 [[candidates]]
 name = "original"
 model = "audio-passthrough"
-params = { highpass = 0, lufs = -14 }
+params = { highpass = 0, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "dfn3-uncapped"
 model = "deepfilternet3"
-params = { highpass = 80, lufs = -14 }
+params = { highpass = 80, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "mossformer2"
 model = "mossformer2-se-48k"
-params = { highpass = 80, lufs = -14 }
+params = { highpass = 80, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "mossformergan-16k"
 model = "mossformergan-se-16k"
-params = { highpass = 80, lufs = -14 }
+params = { highpass = 80, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "frcrn-16k"
 model = "frcrn-se-16k"
-params = { highpass = 80, lufs = -14 }
+params = { highpass = 80, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "resemble-denoise"
 model = "resemble-enhance"
-params = { highpass = 80, mode = "denoise", lufs = -14 }
+params = { highpass = 80, mode = "denoise", lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "noisereduce"
 model = "noisereduce"
-params = { highpass = 80, stationary = true, prop_decrease = 0.9, lufs = -14 }
+params = { highpass = 80, stationary = true, prop_decrease = 0.9, lufs = -14, atten_lim_db = 0, finish = "none" }
 
 [[candidates]]
 name = "afftdn"
 model = "afftdn"
-params = { highpass = 80, nr = 18, nf = -40, lufs = -14 }
+params = { highpass = 80, nr = 18, nf = -40, lufs = -14, atten_lim_db = 0, finish = "none" }

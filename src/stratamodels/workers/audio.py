@@ -6,7 +6,8 @@ The chain, the same for every engine so they differ only in the denoiser (strata
 baseline the evals compare against):
   1. decode to mono 48 kHz (ffmpeg's downmix), `clip` [start, end] seconds if given
   2. high-pass at `highpass` Hz (default 80: wind and handling rumble; 0 = off)
-  3. the engine's denoiser, its result mixed back with a little of what it took out when `atten_lim_db` caps how much it may remove
+  3. the engine's denoiser, its result mixed back with a little of what it took out when `atten_lim_db` caps how much it may remove (0: no
+     cap, to override a model's defaults)
      (DeepFilterNet does this natively; for the others: denoised + 10^(-cap/20) x (input - denoised), strata-360's MossFormer2 stand-in)
   4. `finish = "strata360"`: a little speech EQ (-2 dB at 250 Hz, +2 dB at 3 kHz) and speech-aware auto gain (ffmpeg speechnorm: quiet speech
      lifted, pauses not); "none" leaves it
@@ -217,7 +218,12 @@ def denoise(x, p):
         from df.enhance import enhance
 
         model, st = m
-        y = enhance(model, st, torch.from_numpy(x[None]), atten_lim_db=p.get("atten_lim_db"))
+        y = enhance(
+            model,
+            st,
+            torch.from_numpy(x[None]),
+            atten_lim_db=float(p["atten_lim_db"]) if p.get("atten_lim_db") else None,
+        )
         return fit(y[0].cpu().numpy(), len(x)), True
     import tempfile
 
@@ -277,8 +283,9 @@ def run(p):
     if finish not in ("none", "strata360"):
         raise ParamError("finish is none or strata360")
     cap = p.get("atten_lim_db")
-    if cap is not None and float(cap) <= 0:
-        raise ParamError("atten_lim_db is a positive number of dB (or null for no cap)")
+    if cap is not None and float(cap) < 0:
+        raise ParamError("atten_lim_db is a number of dB (0 or null: no cap)")
+    cap = float(cap) if cap else None  # 0 = no cap: TOML has no null, and a model's defaults may set one
     target = p.get("lufs", -14.0)
     if target is not None and not -40 <= float(target) <= -6:
         raise ParamError("lufs is between -40 and -6 (or null to keep the level)")

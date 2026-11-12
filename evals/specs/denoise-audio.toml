@@ -54,19 +54,19 @@ note = "strata-360's audio_clean today: DeepFilterNet3 capped at 18 dB, speech E
 [[candidates]]
 name = "original"
 model = "audio-passthrough"
-params = { highpass = 0, lufs = -14 }
+params = { highpass = 0, lufs = -14, atten_lim_db = 0, finish = "none" }
 note = "no denoising, only levelled: is any of this better than nothing?"
 
 [[candidates]]
 name = "dfn3-uncapped"
 model = "deepfilternet3"
-params = { highpass = 80, finish = "strata360", lufs = -14 }
+params = { highpass = 80, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "DeepFilterNet3 taking out all it can"
 
 [[candidates]]
 name = "dfn3-no-finish"
 model = "deepfilternet3"
-params = { highpass = 80, atten_lim_db = 18, lufs = -14 }
+params = { highpass = 80, atten_lim_db = 18, lufs = -14, finish = "none" }
 note = "the baseline without the speech EQ and speechnorm: what the finish adds"
 
 [[candidates]]
@@ -78,39 +78,39 @@ note = "strata-360's stand-in on Windows; DNSMOS 2.94 against DeepFilterNet's 2.
 [[candidates]]
 name = "mossformer2"
 model = "mossformer2-se-48k"
-params = { highpass = 80, finish = "strata360", lufs = -14 }
+params = { highpass = 80, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 
 [[candidates]]
 name = "mossformergan-16k"
 model = "mossformergan-se-16k"
-params = { highpass = 80, finish = "strata360", lufs = -14 }
+params = { highpass = 80, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "16 kHz: nothing above 8 kHz comes back"
 
 [[candidates]]
 name = "frcrn-16k"
 model = "frcrn-se-16k"
-params = { highpass = 80, finish = "strata360", lufs = -14 }
+params = { highpass = 80, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "16 kHz: nothing above 8 kHz comes back"
 
 [[candidates]]
 name = "resemble-denoise"
 model = "resemble-enhance"
-params = { highpass = 80, mode = "denoise", finish = "strata360", lufs = -14 }
+params = { highpass = 80, mode = "denoise", finish = "strata360", lufs = -14, atten_lim_db = 0 }
 
 [[candidates]]
 name = "resemble-enhance"
 model = "resemble-enhance"
-params = { highpass = 80, mode = "enhance", lambd = 0.9, tau = 0.5, finish = "strata360", lufs = -14 }
+params = { highpass = 80, mode = "enhance", lambd = 0.9, tau = 0.5, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "generative: also restores bandwidth; reported to change voices"
 
 [[candidates]]
 name = "noisereduce"
 model = "noisereduce"
-params = { highpass = 80, stationary = true, prop_decrease = 0.9, finish = "strata360", lufs = -14 }
+params = { highpass = 80, stationary = true, prop_decrease = 0.9, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "classical spectral gating (Audacity's method): steady hiss and hum, not wind"
 
 [[candidates]]
 name = "afftdn"
 model = "afftdn"
-params = { highpass = 80, nr = 18, nf = -40, finish = "strata360", lufs = -14 }
+params = { highpass = 80, nr = 18, nf = -40, finish = "strata360", lufs = -14, atten_lim_db = 0 }
 note = "ffmpeg's adaptive FFT denoiser, strata-360's old speech chain settings"

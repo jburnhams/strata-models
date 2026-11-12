@@ -123,8 +123,9 @@ def test_strata360s_chain_caps_the_denoiser_and_finishes_the_speech(ff):
         and any(g == A.FINISH for g in f.graphs)
         and r["lufs_out"] == pytest.approx(-14, abs=0.4)
     )
-    r = A.run(dict(path=src, atten_lim_db=None, out_dir=out))  # the job's own settings win over the model's defaults
-    assert r["removed_db"] == pytest.approx(-20 * np.log10(0.5), abs=0.05)
+    for off in (None, 0):  # the job's own settings win over the model's defaults; 0 is no cap (TOML has no null)
+        r = A.run(dict(path=src, atten_lim_db=off, out_dir=out))
+        assert r["removed_db"] == pytest.approx(-20 * np.log10(0.5), abs=0.05)
 
 
 @pytest.mark.parametrize(
@@ -135,7 +136,7 @@ def test_strata360s_chain_caps_the_denoiser_and_finishes_the_speech(ff):
         (dict(clip=[2, 1]), "clip is"),
         (dict(clip="0-1"), "clip is"),
         (dict(finish="loud"), "finish is"),
-        (dict(atten_lim_db=0), "positive number"),
+        (dict(atten_lim_db=-3), "0 or null: no cap"),
         (dict(lufs=0), "lufs is between"),
         (dict(clip=[9, 10]), "no audio in"),
     ],
@@ -223,6 +224,8 @@ def test_deepfilternet_caps_natively(ff, fake_torch, monkeypatch):
     assert calls == [18] and r["removed_db"] == pytest.approx(
         -20 * np.log10(0.25), abs=0.05
     )  # not mixed back again here
+    A.run(dict(path=src, highpass=0, atten_lim_db=0, out_dir=out))
+    assert calls[-1] is None  # 0 = no cap, overriding the model's own 18 dB
 
 
 def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch):
