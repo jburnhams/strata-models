@@ -83,6 +83,7 @@ MEDIA_TYPES = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
 }
+PAIR_SCORE_S = 1.0  # at most this long scoring new pairs in one /pair request (the scores are kept, the rest scored in the background): the most different of those scored is shown
 CONTEXT_S = 2.0  # seconds either side of a phrase in a ?cut=1 answer
 
 
@@ -90,6 +91,27 @@ def mount(app, scheduler):
     runs = {}
     engine = lambda: scheduler.store.engine
     sims = {}  # sims: (result key, result key) -> similarity, outputs never change under a key
+    scoring = set()  # experiments whose unscored pairs a background thread is scoring
+
+    def score_later(name, todo, kind):
+        """Score pairs a /pair request had no time for, in one background thread per experiment, so later requests rank them all."""
+        from stratamodels.evals import similarity as SIM
+
+        if name in scoring:
+            return
+        scoring.add(name)
+
+        def work():
+            try:
+                for oa, ob, key in todo:
+                    if key not in sims:
+                        sims[key] = SIM.similarity(oa, ob, kind)
+                        time.sleep(0)  # let the requests in between
+            finally:
+                scoring.discard(name)
+
+        threading.Thread(target=work, name=f"pair-scores-{name}", daemon=True).start()
+
     summaries = app.state.eval_summaries = Summaries(engine)
     judging = {}  # (experiment, judge) -> run state; one run per judge at a time
     judging_lock = threading.Lock()
@@ -242,27 +264,15 @@ def mount(app, scheduler):
         if len(s.candidates) < 2:
             raise HTTPException(400, "an experiment needs two candidates to judge")
         ds, outs, _ = C.outputs_for(s, engine())
-        pairs = []
         from stratamodels.evals import similarity as SIM
 
+        todo = []
         for i in range(len(ds.items)):
             ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
-            for n, a in enumerate(ok):
-                for b in ok[n + 1 :]:
-                    oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
-                    key = (
-                        s.similarity,
-                        hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest(),
-                    )  # the outputs themselves: a rerun after forget, or another kind, is scored again
-                    if key not in sims:
-                        sims[key] = SIM.similarity(oa, ob, s.similarity or None)
-                    if sims[key] < 0.9999:
-                        pairs.append((sims[key], i, a, b))  # identical outputs teach nothing: not shown
+            todo += [(i, a, b) for n, a in enumerate(ok) for b in ok[n + 1 :]]
         if s.primary == "judged":
-            pairs = [
-                p for p in pairs if s.baseline in p[2:]
-            ]  # decided head to head with the baseline: only those pairs
-        if not pairs:
+            todo = [p for p in todo if s.baseline in p[1:]]  # decided head to head with the baseline: only those pairs
+        if not todo:
             return dict(pair=None)
         current = {(c.name, it["id"]): C.result_key(s, c, it) for c in s.candidates for it in ds.items}
         with C.session(engine()) as ses:  # a judgment of outputs that are no longer the candidates' does not count
@@ -273,15 +283,48 @@ def mount(app, scheduler):
                 )  # people's: a model judge's verdicts do not make a pair judged
                 if j.a_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key
             }
-        fresh = [
-            p for p in pairs if (ds.items[p[1]]["id"], frozenset(p[2:])) not in judged
-        ] or pairs  # pairs not judged yet first,
+        unjudged = lambda p: (ds.items[p[0]]["id"], frozenset(p[1:])) not in judged
+        order = [p for p in todo if unjudged(p)] or todo  # pairs not judged yet first,
+        random.shuffle(order)
+
+        keys = {}
+
+        def key_of(i, a, b):
+            if (i, a, b) not in keys:
+                oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
+                keys[(i, a, b)] = (
+                    oa,
+                    ob,
+                    (
+                        s.similarity,
+                        hashlib.sha256(json.dumps([oa, ob], sort_keys=True, default=str).encode()).hexdigest(),
+                    ),
+                )  # the outputs themselves: a rerun after forget, or another kind, is scored again
+            return keys[(i, a, b)]
+
+        fresh, later, start = [], [], time.monotonic()
+        for i, a, b in order:
+            oa, ob, key = key_of(i, a, b)
+            if key not in sims:
+                if fresh and time.monotonic() - start > PAIR_SCORE_S:
+                    later.append(
+                        (oa, ob, key)
+                    )  # thousands of long descriptions took minutes to score: the rest are scored in the background
+                    continue
+                sims[key] = SIM.similarity(oa, ob, s.similarity or None)
+            if sims[key] < 0.9999:
+                fresh.append((sims[key], i, a, b))  # identical outputs teach nothing: not shown
+        if later:
+            score_later(name, later, s.similarity or None)
+        if not fresh:
+            return dict(pair=None)
         least = min(p[0] for p in fresh)
         sim, i, a, b = random.choice([p for p in fresh if p[0] <= least + 0.02])  # and of those the most different
         if random.random() < 0.5:
             a, b = b, a  # which side is X is random
         it = ds.items[i]
-        left = sum(1 for p in pairs if (ds.items[p[1]]["id"], frozenset(p[2:])) not in judged)
+        known_same = lambda p: sims.get(key_of(*p)[2], 0.0) >= 0.9999
+        left = sum(1 for p in todo if unjudged(p) and not known_same(p))
         return dict(
             remaining=left,
             pair=dict(

@@ -453,3 +453,32 @@ def test_model_judge_beside_a_person(client):
     assert (
         wait_judge(client, name, "fox")["result"]["judged"] == 0
     )  # pairs = judged: nothing new until people judge more
+
+
+def test_a_pair_comes_back_in_time_and_the_rest_are_scored_behind_it(client, scheduler, monkeypatch):
+    import threading
+    import time
+
+    from stratamodels.evals import api as A
+    from stratamodels.evals import similarity as SIM
+
+    client.post("/api/evals/fake-asr/run")
+    wait_run(client, "fake-asr")
+    calls, real = [], SIM.similarity
+
+    def slow(x, y, kind=None):
+        calls.append(1)
+        time.sleep(0.01)
+        return real(x, y, kind)
+
+    monkeypatch.setattr(SIM, "similarity", slow)
+    monkeypatch.setattr(A, "PAIR_SCORE_S", 0.0)  # no time: score until one pair is usable, leave the rest
+    first = client.get("/api/evals/fake-asr/pair").json()
+    assert first["pair"] is not None and len(calls) >= 1
+    for t in threading.enumerate():
+        if t.name == "pair-scores-fake-asr":
+            t.join(10)
+    n = len(calls)
+    assert n > 1  # the rest were scored in the background
+    client.get("/api/evals/fake-asr/pair")
+    assert len(calls) == n  # and kept: the next request scores nothing again
