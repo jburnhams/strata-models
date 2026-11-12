@@ -317,7 +317,9 @@ function Judge({ name }: { name: string }) {
       {({ pair, remaining }) => {
         const p = pair!; const pics = imagePath(p.x) && imagePath(p.y)
         const vx = videoCandidate('x', p.x); const vy = videoCandidate('y', p.y); const src = vx && vy ? sourceSide(name, p.item_id, p.reference) : null
-        const answers = <div className="flex flex-wrap items-center gap-3">{(['x', 'tie', 'y'] as const).map(w => <Button key={w} onClick={() => choose(w)} disabled={busy}>{ANSWER_WORD[w]}</Button>)}</div>
+        // the same answers above the pair and below it: no scrolling past a tall picture or video to vote
+        const answerBar = (where: string) => <div role="group" aria-label={`Answers ${where}`} className="flex flex-wrap items-center gap-3">{(['x', 'tie', 'y'] as const).map(w => <Button key={w} onClick={() => choose(w)} disabled={busy}>{ANSWER_WORD[w]}</Button>)}</div>
+        const answers = answerBar('below')
         const side = (k: 'x' | 'y'): Candidate => ({ id: k, label: k.toUpperCase(), media: { kind: 'image', src: imagesApi.fileUrl(imagePath(p[k])!), alt: `Output ${k.toUpperCase()}`, size: imageSize(p[k]) } })
         return (
           <div className="grid gap-4">
@@ -327,6 +329,7 @@ function Judge({ name }: { name: string }) {
             {typeof p.input.prompt === 'string' && <p className="type-body">Prompt: {p.input.prompt}</p>}
             {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
             {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
+            {answerBar('above')}
             {vx && vy
               ? <>
                   <div ref={videoBox}>

@@ -78,7 +78,7 @@ describe('Video outputs', () => {
       http.get('/api/evals/:name/outputs', () => { const d = evalFixtures.outputs(); (d.items[0] as { outputs: Record<string, unknown> }).outputs = { turbo: { output: video('b'), error: null }, 'large-v3': { output: { segments: [{ text: 'x' }] }, error: null } }; return HttpResponse.json(d) }),
     )
     const { user } = setup(<App />, { route: '/evals/vhs?tab=judge' })
-    await user.click(await screen.findByRole('button', { name: 'X is better' }))
+    await user.click((await screen.findAllByRole('button', { name: 'X is better' }))[0])
     await user.click(await screen.findByText(/Last pair \(u1\)/))
     expect(await screen.findByLabelText('turbo', { selector: 'video' })).toHaveAttribute('controls')
   })
@@ -162,5 +162,17 @@ describe('Video plays on its own', () => {
     await waitFor(() => expect(vids.every(v => of(v).playing)).toBe(true))
     vids[0].dispatchEvent(new Event('canplay'))
     expect(vids.every(v => of(v).playing)).toBe(true) // once only
+  })
+})
+
+describe('Answer buttons', () => {
+  it('are above the pair as well as below it, and both answer', async () => {
+    const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    const above = await screen.findByRole('group', { name: 'Answers above' })
+    const below = screen.getByRole('group', { name: 'Answers below' })
+    expect(above.compareDocumentPosition(screen.getByText('ask knot')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(below.compareDocumentPosition(screen.getByText('ask knot')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    await user.click(within(above).getByRole('button', { name: 'Y is better' }))
+    await waitFor(() => expect(mock.calls).toContain('judge y'))
   })
 })

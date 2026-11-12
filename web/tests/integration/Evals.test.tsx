@@ -73,15 +73,15 @@ describe('An experiment', () => {
     await user.click(screen.getByRole('button', { name: 'Play the phrase' })); expect(audio.currentTime).toBeCloseTo(12.4)
     let paused = false; audio.pause = () => { paused = true }; audio.currentTime = 17.5; audio.dispatchEvent(new Event('timeupdate')); expect(paused).toBe(true)
     expect(screen.getByText(/38% different · 12\spairs not judged yet, most different first/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'X is better' }))
-    await user.click(await screen.findByRole('button', { name: 'About the same' }))
+    await user.click(screen.getAllByRole('button', { name: 'X is better' })[0])
+    await user.click((await screen.findAllByRole('button', { name: 'About the same' }))[0])
     await waitFor(() => expect(mock.calls).toEqual(['judge x', 'judge tie']))
     await user.click(screen.getByRole('tab', { name: 'Write-up' }))
     expect(await screen.findByText(/## Answer/)).toBeInTheDocument()
   })
   it('shows the pair just judged unblinded, with its pipeline steps', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
-    await user.click(await screen.findByRole('button', { name: 'X is better' }))
+    await user.click((await screen.findAllByRole('button', { name: 'X is better' }))[0])
     const last = await screen.findByText('Last pair (u1): X was turbo, Y was large-v3; you chose x')
     await user.click(last)
     expect(await screen.findByText(/chose turbo\. turbo keeps the last word/)).toBeInTheDocument() // the model judge's verdict on the same pair, after the person's
@@ -106,7 +106,7 @@ describe('An experiment', () => {
     expect(await screen.findByText('Last pair (u1): X was turbo, Y was large-v3; you chose y')).toBeInTheDocument()
     await user.keyboard('t')
     await waitFor(() => expect(mock.calls).toEqual(['judge y', 'judge tie']))
-    expect(await screen.findByRole('button', { name: 'X is better' })).toBeEnabled()
+    expect((await screen.findAllByRole('button', { name: 'X is better' }))[0]).toBeEnabled()
   }, 15000)
   it('does not take a judging key typed into a field', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
@@ -119,7 +119,7 @@ describe('An experiment', () => {
   it('says when a judgment was not saved', async () => {
     server.use(http.post('/api/evals/:name/judgments', () => HttpResponse.json({ detail: 'pair token expired' }, { status: 409 })))
     const { user } = setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
-    await user.click(await screen.findByRole('button', { name: 'Y is better' }))
+    await user.click((await screen.findAllByRole('button', { name: 'Y is better' }))[0])
     expect(await screen.findByRole('alert')).toHaveTextContent(/Not saved/)
   })
   it('shows every output on the Outputs tab, each step of a pipeline, and failures', async () => {
