@@ -9,7 +9,14 @@ the same context, the same pictures (`runtimes.llama.request` builds the prompt,
 lines file of {"key": <the item's `by` param>, "item": <id>, "output": {...}} that the `recorded` runtime replays (see models.toml).
 
     uv run python scripts/evals/record_cloud.py SPEC --like CANDIDATE --cli codex|agy [--model SLUG] [--effort low] \
-        --out <data>/evals/recorded/<name>.jsonl [--by image] [--limit N] [--timeout 600]
+        --out <data>/evals/recorded/<name>.jsonl [--by image] [--limit N] [--timeout 600] [--min-left 0.10]
+
+The spec's role picks the job: describe-style roles (text and pictures in, JSON out) through either CLI; image-generate (both CLIs make
+pictures, saved under <data>/generated/recorded/<out name>/, keyed by prompt); transcribe roles through agy only (Codex cannot hear),
+keyed by path and clip, as plain text in one segment (agy's timings drift, so none are recorded).
+
+Before every item it reads how much of the plan is left, through the CLIs themselves and at no cost (`agy -p /usage`; Codex's own app-server,
+`account/rateLimits/read`), and stops with exit code 75 once a limit the model draws on has --min-left (default 10 %) or less.
 
 Resumable: items already in --out are skipped, so rerun it after a quota runs out. A quota or rate-limit answer stops the run with exit code 75
 (EX_TEMPFAIL) and writes nothing for that item; any other failure is recorded as {"error": ...} in the log on stderr and the item is left out,
@@ -17,6 +24,7 @@ so the eval counts it as missing against the cloud model (a recorded job with no
 database; uses no GPU and does not need the service running."""
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -29,29 +37,50 @@ from stratamodels.evals.cloud import (  # the CLI calls live in the package: eva
     CLIS,
     QUOTA,
     TEMPFAIL,
+    USAGE,
     CallError,
     QuotaError,
+    UsageError,
+    agy_group,
     call_agy,
     call_codex,
     clean_env,
+    image_agy,
+    image_codex,
+    low_bucket,
     parse_json,
     prompt_of,
     stage_images,
+    transcribe_agy,
+    usage_agy,
+    usage_codex,
 )
 
 __all__ = [
     "CLIS",
     "QUOTA",
     "TEMPFAIL",
+    "USAGE",
     "CallError",
     "QuotaError",
+    "UsageError",
+    "agy_group",
     "call_agy",
     "call_codex",
     "clean_env",
+    "image_agy",
+    "image_codex",
+    "low_bucket",
     "parse_json",
     "prompt_of",
     "stage_images",
+    "transcribe_agy",
+    "usage_agy",
+    "usage_codex",
 ]
+
+IMAGERS = {"codex": image_codex, "agy": image_agy}
+TRANSCRIBERS = {"agy": transcribe_agy}  # codex has no audio input (probed 2026-11-12)
 
 
 def job(params):
@@ -84,6 +113,48 @@ def record_one(params, cli, model=None, effort=None, timeout=600, call=None, clo
     return out
 
 
+def key_of(params, by):
+    """The record's key: one param as a string, or several (by = ["path", "clip"]) as a JSON list, as runtimes/recorded.py looks it up."""
+    return json.dumps([params.get(b) for b in by]) if isinstance(by, list) else params.get(by)
+
+
+def record_image(params, cli, dest, model=None, effort=None, timeout=900, make=None, clock=time.perf_counter):
+    """One picture for an image-generate job: saved under dest (the data folder's generated/, so the web app and judges can show it)."""
+    t0 = clock()
+    r = (make or IMAGERS[cli])(
+        params["prompt"],
+        dest,
+        int(params.get("width") or 1024),
+        int(params.get("height") or 1024),
+        model=model,
+        effort=effort,
+        timeout=timeout,
+    )
+    return dict(r, seconds=round(clock() - t0, 2), cli=cli, cli_model=model or "default")
+
+
+def record_speech(params, cli, model=None, effort=None, timeout=600, hear=None, clock=time.perf_counter):
+    """One transcript for a transcribe job, shaped like Whisper's (segments[].text, which the WER metric joins), without timings."""
+    if hear is None and cli not in TRANSCRIBERS:
+        raise SystemExit(f"{cli} cannot hear audio; use --cli agy")
+    t0 = clock()
+    r = (hear or TRANSCRIBERS[cli])(
+        params["path"], params.get("clip"), params.get("language"), model=model, effort=effort, timeout=timeout
+    )
+    if not r["text"]:
+        raise CallError(f"{cli} answered nothing")
+    out = dict(
+        text=r["text"],
+        segments=[dict(text=r["text"])],
+        seconds=round(clock() - t0, 2),
+        cli=cli,
+        cli_model=model or "default",
+    )
+    if params.get("language"):
+        out["language"] = params["language"]
+    return out
+
+
 def done_keys(path):
     if not os.path.exists(path):
         return set()
@@ -105,9 +176,18 @@ def main(argv=None, log=None):
     ap.add_argument(
         "--out", required=True, help="JSON lines file to append to (relative paths are under the data folder)"
     )
-    ap.add_argument("--by", default="image", help="the job param the recorded runtime matches on (default image)")
+    ap.add_argument(
+        "--by",
+        help="the job param(s) the recorded runtime matches on, comma separated (default: image; prompt for image-generate; path,clip for transcribe)",
+    )
     ap.add_argument("--limit", type=int, help="record at most this many new items")
     ap.add_argument("--timeout", type=int, default=600, help="seconds per item")
+    ap.add_argument(
+        "--min-left",
+        type=float,
+        default=0.10,
+        help="stop (exit 75) once any of the plan's limits this model draws on has this share or less left (default 0.10; 0 turns the check off)",
+    )
     a = ap.parse_args(argv)
 
     from stratamodels import settings
@@ -118,8 +198,14 @@ def main(argv=None, log=None):
     ds = C.load_dataset(spec.dataset)
     out = a.out if os.path.isabs(a.out) else os.path.join(settings.data_dir(), a.out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    role = spec.role
+    if role.startswith("transcribe") and a.cli not in TRANSCRIBERS:
+        log(f"{a.cli} cannot hear audio; transcribe through {', '.join(sorted(TRANSCRIBERS))}")
+        return 2
+    by = a.by or ("prompt" if role == "image-generate" else "path,clip" if role.startswith("transcribe") else "image")
+    by = by.split(",") if "," in by else by
     have = done_keys(out)
-    todo = [it for it in ds.items if str(C.job_params(spec, cand, it).get(a.by)) not in have]
+    todo = [it for it in ds.items if str(key_of(C.job_params(spec, cand, it), by)) not in have]
     if a.limit is not None:
         todo = todo[: a.limit]
     log(
@@ -128,9 +214,33 @@ def main(argv=None, log=None):
     failed = 0
     for n, it in enumerate(todo, 1):
         params = {k: v for k, v in C.job_params(spec, cand, it).items() if not k.startswith("__")}
-        key = params.get(a.by)
+        key = key_of(params, by)
+        if a.min_left > 0:
+            try:
+                low = low_bucket(a.cli, a.model, a.min_left)
+            except (UsageError, OSError, subprocess.TimeoutExpired) as e:
+                log(f"cannot read the remaining allowance, stopping (--min-left 0 skips the check): {e}")
+                return 1
+            if low:
+                log(
+                    f"allowance: {low[0]} has {low[1]:.0%} left (at most {a.min_left:.0%}), resets {low[2]}; stopping after {n - 1} new items, rerun then to resume"
+                )
+                return TEMPFAIL
         try:
-            o = record_one(params, a.cli, a.model, a.effort, a.timeout)
+            if role == "image-generate":
+                stem = os.path.splitext(os.path.basename(out))[0]
+                dest = os.path.join(
+                    settings.data_dir(),
+                    "generated",
+                    "recorded",
+                    stem,
+                    hashlib.sha256(str(key).encode()).hexdigest()[:16],
+                )
+                o = record_image(params, a.cli, dest, a.model, a.effort, a.timeout)
+            elif role.startswith("transcribe"):
+                o = record_speech(params, a.cli, a.model, a.effort, a.timeout)
+            else:
+                o = record_one(params, a.cli, a.model, a.effort, a.timeout)
         except QuotaError as e:
             log(f"quota: stopping after {n - 1} new items; rerun later to resume. {e}")
             return TEMPFAIL
@@ -140,7 +250,13 @@ def main(argv=None, log=None):
             continue
         with open(out, "a", encoding="utf8") as f:
             f.write(json.dumps(dict(key=key, item=it["id"], output=o), ensure_ascii=False) + "\n")
-        ok = "json ok" if o.get("json") is not None else ("no json" if "json" in o else "text")
+        ok = (
+            o["path"]
+            if "path" in o
+            else "json ok"
+            if o.get("json") is not None
+            else ("no json" if "json" in o else "text")
+        )
         log(f"[{n}/{len(todo)}] {it['id']}: {o['seconds']} s, {ok}")
     log(f"done: {len(todo) - failed} recorded, {failed} failed (left out: they count as missing)")
     return 0 if not failed else 1

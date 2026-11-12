@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+from stratamodels.evals import cloud
+
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 spec = importlib.util.spec_from_file_location("record_cloud", os.path.join(ROOT, "scripts", "evals", "record_cloud.py"))
 R = importlib.util.module_from_spec(spec)
@@ -139,7 +141,7 @@ def test_main_skips_recorded_items_and_stops_on_quota(tmp_path, monkeypatch):
 
     items = [dict(id=f"p{i}", input=dict(image=f"/img/p{i}.jpg", context={})) for i in range(4)]
     cand = types.SimpleNamespace(name="local", params=dict(preset="photo-describe-v1"))
-    sp = types.SimpleNamespace(name="describe", dataset="ds", candidate=lambda n: cand)
+    sp = types.SimpleNamespace(name="describe", role="vision-language", dataset="ds", candidate=lambda n: cand)
     monkeypatch.setattr(C, "load_spec", lambda n: sp)
     monkeypatch.setattr(C, "load_dataset", lambda n: types.SimpleNamespace(items=items))
     out = tmp_path / "rec.jsonl"
@@ -153,6 +155,7 @@ def test_main_skips_recorded_items_and_stops_on_quota(tmp_path, monkeypatch):
         return dict(text="{}", json={}, seconds=1.0)
 
     monkeypatch.setattr(R, "record_one", rec)
+    monkeypatch.setattr(R, "low_bucket", lambda *a: None)
     code = R.main(["describe", "--like", "local", "--cli", "codex", "--out", str(out)], log=lambda m: None)
     assert code == R.TEMPFAIL and calls == ["/img/p1.jpg", "/img/p2.jpg", "/img/p3.jpg"]
     assert [json.loads(line)["key"] for line in out.read_text().splitlines()] == [
@@ -179,3 +182,309 @@ def test_latency_of_a_recorded_output_is_the_time_it_took_when_made():
     )  # replayed with no time recorded: none, not 0
     assert lat(dict(_run_s=4.2), dict(text="x", seconds=4.2), None) == 4.2  # a model run here: the job's run time
     assert lat(dict(_run_s=4.2), None, "boom") is None
+
+
+AGY_USAGE = dict(
+    status="SUCCESS",
+    command=dict(
+        name="usage",
+        data=dict(
+            groups=[
+                dict(
+                    name="Gemini Models",
+                    buckets=[
+                        dict(id="gemini-weekly", window="weekly", remaining_fraction=0.95, reset_time="w"),
+                        dict(id="gemini-5h", window="5h", remaining_fraction=0.08, reset_time="h"),
+                    ],
+                ),
+                dict(
+                    name="Claude and GPT models",
+                    buckets=[dict(id="3p-weekly", window="weekly", remaining_fraction=0.5, reset_time="w")],
+                ),
+                dict(
+                    name="Gemini 4 Argon",
+                    buckets=[
+                        dict(id="gemini-argon-wtu-weekly", window="weekly", remaining_fraction=0.84, reset_time="a")
+                    ],
+                ),
+            ]
+        ),
+    ),
+)
+
+
+def test_agy_usage_reads_the_models_own_group():
+    run = lambda *a, **k: done(stdout=json.dumps(AGY_USAGE))
+    assert R.usage_agy("gemini-3.8-flash-low", run=run) == [
+        ("Gemini Models weekly", 0.95, "w"),
+        ("Gemini Models 5h", 0.08, "h"),
+    ]
+    assert R.usage_agy("gemini-4-argon-medium", run=run) == [("Gemini 4 Argon weekly", 0.84, "a")]
+    assert R.usage_agy("claude-opus-5-5-low", run=run)[0][1] == 0.5
+    assert R.low_bucket("agy", "gemini-3.8-flash-low", 0.10, usage=lambda m: R.usage_agy(m, run=run)) == (
+        "Gemini Models 5h",
+        0.08,
+        "h",
+    )
+    assert R.low_bucket("agy", "gemini-4-argon-low", 0.10, usage=lambda m: R.usage_agy(m, run=run)) is None
+    with pytest.raises(R.UsageError):
+        R.usage_agy("x", run=lambda *a, **k: done(stdout="not json"))
+
+
+class FakeAppServer:
+    """codex app-server --stdio: answers initialize and account/rateLimits/read."""
+
+    def __init__(self, used=(94, 15), error=None):
+        import io
+
+        self.stdin, self.used, self.error, self.sent = io.StringIO(), used, error, []
+        self.stdout = self
+        self.lines = None
+
+    def readline(self):
+        if self.lines is None:
+            self.sent = [json.loads(x) for x in self.stdin.getvalue().splitlines()]
+            r = dict(
+                rateLimits=dict(
+                    primary=dict(usedPercent=self.used[0], resetsAt=1794461330),
+                    secondary=dict(usedPercent=self.used[1], resetsAt=1795048130),
+                )
+            )
+            self.lines = [
+                json.dumps(dict(id=1, result={})),
+                json.dumps(dict(method="account/updated")),
+                json.dumps(dict(id=2, error=self.error) if self.error else dict(id=2, result=r)),
+            ]
+        return (self.lines.pop(0) + "\n") if self.lines else ""
+
+    def kill(self):
+        pass
+
+    def wait(self):
+        pass
+
+
+def test_codex_usage_comes_from_the_app_server_without_a_model_call():
+    fake = FakeAppServer()
+    u = R.usage_codex(popen=lambda *a, **k: fake)
+    assert [m.get("method") for m in fake.sent] == ["initialize", "initialized", "account/rateLimits/read"]
+    assert [(n, round(r, 2)) for n, r, _ in u] == [("codex 5h", 0.06), ("codex weekly", 0.85)] and u[0][2].startswith(
+        "2026-"
+    )
+    assert R.low_bucket("codex", None, 0.10, usage=lambda m: u)[0] == "codex 5h"
+    with pytest.raises(R.UsageError):
+        R.usage_codex(popen=lambda *a, **k: FakeAppServer(error=dict(message="no")))
+
+
+class SilentAppServer(FakeAppServer):
+    """Starts, then never answers: readline blocks until the process is killed."""
+
+    def __init__(self):
+        import threading
+
+        super().__init__()
+        self.killed = threading.Event()
+
+    def readline(self):
+        self.killed.wait(5)
+        return ""
+
+    def kill(self):
+        self.killed.set()
+
+
+def test_a_silent_app_server_is_killed_at_the_deadline_not_waited_on_forever():
+    fake = SilentAppServer()
+    with pytest.raises(R.UsageError, match="within 0.05 s"):
+        R.usage_codex(popen=lambda *a, **k: fake, timeout=0.05)
+    assert fake.killed.is_set()
+
+
+def test_no_readable_bucket_stops_the_recorder_rather_than_spending_blind():
+    with pytest.raises(R.UsageError, match="no readable allowance"):
+        R.low_bucket("agy", "gemini-3.8-flash-low", 0.10, usage=lambda m: [])
+    empty = json.dumps(dict(command=dict(data=dict(groups=[dict(name="Gemini Models", buckets=[])]))))
+    with pytest.raises(R.UsageError):
+        R.low_bucket("agy", None, 0.10, usage=lambda m: R.usage_agy(m, run=lambda *a, **k: done(empty)))
+
+
+def test_main_stops_before_the_allowance_runs_dry(tmp_path, monkeypatch):
+    from stratamodels.evals import core as C
+
+    items = [dict(id=f"p{i}", input=dict(image=f"/img/p{i}.jpg", context={})) for i in range(3)]
+    cand = types.SimpleNamespace(name="local", params=dict(preset="photo-describe-v1"))
+    monkeypatch.setattr(
+        C,
+        "load_spec",
+        lambda n: types.SimpleNamespace(name="d", role="vision-language", dataset="ds", candidate=lambda n: cand),
+    )
+    monkeypatch.setattr(C, "load_dataset", lambda n: types.SimpleNamespace(items=items))
+    left = iter([None, ("Gemini Models 5h", 0.09, "h")])
+    monkeypatch.setattr(R, "low_bucket", lambda *a: next(left))
+    monkeypatch.setattr(R, "record_one", lambda *a: dict(text="{}", json={}, seconds=1.0))
+    out, log = tmp_path / "r.jsonl", []
+    assert R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out)], log=log.append) == R.TEMPFAIL
+    assert len(out.read_text().splitlines()) == 1 and "9% left" in log[-1]
+
+    def broken(*a):
+        raise R.UsageError("no usage")
+
+    monkeypatch.setattr(R, "low_bucket", broken)
+    assert (
+        R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out)], log=log.append) == 1
+        and "cannot read" in log[-1]
+    )
+    monkeypatch.setattr(R, "low_bucket", lambda *a: pytest.fail("checked with --min-left 0"))
+    assert R.main(["d", "--like", "local", "--cli", "agy", "--out", str(out), "--min-left", "0"], log=log.append) == 0
+
+
+# ---- pictures and speech ---------------------------------------------------------------------------------------------------------------------
+def png(path, w=8, h=6):
+    from PIL import Image
+
+    Image.new("RGB", (w, h)).save(path)
+
+
+def test_codex_makes_a_picture_in_its_writable_workspace_and_it_is_kept(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    seen = {}
+
+    def run(cmd, input=None, cwd=None, env=None, **k):
+        seen.update(cmd=cmd, input=input, env=env)
+        png(os.path.join(cwd, "out.png"))
+        return done("saved out.png")
+
+    r = R.image_codex("a red fox", str(tmp_path / "keep" / "abc"), 512, 768, model="gpt-6.1-terra", run=run)
+    assert r == dict(path=str(tmp_path / "keep" / "abc.png"), width=8, height=6) and os.path.isfile(r["path"])
+    assert "workspace-write" in seen["cmd"] and "gpt-6.1-terra" in seen["cmd"] and "OPENAI_API_KEY" not in seen["env"]
+    assert "512x768" in seen["input"] and "a red fox" in seen["input"]
+    with pytest.raises(R.CallError, match="made no picture"):
+        R.image_codex("x", str(tmp_path / "k2"), run=lambda *a, **k: done("sorry"))
+
+
+def test_agy_picture_is_found_in_the_conversations_own_folder(tmp_path):
+    brain = tmp_path / "brain"
+
+    def run(cmd, cwd=None, **k):
+        (brain / "conv1" / "artifacts").mkdir(parents=True)
+        png(brain / "conv1" / "artifacts" / "fox.jpg", 4, 4)
+        return done(json.dumps(dict(status="SUCCESS", conversation_id="conv1", response="made it")))
+
+    r = R.image_agy("a fox", str(tmp_path / "out" / "k"), run=run, brain=str(brain))
+    assert r["path"].endswith("k.jpg") and (r["width"], r["height"]) == (4, 4)
+    with pytest.raises(R.CallError, match="made no picture"):  # an old picture of another turn is not this one's
+        R.image_agy(
+            "a fox",
+            str(tmp_path / "out" / "k2"),
+            run=lambda *a, **k: done(json.dumps(dict(status="SUCCESS", conversation_id="none"))),
+            brain=str(brain),
+        )
+
+
+def test_keep_reads_no_size_from_a_file_that_is_not_a_picture(tmp_path):
+    (tmp_path / "x.png").write_text("not a png")
+    assert cloud._keep(str(tmp_path / "x.png"), str(tmp_path / "o" / "y"))["width"] is None
+
+
+def test_agy_transcribes_a_clip_it_reads_from_its_workspace(tmp_path):
+    cuts, seen = [], {}
+
+    def cut(path, clip, out):
+        cuts.append((path, clip))
+        open(out, "wb").close()
+
+    def run(cmd, cwd=None, **k):
+        seen.update(prompt=cmd[cmd.index("-p") + 1], files=os.listdir(cwd))
+        return done(json.dumps(dict(status="SUCCESS", response=" bonjour à tous \n", usage=dict(input_tokens=9))))
+
+    r = R.transcribe_agy("/a/race.mp3", [3, 9.5], "fr", run=run, cut=cut)
+    assert r == dict(text="bonjour à tous", usage=dict(input_tokens=9)) and cuts == [("/a/race.mp3", [3, 9.5])]
+    assert "clip.wav" in seen["files"] and "in French" in seen["prompt"] and "shell" in seen["prompt"]
+
+
+def test_cut_audio_asks_ffmpeg_for_16k_mono_of_the_clip():
+    seen = []
+    cloud.cut_audio("/a.mp3", [1, 2.5], "/o.wav", run=lambda cmd, **k: seen.append(cmd) or done())
+    assert seen[0][-1] == "/o.wav" and seen[0][5:9] == ["-ss", "1.000", "-to", "2.500"] and "16000" in seen[0]
+    cloud.cut_audio("/a.mp3", None, "/o.wav", run=lambda cmd, **k: seen.append(cmd) or done())
+    assert "-ss" not in seen[1]
+    with pytest.raises(R.CallError, match="could not cut"):
+        cloud.cut_audio("/a.mp3", None, "/o.wav", run=lambda *a, **k: done(stderr="bad", code=1))
+
+
+def test_record_image_and_speech_shape_outputs_like_the_local_runtimes(tmp_path):
+    t = iter([0.0, 12.5, 0.0, 3.0])
+    o = R.record_image(
+        dict(prompt="fox", width=640),
+        "agy",
+        "/d/k",
+        make=lambda p, d, w, h, **k: dict(path=d + ".png", width=w, height=h),
+        clock=lambda: next(t),
+    )
+    assert o == dict(path="/d/k.png", width=640, height=1024, seconds=12.5, cli="agy", cli_model="default")
+    o = R.record_speech(
+        dict(path="/a.wav", language="en"),
+        "agy",
+        model="gemini-3.8-flash-low",
+        hear=lambda *a, **k: dict(text="hello"),
+        clock=lambda: next(t),
+    )
+    assert o["segments"] == [dict(text="hello")] and o["language"] == "en" and o["seconds"] == 3.0
+    with pytest.raises(R.CallError):
+        R.record_speech(dict(path="/a.wav"), "agy", hear=lambda *a, **k: dict(text=""))
+    with pytest.raises(SystemExit):
+        R.record_speech(dict(path="/a.wav"), "codex")
+
+
+def test_main_picks_the_job_and_the_key_from_the_specs_role(tmp_path, monkeypatch):
+    from stratamodels.evals import core as C
+
+    monkeypatch.setenv("STRATAMODELS_DATA", str(tmp_path))
+    cand = types.SimpleNamespace(name="local", params=dict(width=1024, height=1024))
+    sp = types.SimpleNamespace(name="img", role="image-generate", dataset="ds", candidate=lambda n: cand)
+    monkeypatch.setattr(C, "load_spec", lambda n: sp)
+    monkeypatch.setattr(
+        C, "load_dataset", lambda n: types.SimpleNamespace(items=[dict(id="fox", input=dict(prompt="a fox", seed=1))])
+    )
+    monkeypatch.setattr(R, "low_bucket", lambda *a: None)
+    dests = []
+    monkeypatch.setattr(
+        R, "record_image", lambda p, cli, dest, *a: dests.append(dest) or dict(path=dest + ".png", seconds=1.0)
+    )
+    out = tmp_path / "evals" / "recorded" / "flash-img.jsonl"
+    assert R.main(["img", "--like", "local", "--cli", "agy", "--out", str(out)], log=lambda m: None) == 0
+    assert (
+        json.loads(out.read_text())["key"] == "a fox" and os.path.join("generated", "recorded", "flash-img") in dests[0]
+    )
+
+    sp.role, cand.params = "transcribe", {}
+    monkeypatch.setattr(
+        C, "load_dataset", lambda n: types.SimpleNamespace(items=[dict(id="a", input=dict(path="/a.wav", clip=[1, 2]))])
+    )
+    monkeypatch.setattr(R, "record_speech", lambda p, *a: dict(text="hi", segments=[dict(text="hi")], seconds=1.0))
+    out = tmp_path / "speech.jsonl"
+    assert R.main(["t", "--like", "local", "--cli", "agy", "--out", str(out)], log=lambda m: None) == 0
+    assert json.loads(out.read_text())["key"] == json.dumps(["/a.wav", [1, 2]])
+    log = []
+    assert (
+        R.main(["t", "--like", "local", "--cli", "codex", "--out", str(out)], log=log.append) == 2
+        and "cannot hear" in log[-1]
+    )
+
+
+def test_a_filter_notice_inside_an_answer_is_a_failure_and_an_image_quota_a_stop(tmp_path):
+    blocked = "She rose This request was blocked by Gemini's filters. They can occasionally trigger by mistake."
+    with pytest.raises(R.CallError, match="filters"):
+        R.transcribe_agy(
+            "/a.wav",
+            run=lambda *a, **k: done(json.dumps(dict(status="SUCCESS", response=blocked))),
+            cut=lambda p, c, o: o,
+        )
+    full = "429 RESOURCE_EXHAUSTED (Capacity exhausted on `gemini-3.1-flash-image`; quota resets in ~4 hours)"
+    with pytest.raises(R.QuotaError):  # the image model's own quota, which /usage does not show
+        R.image_agy(
+            "fox",
+            str(tmp_path / "k"),
+            run=lambda *a, **k: done(json.dumps(dict(status="SUCCESS", response=full))),
+            brain=str(tmp_path),
+        )

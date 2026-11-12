@@ -172,6 +172,44 @@ options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 # Every model is tried, on a number of pictures that follows its share of the plan (Jonathan, 2026-11-12): the candidates' `items` in the
 # describe-photos spec (evals.core "Samples"). Measured cost per picture: Flash low ~0.2 % of the Gemini week, Argon ~0.3 % of its own week,
 # Sonnet 5.5 low ~1.4 % of the Claude-and-GPT week (2.9 % of its 5 hours), Opus far more; Codex shows no usage outside its interactive /status.
+# Pictures and transcripts recorded through the same CLIs (scripts/evals/record_cloud.py, 2026-11-12). Pictures live under
+# <data>/generated/recorded/; transcripts are text only (one segment, no timings).
+[models."gemini-3.8-flash-image-v1"]
+runtime = "recorded"
+name = "Gemini Flash image (agy generate_image, AI Pro), recorded"
+roles = ["image-generate"]
+vram_gb = 0.0
+licence = "outputs recorded through Antigravity CLI on Google AI Pro"
+source = "scripts/evals/record_cloud.py --cli agy --model gemini-3.8-flash-low"
+options = { file = "evals/recorded/gemini-3.8-flash-image-v1.jsonl", by = "prompt" }
+
+[models."gpt-image-codex-image-v1"]
+runtime = "recorded"
+name = "ChatGPT image (Codex image skill, Plus), recorded"
+roles = ["image-generate"]
+vram_gb = 0.0
+licence = "outputs recorded through Codex CLI on ChatGPT Plus"
+source = "scripts/evals/record_cloud.py --cli codex"
+options = { file = "evals/recorded/gpt-image-codex-image-v1.jsonl", by = "prompt" }
+
+[models."gemini-3.8-flash-transcribe-en-v1"]
+runtime = "recorded"
+name = "Gemini 3.8 Flash low transcripts (agy), LibriSpeech, recorded"
+roles = ["transcribe"]
+vram_gb = 0.0
+licence = "outputs recorded through Antigravity CLI on Google AI Pro"
+source = "scripts/evals/record_cloud.py --cli agy --model gemini-3.8-flash-low"
+options = { file = "evals/recorded/gemini-3.8-flash-transcribe-en-v1.jsonl", by = ["path", "clip"] }
+
+[models."gemini-3.8-flash-transcribe-race-v1"]
+runtime = "recorded"
+name = "Gemini 3.8 Flash low transcripts (agy), race commentary, recorded"
+roles = ["transcribe"]
+vram_gb = 0.0
+licence = "outputs recorded through Antigravity CLI on Google AI Pro"
+source = "scripts/evals/record_cloud.py --cli agy --model gemini-3.8-flash-low"
+options = { file = "evals/recorded/gemini-3.8-flash-transcribe-race-v1.jsonl", by = ["path", "clip"] }
+
 # gpt-oss-120b on Antigravity cannot see pictures (it asks for a description), so it is not a vision-language candidate.
 
 [models."gpt-6-luna-photos-v1"]
