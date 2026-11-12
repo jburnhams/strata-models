@@ -163,7 +163,8 @@ options = { file = "evals/recorded/sonnet-schema-v1.jsonl", by = "image" }
 # same preset and context as the local candidates (--like qwen3.5-9b). Not models this service runs: replayed by picture for the evals.
 # Every model is tried, on a number of pictures that follows its share of the plan (Jonathan, 2026-11-12): the candidates' `items` in the
 # describe-photos spec (evals.core "Samples"). Measured cost per picture: Flash low ~0.2 % of the Gemini week, Argon ~0.3 % of its own week,
-# Sonnet 5.5 low ~1.4 % of the Claude-and-GPT week (2.9 % of its 5 hours); Codex shows no usage outside its interactive /status.
+# Sonnet 5.5 low ~1.4 % of the Claude-and-GPT week (2.9 % of its 5 hours), Opus far more; Codex shows no usage outside its interactive /status.
+# gpt-oss-120b on Antigravity cannot see pictures (it asks for a description), so it is not a vision-language candidate.
 
 [models."gpt-6-luna-photos-v1"]
 runtime = "recorded"
@@ -214,16 +215,6 @@ licence = "outputs recorded from Google AI Pro (agy -p --model claude-sonnet-5-5
 source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli agy"
 used_by = []
 options = { file = "evals/recorded/claude-sonnet-5-5-low-photo-describe-v1.jsonl", by = "image" }
-
-[models."gpt-oss-120b-agy-photos-v1"]
-runtime = "recorded"
-name = "gpt-oss-120b (medium) via Antigravity CLI, photo-describe-v1"
-roles = ["vision-language"]
-vram_gb = 0.0
-licence = "outputs recorded from Google AI Pro (agy -p --model gpt-oss-120b-medium)"
-source = "scripts/evals/record_cloud.py describe-photos --limit N --like qwen3.5-9b --cli agy"
-used_by = []
-options = { file = "evals/recorded/gpt-oss-120b-medium-photo-describe-v1.jsonl", by = "image" }
 
 [models."gpt-6.1-sol-photos-v1"]
 runtime = "recorded"
