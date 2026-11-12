@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Video quality readings never fail a job (branch `claude/video-quality-optional`)**
+A worker venv without numpy (or a reading ffmpeg cannot take) failed the whole job at its last step, after the video was made.
+
+- `workers/video.py`: without numpy, `quality` keeps the ffmpeg readings (fidelity, flicker) and leaves out sharpness and noise, with `quality.skipped` saying why; any other error in the readings gives `quality = {skipped: "<error>"}` and the job still succeeds. The metrics read a missing reading as not measured (None), never as a failure.
+
 **VHS cleanup: a stage before any upscaler, and one eval per cleanup problem (branch `claude/vhs-cleanup-evals`)**
 Jonathan asked for VHS-specific noise removal, as separate evals for the different cleanup options.
 
