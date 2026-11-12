@@ -81,7 +81,7 @@ function ModelJudges({ judges }: { judges: Record<string, JudgeSummary> }) {
 function PairVerdicts({ name, last }: { name: string; last: { item_id: string; x: string; y: string } }) {
   const load = useLoad({ queryKey: ['verdicts', name, last.item_id], queryFn: () => evalsApi.verdicts(name, last.item_id), refetchInterval: 4000 })
   if (load.status !== 'ready') return null
-  const mine = load.data.judgments.filter(v => v.judge && [v.a, v.b].includes(last.x) && [v.a, v.b].includes(last.y))
+  const mine = load.data.judgments.filter(v => v.judge && v.current && [v.a, v.b].includes(last.x) && [v.a, v.b].includes(last.y))
   if (!mine.length) return null
   return <ul className="mt-2 grid gap-1 type-body-sm">{mine.map(v => <li key={`${v.rater}-${v.at}`}><span className="font-mono">{v.rater}</span>: {v.winner === 'tie' ? 'about the same' : `chose ${v.winner}`}{v.detail?.consistent === false ? ' (changed its mind when X and Y were swapped)' : ''}{v.note ? `. ${v.note}` : ''}</li>)}</ul>
 }

@@ -86,6 +86,7 @@ describe('An experiment', () => {
     await user.click(last)
     expect(await screen.findByText(/chose turbo\. turbo keeps the last word/)).toBeInTheDocument() // the model judge's verdict on the same pair, after the person's
     expect(screen.queryByText(/jonathan/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/an old judge/)).not.toBeInTheDocument() // a verdict on outputs or by a judge config no longer current is history
     expect(await screen.findByText('Pipeline: 2 steps')).toBeInTheDocument()
     await user.click(screen.getByText('Pipeline: 2 steps'))
     expect(screen.getAllByText('a fluffy ginger cat asleep on a windowsill').length).toBeGreaterThan(0)

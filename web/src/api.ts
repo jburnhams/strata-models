@@ -100,7 +100,7 @@ export interface JudgeSummary {
   tally: { same_winner: number; opposite: number; judge_tie: number; person_tie: number; both_tie: number }
   disagreements: { item_id: string; a: string; b: string; person: string; judge: string; reason: string }[]
 }
-export interface JudgmentRow { a: string; b: string; winner: string; rater: string; judge: string | null; at: number; note: string | null; detail: { consistent?: boolean | null } | null; a_key: string | null; b_key: string | null }
+export interface JudgmentRow { a: string; b: string; winner: string; rater: string; judge: string | null; at: number; note: string | null; detail: { consistent?: boolean | null } | null; a_key: string | null; b_key: string | null; current: boolean }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
 

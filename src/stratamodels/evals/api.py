@@ -339,8 +339,7 @@ def mount(app, scheduler):
     def get_verdicts(name: str, item_id: str):
         from stratamodels.evals import judges as J
 
-        spec_or_404(name)
-        return dict(item_id=item_id, judgments=J.verdicts_on(engine(), name, item_id))
+        return dict(item_id=item_id, judgments=J.verdicts_on(engine(), spec_or_404(name), item_id))
 
     @app.post("/api/evals/{name}/judges/{judge}/run", status_code=202)
     def post_judge_run(name: str, judge: str, limit: int | None = None):

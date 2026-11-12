@@ -297,10 +297,30 @@ def test_verdicts_on_lists_people_and_judges(ran, scheduler):
     engine = scheduler.store.engine
     person(engine, ran, "better", "base", "better", 1)
     J.run_judge(ran, engine, "j", ask_queue(scheduler))
-    v = J.verdicts_on(engine, ran.name, "u0")
+    v = J.verdicts_on(engine, ran, "u0")
     assert (
         [x["rater"] for x in v] == ["j", "jonathan"]
         and v[0]["judge"]
         and v[1]["judge"] is None
         and v[0]["detail"]["consistent"]
+        and v[0]["current"]
+        and v[1]["current"]
     )
+    ran.judges = [
+        judge_spec(criteria="new rules")
+    ]  # another judge config: the old verdict is history, the person's still stands
+    assert [x["current"] for x in J.verdicts_on(engine, ran, "u0")] == [False, True]
+    ran.candidates[1].params = dict(drop=6)  # other outputs: the person's judgment of the old ones is history too
+    assert [x["current"] for x in J.verdicts_on(engine, ran, "u0")] == [False, False]
+    assert J.verdicts_on(engine, ran, "nope") == []
+
+
+def test_a_new_model_for_a_judges_role_changes_the_analysis_signature(ran, scheduler, monkeypatch):
+    from stratamodels.evals import summaries
+
+    engine = scheduler.store.engine
+    ran.judges = [J.parse_judge(dict(name="v"))]
+    monkeypatch.setattr(J, "resolve", lambda engine, j: "qwen")
+    a = summaries.signature(ran, engine)
+    monkeypatch.setattr(J, "resolve", lambda engine, j: "gemma")
+    assert summaries.signature(ran, engine) != a

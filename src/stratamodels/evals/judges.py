@@ -549,16 +549,20 @@ def summary(spec, engine, current, names, base):
     return out
 
 
-def verdicts_on(engine, experiment, item_id):
-    """Every judgment of one item, people's and judges', newest first (the judging page shows them after a person has judged)."""
+def verdicts_on(engine, spec, item_id):
+    """Every judgment of one item, people's and judges', newest first (the judging page shows them after a person has judged). `current`: of
+    the outputs as they are now and, for a judge's, by a judge in the spec as it is now (an old model's verdict on other answers is history)."""
     with C.session(engine) as s:
         rows = list(
             s.scalars(
                 select(EvalJudgment)
-                .where(EvalJudgment.experiment == experiment, EvalJudgment.item_id == item_id)
+                .where(EvalJudgment.experiment == spec.name, EvalJudgment.item_id == item_id)
                 .order_by(EvalJudgment.id.desc())
             )
         )
+    item = [it for it in C.load_dataset(spec.dataset, engine=engine).items if it["id"] == item_id]
+    current = {(c.name, item_id): C.result_key(spec, c, item[0]) for c in spec.candidates} if item else {}
+    active = {judge_key(j, resolve(engine, j)) for j in spec.judges}
     return [
         dict(
             a=r.a,
@@ -571,6 +575,7 @@ def verdicts_on(engine, experiment, item_id):
             detail=r.detail,
             a_key=r.a_key,
             b_key=r.b_key,
+            current=_counts(r, current) and (r.judge is None or r.judge in active),
         )
         for r in rows
     ]

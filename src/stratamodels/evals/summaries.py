@@ -57,6 +57,10 @@ def signature(spec, engine):
             C.load_dataset(spec.dataset, engine=engine).version,
             CODE,
         ]
+    if spec.judges:  # a judge with no model of its own follows its role's choice: a new choice is a new judge, whose verdicts count instead
+        from stratamodels.evals import judges as J
+
+        parts.append([J.resolve(engine, j) for j in spec.judges])
     return hashlib.sha256(json.dumps(parts, default=str).encode()).hexdigest()
 
 

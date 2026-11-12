@@ -255,3 +255,81 @@ def test_text_role_expands_an_image_prompt_on_the_gpu(model):
     )
     print(out["text"][:300])
     assert len(out["text"].split()) > 40 and "five" in out["text"].lower() and out["finish"] == "stop"
+
+
+def _judge(role, spec_q, item, right, wrong):
+    """Both orders of one clear-cut pair: the real model must accept the verdict schema and pick the right answer whichever side it is on."""
+    from stratamodels.evals import core as C
+    from stratamodels.evals import judges as J
+
+    spec = C.parse_spec(
+        dict(
+            name="g", question=spec_q, role="r", dataset="d", metrics=["failed"], candidates=[dict(name="a", model="m")]
+        )
+    )
+    j = J.parse_judge(dict(name="g", kind=role.removeprefix("judge-")))
+    m = Registry.load().resolve(role)
+    rt = runtimes.get(m.runtime)
+    h = rt.load(m, MODELS)
+    try:
+        for x, y, want in ((right, wrong, "X"), (wrong, right, "Y")):
+            system, text, images = J.prompt(spec, j, item, x, y)
+            p = dict(
+                temperature=0,
+                max_tokens=1024,
+                system=system,
+                prompt=text,
+                schema=J.SCHEMA,
+                **({"images": images} if images else {}),
+            )
+            out = rt.run(h, p)
+            said, why = J.verdict(out)
+            print(f"\n{m.key} {role}: {said} ({out['seconds']} s): {why}")
+            assert said == want
+    finally:
+        rt.unload(h)
+
+
+@pytest.mark.skipif(
+    bool(runtimes.available()["llama-server"]), reason="needs the llama-server binary (llama.cpp) and huggingface_hub"
+)
+def test_judge_text_on_the_gpu():
+    """Role judge-text: a transcript that matches the reference against one that does not."""
+    _judge(
+        "judge-text",
+        "Which transcript of the speech is right?",
+        dict(id="t", input=dict(language="en"), reference=dict(text="the quick brown fox jumps over the lazy dog")),
+        dict(segments=[dict(text="the quick brown fox jumps over the lazy dog")]),
+        dict(segments=[dict(text="a quick round box dumps over the hazy fog")]),
+    )
+
+
+@pytest.mark.skipif(
+    bool(runtimes.available()["llama-server"]), reason="needs the llama-server binary (llama.cpp) and huggingface_hub"
+)
+def test_judge_vision_on_the_gpu(tmp_path):
+    """Role judge-vision: two descriptions of the item's picture, then two pictures made for one prompt (three pictures in one job)."""
+    from PIL import Image, ImageDraw
+
+    def pic(name, colour, shape):
+        im = Image.new("RGB", (384, 384), "white")
+        d = ImageDraw.Draw(im)
+        (d.rectangle if shape == "square" else d.ellipse)((96, 96, 288, 288), fill=colour)
+        im.save(tmp_path / name)
+        return str(tmp_path / name)
+
+    red = pic("red.png", "red", "square")
+    _judge(
+        "judge-vision",
+        "Describe the picture",
+        dict(id="p", input=dict(image=red)),
+        dict(text="A red square on a white background."),
+        dict(text="A blue circle on a black background."),
+    )
+    _judge(
+        "judge-vision",
+        "Draw the prompt: a red square on a white background",
+        dict(id="g", input=dict(image=pic("ref.png", "red", "square"))),
+        dict(path=red),
+        dict(path=pic("blue.png", "blue", "circle")),
+    )
