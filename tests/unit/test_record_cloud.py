@@ -276,6 +276,38 @@ def test_codex_usage_comes_from_the_app_server_without_a_model_call():
         R.usage_codex(popen=lambda *a, **k: FakeAppServer(error=dict(message="no")))
 
 
+class SilentAppServer(FakeAppServer):
+    """Starts, then never answers: readline blocks until the process is killed."""
+
+    def __init__(self):
+        import threading
+
+        super().__init__()
+        self.killed = threading.Event()
+
+    def readline(self):
+        self.killed.wait(5)
+        return ""
+
+    def kill(self):
+        self.killed.set()
+
+
+def test_a_silent_app_server_is_killed_at_the_deadline_not_waited_on_forever():
+    fake = SilentAppServer()
+    with pytest.raises(R.UsageError, match="within 0.05 s"):
+        R.usage_codex(popen=lambda *a, **k: fake, timeout=0.05)
+    assert fake.killed.is_set()
+
+
+def test_no_readable_bucket_stops_the_recorder_rather_than_spending_blind():
+    with pytest.raises(R.UsageError, match="no readable allowance"):
+        R.low_bucket("agy", "gemini-3.8-flash-low", 0.10, usage=lambda m: [])
+    empty = json.dumps(dict(command=dict(data=dict(groups=[dict(name="Gemini Models", buckets=[])]))))
+    with pytest.raises(R.UsageError):
+        R.low_bucket("agy", None, 0.10, usage=lambda m: R.usage_agy(m, run=lambda *a, **k: done(empty)))
+
+
 def test_main_stops_before_the_allowance_runs_dry(tmp_path, monkeypatch):
     from stratamodels.evals import core as C
 

@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 
 QUOTA = re.compile(
@@ -324,6 +325,7 @@ def usage_codex(model=None, popen=subprocess.Popen, timeout=60):
         text=True,
         env=clean_env(),
     )
+    watchdog = threading.Timer(timeout, p.kill)
     try:
         for msg in (
             dict(
@@ -337,9 +339,9 @@ def usage_codex(model=None, popen=subprocess.Popen, timeout=60):
         ):
             p.stdin.write(json.dumps(msg) + "\n")
         p.stdin.flush()
-        t0 = time.monotonic()
         res = None
-        while time.monotonic() - t0 < timeout:
+        watchdog.start()  # a server that goes quiet would block readline forever: killing it ends the read with EOF
+        while True:
             line = p.stdout.readline()
             if not line:
                 break
@@ -353,11 +355,12 @@ def usage_codex(model=None, popen=subprocess.Popen, timeout=60):
                 res = m.get("result") or {}
                 break
     finally:
+        watchdog.cancel()
         p.kill()
         p.wait()
     rl = (res or {}).get("rateLimits")
     if not rl:
-        raise UsageError("codex app-server gave no rate limits")
+        raise UsageError(f"codex app-server gave no rate limits{'' if res is not None else f' within {timeout} s'}")
     out = []
     for k, name in (("primary", "5h"), ("secondary", "weekly")):
         w = rl.get(k)
@@ -377,8 +380,12 @@ USAGE = {"codex": usage_codex, "agy": usage_agy}
 
 
 def low_bucket(cli, model, min_left, usage=None):
-    """The first bucket at or under `min_left` remaining as (name, remaining, reset), or None when there is room."""
-    for b in (usage or USAGE[cli])(model):
+    """The first bucket at or under `min_left` remaining as (name, remaining, reset), or None when there is room. No readable bucket at all
+    is a UsageError: the recorder must not spend blind."""
+    buckets = (usage or USAGE[cli])(model)
+    if not buckets:
+        raise UsageError(f"{cli} gave no readable allowance for {model or 'its default model'}")
+    for b in buckets:
         if b[1] <= min_left:
             return b
     return None
