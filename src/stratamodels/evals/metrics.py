@@ -333,7 +333,16 @@ def _desc_valid(item, output, error):
 
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error):
-    return None if error else item.get("_run_s")
+    """The job's run time; for outputs recorded elsewhere (runtime `recorded`: a replay takes no time) the time they took when made, if it
+    was recorded (`seconds`), else none: a replay must not read as an instant model."""
+    if error:
+        return None
+    if isinstance(output, dict) and (
+        output.get("recorded") or output.get("cli")
+    ):  # `cli`: recorded by scripts/evals/record_cloud.py
+        s = output.get("seconds")
+        return float(s) if isinstance(s, (int, float)) else None
+    return item.get("_run_s")
 
 
 def _exact(item, output, error):

@@ -229,7 +229,9 @@ def test_recorded_replays_by_key(tmp_path, monkeypatch):
         key="sonnet", runtime="recorded", name="s", roles=("vision-language",), vram_gb=0, options=dict(file="r.jsonl")
     )
     h = recorded.load(m, str(tmp_path))
-    assert recorded.run(h, dict(image="/a.jpg", preset="p")) == dict(json=dict(caption="x"), model="sonnet")
+    assert recorded.run(h, dict(image="/a.jpg", preset="p")) == dict(
+        json=dict(caption="x"), model="sonnet", recorded=True
+    )
     with pytest.raises(RunError, match="nothing recorded"):
         recorded.run(h, dict(image="/b.jpg"))
     with pytest.raises(RunError, match="give image"):
