@@ -580,13 +580,13 @@ options = { worker = "audio_quality", venv = "audio-quality" }
 
 [roles.judge-audio]
 description = "Judge two recordings made from the same one, blind (cleaned sound, speech): an eval's model judge of kind audio (evals.judges)"
-model = "qwen3-omni-30b-a3b"                 # first pick, not yet measured: its agreement with people's judgments decides (eval analysis, judges)
+model = "qwen3-omni-30b-a3b"                 # failed its clear-cut GPU test (2026-11-12: called a clean and a noisy recording a tie); not used by the evals yet
 
 [models.qwen3-omni-30b-a3b]
 runtime = "llama-server"
 name = "Qwen3-Omni-30B-A3B-Instruct Q4_K_M (MoE, experts partly on the CPU)"
 roles = ["judge-audio"]
-vram_gb = 11.0
+vram_gb = 10.0                               # a lease or model over ~10.7 GB is never granted on the 12 GB card (2026-11-12)
 licence = "Apache-2.0"
 source = "https://huggingface.co/ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF"
 used_by = []

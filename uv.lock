@@ -2736,6 +2736,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "huggingface-hub" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "omarchy-db" },
@@ -2779,6 +2780,7 @@ gpu = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "huggingface-hub", specifier = ">=2.4.0" },
     { name = "numpy" },
     { name = "omarchy-db", git = "https://github.com/jburnhams/database?subdirectory=python" },
     { name = "pillow" },

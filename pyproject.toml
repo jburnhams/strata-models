@@ -19,6 +19,7 @@ dependencies = [
     "omarchy-db",
     "strata-python",     # shared server code: oslib, settings, web serving, CLI commands, test plugin, strata-check
     "tzdata; sys_platform == 'win32'",
+    "huggingface-hub>=2.4.0",
 ]
 
 [project.scripts]

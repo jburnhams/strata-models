@@ -20,18 +20,9 @@ params = { metrics = ["dnsmos", "squim"] }
 
 # Model judges that listen (kind audio): they hear the original, then X and Y, as 16 kHz WAV (hiss above 8 kHz is lost on them). Measured
 # against people's verdicts before they are trusted with more (`judges` in the analysis).
-[[judges]]
-name = "qwen3-omni"
-kind = "audio"                   # role judge-audio: Qwen3-Omni-30B-A3B for now
-pairs = "all"                    # every pair the Judge tab would offer: a first pass ahead of people, agreement measured where both judged
-criteria = "The recordings will be heard in a home film. Better: the speech is clear and natural (no robotic, watery, lisping or muffled artefacts, no words or syllables lost, the voice still sounds like the same person); steady noise (hiss, hum, buzz, wind, rumble) is gone or much reduced; the sense of place (a crowd, a room, music, birds) is kept rather than stripped to silence. Artefacts in the speech count more than leftover noise. Recording 1 is the original."
-
-[[judges]]
-name = "gemma-e4b"
-kind = "audio"
-model = "gemma-4-e4b"            # a small one, to trial against Qwen3-Omni
-pairs = "all"
-criteria = "The recordings will be heard in a home film. Better: the speech is clear and natural (no robotic, watery, lisping or muffled artefacts, no words or syllables lost, the voice still sounds like the same person); steady noise (hiss, hum, buzz, wind, rumble) is gone or much reduced; the sense of place (a crowd, a room, music, birds) is kept rather than stripped to silence. Artefacts in the speech count more than leftover noise. Recording 1 is the original."
+# Local judges (role judge-audio) failed their clear-cut test on omarchy (2026-11-12, llama.cpp b12224, audio input "experimental"): Gemma 4
+# E4B answered X whichever side was right; Qwen3-Omni-30B-A3B heard X and Y as identical to the input. Left out until they pass
+# tests/gpu test_judge_audio_on_the_gpu; Gemini is the model judge for now.
 
 [[judges]]
 name = "gemini-flash"

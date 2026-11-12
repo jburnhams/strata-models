@@ -201,7 +201,9 @@ def load(model, models_dir):
     from resemble_enhance.enhancer import inference  # resemble
 
     # its own download() needs git-lfs and writes into the venv: fetch the weights into the models folder instead and load them now
-    repo = snapshot_download("ResembleAI/resemble-enhance", local_dir=os.path.join(models_dir, "audio", "resemble-enhance"))
+    repo = snapshot_download(
+        "ResembleAI/resemble-enhance", local_dir=os.path.join(models_dir, "audio", "resemble-enhance")
+    )
     E["m"], E["run_dir"] = inference, Path(repo) / "enhancer_stage2"
     inference.load_enhancer(E["run_dir"], dev)
     return dict(device=dev)

@@ -247,7 +247,9 @@ def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch, tmp_path):
     cwd = os.getcwd()
     A.load(dict(key="k-clearvoice", name="model-clearvoice", options=dict(engine="clearvoice")), str(tmp_path))
     assert A.E["m"].names == ["model-clearvoice"] and A.E["m"].task == "speech_enhancement"
-    assert A.E["m"].cwd == str(tmp_path / "audio" / "clearvoice") and os.getcwd() == cwd  # its ./checkpoints in the models folder
+    assert (
+        A.E["m"].cwd == str(tmp_path / "audio" / "clearvoice") and os.getcwd() == cwd
+    )  # its ./checkpoints in the models folder
     r = A.run(dict(path=src, highpass=0, out_dir=out))
     assert r["removed_db"] == pytest.approx(6.02, abs=0.05)
 
@@ -256,7 +258,12 @@ def test_resemble_denoises_or_enhances_and_comes_back_at_48k(ff, fake_torch, mon
     _, src, out = ff
     pkg, enh, inf, hub = (
         types.ModuleType(n)
-        for n in ("resemble_enhance", "resemble_enhance.enhancer", "resemble_enhance.enhancer.inference", "huggingface_hub")
+        for n in (
+            "resemble_enhance",
+            "resemble_enhance.enhancer",
+            "resemble_enhance.enhancer.inference",
+            "huggingface_hub",
+        )
     )
     got = {}
     hub.snapshot_download = lambda repo, local_dir: got.update(repo=repo) or local_dir

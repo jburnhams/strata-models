@@ -59,4 +59,15 @@ onnxruntime 1.24+ is built for CUDA 13 and CTranslate2 (4.8.5, the newest) for C
   Enhance's enhance mode) can change a voice: in the eval, but judged with that in mind.
 - Model judges that listen: llama.cpp hears through the mmproj of Qwen3-Omni-30B-A3B (ggml-org GGUF, 18.6 GB Q4_K_M, experts partly on the
   CPU with `--fit`) and Gemma 4 E4B; Gemini through agy. All of them hear 16 kHz, so tape hiss above 8 kHz is for people.
+- Measured on omarchy (10 s of Legends speech with white noise at 0 dB, under a lease): taken out / first run / VRAM: DeepFilterNet3 8.8 dB,
+  4.7 s, 0.15 GB; MossFormerGAN 9.3 dB, 3.5 s, 0.13 GB; FRCRN 8.6 dB, 4.8 s, 0.17 GB; MossFormer2 7.0 dB, 1.8 s, 0.33 GB (26 s first load);
+  Resemble Enhance (denoise) 5.0 dB, 2.3 s, 1.5 GB; noisereduce 8.6 dB, 0.7 s, CPU; afftdn 0.1 dB (barely anything, at any setting tried).
+  Resemble Enhance fetches its weights with git-lfs (not installed): the worker downloads them with huggingface_hub into
+  <models>/audio/resemble-enhance; ClearVoice wrote its checkpoints into the working folder: now <models>/audio/clearvoice.
+- Audio judges on llama.cpp b12224 (audio input logged as experimental) fail a clear-cut pair (clean against the same with noise at -5 dB):
+  Gemma 4 E4B answers X in both orders (1.5 s a verdict, 4.8 GB); Qwen3-Omni-30B-A3B says X and Y are both the input (12 s). Asked to rate
+  one recording's noise 1-5, neither tells clean from noisy. The denoise-audio spec keeps Gemini (agy) as its only model judge; DNSMOS,
+  SQUIM and people carry the rest. Retry the local ones on a newer llama.cpp.
+- huggingface_hub is now a declared dependency: the llama-server and sd-cpp runtimes fetch weights with it, and the live venv only had it
+  because it was installed by hand (a plain `uv sync` would have removed it).
 
