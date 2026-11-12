@@ -290,10 +290,12 @@ def test_engine_cmd_builds_each_clis_command(tmp_path):
     V.E.clear()
     V.E.update(engine="seedvr2", repo="/r", models_dir="/m", options=dict(args=dict(blocks_to_swap=16, batch_size=5)))
     cmd, cwd = V.engine_cmd(P(), "prep.mp4", "up.mp4")
-    assert cmd[1:5] == ["/r/inference_cli.py", "prep.mp4", "--output", "up.mp4"] and cwd == "/r"
+    assert (
+        cmd[1:5] == [os.path.join("/r", "inference_cli.py"), "prep.mp4", "--output", "up.mp4"] and cwd == "/r"
+    )  # the OS's separator
     assert (
         cmd[cmd.index("--resolution") + 1] == "1080"
-        and cmd[cmd.index("--model_dir") + 1] == "/m/seedvr2"
+        and cmd[cmd.index("--model_dir") + 1] == os.path.join("/m", "seedvr2")
         and cmd[cmd.index("--blocks_to_swap") + 1] == "16"
     )
     V.E.update(engine="flashvsr", options=dict(args=dict(mode="base", cf=True)))
