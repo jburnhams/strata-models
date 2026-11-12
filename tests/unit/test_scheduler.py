@@ -450,7 +450,7 @@ def test_gpu_jobs_on_different_models_run_together_up_to_the_slots(scheduler):
     scheduler.execute(ta)
     assert scheduler.step()["id"] == a2["id"]
     scheduler.execute(tc)
-    assert set(scheduler.resident) == {"small", "other", "big"} and scheduler.busy == {} and scheduler.running == {}
+    assert {"small", "big"} <= set(scheduler.resident) and scheduler.busy == {} and scheduler.running == {}
 
 
 def test_a_gpu_job_that_does_not_fit_beside_running_ones_waits_and_nothing_passes_it(scheduler):
@@ -470,7 +470,7 @@ def test_a_gpu_job_that_does_not_fit_beside_running_ones_waits_and_nothing_passe
 def test_a_running_model_is_never_evicted_and_its_growth_is_promised(scheduler):
     scheduler.submit("echo", {}, "a")
     scheduler.step()
-    scheduler.resident["small"].vram_mb = 512  # measured little at load, like sd-cpp, which allocates per job
+    scheduler.resident["small"].held_mb = 512  # measured little at load, like sd-cpp, which allocates per job
     s = scheduler.submit("echo", {}, "a")
     ts = scheduler.dispatch()
     assert ts["job"]["id"] == s["id"] and scheduler.pending_mb() == 1536
@@ -546,11 +546,18 @@ def test_a_load_measured_beside_other_gpu_work_keeps_its_estimate(scheduler, mon
     )  # big's 6 GB appear meanwhile
     scheduler.submit("other", {}, "b")
     scheduler.execute(scheduler.dispatch())
+    r = scheduler.resident["other"]
     assert (
-        scheduler.resident["other"].vram_mb == 2048
+        r.vram_mb == 2048 and r.held_mb is None
     )  # not 8 GB: `small` was busy, so the card's change was not all its own
     monkeypatch.undo()
     fake.LOADED.pop()
+    s2 = scheduler.submit("other", {}, "b")
+    t2 = scheduler.dispatch()
+    assert (
+        t2["job"]["id"] == s2["id"] and scheduler.pending_mb() == 2048 + 2048
+    )  # small loading, other unknown: both estimates promised
+    scheduler.execute(t2)
     scheduler.execute(t)
 
 
@@ -579,3 +586,44 @@ def test_slots_are_at_least_one_and_a_job_for_an_unknown_model_fails_in_the_cpu_
     assert (s.gpu_jobs, s.cpu_jobs) == (1, 1)
     j = scheduler.store.add(kind="run", role="echo", model="gone", app="a", priority="batch")
     assert scheduler._lane(j) == "cpu" and "no longer served" in scheduler.step()["error"]
+
+
+def test_a_model_that_allocates_per_job_keeps_its_estimate_promised_while_it_runs(scheduler, monkeypatch):
+    real = fake.load
+
+    def load(m, d):  # like sd-cpp: nothing on the card at load (the fake card counts this handle as the 0 GB `cloud`)
+        h = real(m, d)
+        if m.key == "big":
+            h["model"] = "cloud"
+        return h
+
+    monkeypatch.setattr(fake, "load", load)
+    _cloud(scheduler)
+    scheduler.submit("echo", {}, "a", model="big")
+    scheduler.step()
+    r = scheduler.resident["big"]
+    assert r.held_mb == 0 and r.vram_mb == 6144 and r.frees_mb == 0
+    scheduler.probe.other_mb = 3000  # 12 - 2.9 - 1 = 8.1 GB for models
+    t = scheduler.dispatch() if scheduler.submit("echo", {}, "a", model="big") else None
+    assert scheduler.pending_mb() == 6144
+    scheduler.submit("other", {}, "b")  # 2 GB beside sd-cpp's 6 GB to come: 8 of 8.1, fits
+    t2 = scheduler.dispatch()
+    assert t2["job"]["role"] == "other"
+    scheduler.submit("echo", {}, "c")  # another 2 GB would not
+    assert scheduler.dispatch() is None
+    scheduler.execute(t2)
+    scheduler.execute(t)
+
+
+def test_a_model_reloaded_with_edited_options_reserves_its_estimate_while_it_loads(scheduler):
+    import dataclasses
+
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    m = scheduler.registry.models["small"]
+    scheduler.registry.models["small"] = dataclasses.replace(m, options=dict(ctx=4096))
+    scheduler.submit("echo", {}, "a")
+    t = scheduler.dispatch()
+    assert scheduler.loading == {"small": 2048}
+    scheduler.execute(t)
+    assert scheduler.loading == {} and scheduler.resident["small"].model.options == dict(ctx=4096)

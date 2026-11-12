@@ -45,10 +45,21 @@ class QueueError(ValueError):
 
 
 class Resident:
-    def __init__(self, model, handle, vram_mb, load_s, clock):
+    def __init__(self, model, handle, vram_mb, load_s, clock, held_mb=None):
         self.model, self.handle, self.vram_mb, self.load_s = model, handle, vram_mb, load_s
+        self.held_mb = held_mb  # what loading it really took on the card (0 for sd-cpp, which allocates per job); None: not known, its load overlapped other GPU work
         self.loaded_at = self.last_used = clock()
         self.jobs = 0
+
+    @property
+    def growth_mb(self):
+        """What a job on it may still take beyond what it holds idle: its estimate less what it measured (the whole estimate when unknown)."""
+        return max(self.model.vram_gb * MB - (self.held_mb or 0.0), 0.0)
+
+    @property
+    def frees_mb(self):
+        """What unloading it gives back."""
+        return self.vram_mb if self.held_mb is None else self.held_mb
 
     def to_json(self):
         return dict(
@@ -273,7 +284,7 @@ class Scheduler:
             for k in self.busy:
                 r = self.resident.get(k)
                 if r is not None and k not in self.loading:
-                    p += max(r.model.vram_gb * MB - r.vram_mb, 0.0)
+                    p += r.growth_mb
         return p
 
     def free_mb(self, state, leases=None):
@@ -346,23 +357,32 @@ class Scheduler:
                 break
             if k == keep:
                 continue
-            free += r.vram_mb
+            free += r.frees_mb
             self._unload(k, f"room for {need_mb / MB:.1f} GB")
 
     def _need_mb(self, model):
         """MB a job for `model` will take beyond what the card shows now: the whole estimate to load it, or its growth if it is loaded."""
         with self.cv:
             r = self.resident.get(model.key)
-        if r is None or (r.model.runtime, r.model.name, r.model.options) != (model.runtime, model.name, model.options):
+        if not self._same(r, model):
             return model.vram_gb * MB
-        return max(model.vram_gb * MB - r.vram_mb, 0.0)
+        return max(model.vram_gb * MB - (r.held_mb or 0.0), 0.0)
+
+    @staticmethod
+    def _same(r, model):
+        """Whether resident `r` is `model` as it stands (not loaded with a runtime, file or options since edited)."""
+        return r is not None and (r.model.runtime, r.model.name, r.model.options) == (
+            model.runtime,
+            model.name,
+            model.options,
+        )
 
     def _room_now(self, model):
         """Whether `model` fits now beside the work running, counting idle models as room (they can be evicted)."""
         state = self._state()
         if not state:
             return True
-        idle = sum(r.vram_mb for k, r in self._idle() if k != model.key)
+        idle = sum(r.frees_mb for k, r in self._idle() if k != model.key)
         return self.free_mb(state) + idle >= self._need_mb(model)
 
     def _ensure(self, model):
@@ -389,7 +409,8 @@ class Scheduler:
         measured = gpu.own_used_mb(self.probe()) - before
         with self.cv:
             alone = alone and epoch == self._epoch and not self._gpu_busy(but=model.key)
-            r = Resident(model, handle, measured if measured > 0 and alone else model.vram_gb * MB, load_s, self.clock)
+            held = max(measured, 0.0) if alone else None
+            r = Resident(model, handle, held if held else model.vram_gb * MB, load_s, self.clock, held)
             self.resident[model.key] = r
             self.loading.pop(model.key, None)
             self._epoch += 1
@@ -484,7 +505,7 @@ class Scheduler:
         state = self._state()
         if not state:
             return True
-        return self.free_mb(state) + sum(r.vram_mb for r in list(self.resident.values())) >= m.vram_gb * MB
+        return self.free_mb(state) + sum(r.frees_mb for r in list(self.resident.values())) >= m.vram_gb * MB
 
     def _wait_note(self, j, text):
         if self._waiting != j["id"]:
@@ -573,7 +594,7 @@ class Scheduler:
         with self.cv:
             key = model.key if model is not None else j["model"]
             self.busy[key] = j["id"] if j else "load"
-            if model is not None and key not in self.resident and self._on_gpu(model):
+            if model is not None and not self._same(self.resident.get(key), model) and self._on_gpu(model):
                 self.loading[key] = model.vram_gb * MB
             if j is not None:
                 self.running[j["id"]] = (j, lane)
