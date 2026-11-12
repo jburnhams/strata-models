@@ -22,6 +22,8 @@ QUOTA = re.compile(
     r"usage limit|rate limit|quota|resource[_ ]exhausted|too many requests|\b429\b|try again (later|in)", re.I
 )
 TEMPFAIL = 75
+# Gemini's safety-filter notice, which agy can splice into an otherwise good answer (4 of 100 LibriSpeech transcripts, 2026-11-12): a failure
+FILTERED = re.compile(r"request was blocked by Gemini's filters", re.I)
 
 
 class QuotaError(RuntimeError):
@@ -138,6 +140,8 @@ def _agy(prompt, d, model=None, effort=None, timeout=600, run=subprocess.run, sc
         if QUOTA.search(msg) or QUOTA.search(p.stderr or ""):
             raise QuotaError(f"agy: {msg.strip()[-400:]}")
         raise CallError(f"agy exited {p.returncode} ({status or 'no status'}): {msg.strip()[-400:]}")
+    if FILTERED.search(str(env.get("response") or "")):
+        raise CallError("agy: the answer was blocked by Gemini's filters (rerun to try again)")
     return env
 
 
@@ -220,7 +224,12 @@ def image_agy(
             ]
         made = [f for f in made if os.path.getmtime(f) >= t0 - 1]
         if not made:
-            raise CallError(f"agy made no picture: {str(env.get('response') or '')[-300:]}")
+            said = str(env.get("response") or "")
+            if QUOTA.search(
+                said
+            ):  # the image model has its own quota, which /usage does not show (about 14 pictures per 5 h on AI Pro)
+                raise QuotaError(f"agy image model: {said.strip()[-300:]}")
+            raise CallError(f"agy made no picture: {said[-300:]}")
         return _keep(max(made, key=os.path.getmtime), dest)
 
 

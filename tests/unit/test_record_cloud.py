@@ -470,3 +470,21 @@ def test_main_picks_the_job_and_the_key_from_the_specs_role(tmp_path, monkeypatc
         R.main(["t", "--like", "local", "--cli", "codex", "--out", str(out)], log=log.append) == 2
         and "cannot hear" in log[-1]
     )
+
+
+def test_a_filter_notice_inside_an_answer_is_a_failure_and_an_image_quota_a_stop(tmp_path):
+    blocked = "She rose This request was blocked by Gemini's filters. They can occasionally trigger by mistake."
+    with pytest.raises(R.CallError, match="filters"):
+        R.transcribe_agy(
+            "/a.wav",
+            run=lambda *a, **k: done(json.dumps(dict(status="SUCCESS", response=blocked))),
+            cut=lambda p, c, o: o,
+        )
+    full = "429 RESOURCE_EXHAUSTED (Capacity exhausted on `gemini-3.1-flash-image`; quota resets in ~4 hours)"
+    with pytest.raises(R.QuotaError):  # the image model's own quota, which /usage does not show
+        R.image_agy(
+            "fox",
+            str(tmp_path / "k"),
+            run=lambda *a, **k: done(json.dumps(dict(status="SUCCESS", response=full))),
+            brain=str(tmp_path),
+        )
