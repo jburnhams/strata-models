@@ -212,6 +212,8 @@ def cmd_eval(args):
         r = C.run(spec, engine, C.ClientExecutor(sm), candidates=args.candidate or None, limit=args.limit)
         print(json.dumps(r))
         return 0
+    if args.action == "judge":
+        return _eval_judge(spec, engine, args)
     if args.action == "forget":
         print(f"{C.forget(spec, engine, args.candidate[0] if args.candidate else None)} outputs forgotten")
         return 0
@@ -228,6 +230,40 @@ def cmd_eval(args):
     else:
         print(text)
     return 0
+
+
+def _eval_judge(spec, engine, args):
+    """Model judges judge what they have still to judge: a local one through the running service's queue, a cloud one by calling its CLI here
+    (on the plan: this machine's codex or agy must be signed in). Exit 75 when a plan's allowance ran out (run again later to go on)."""
+    import os
+
+    from stratamodels.evals import core as C
+    from stratamodels.evals import judges as J
+
+    names = args.judge or [j["name"] for j in spec.judges]
+    if not names:
+        sys.exit(f"{spec.name} names no judges ([[judges]] in its spec)")
+    executor = None
+    try:
+        local = [J.find(spec, n) for n in names if not J.find(spec, n)["cli"]]
+    except C.EvalError as e:
+        sys.exit(str(e))
+    if local:
+        sys.path.insert(
+            0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "client")
+        )
+        import strata_models_client as sm
+
+        if not sm.available():
+            sys.exit(f"strata-models is not running at {sm.url()}: a local judge's jobs go through its queue")
+        executor = C.ClientExecutor(sm)
+    out, code = {}, 0
+    for n in names:
+        r = out[n] = J.run_judge(spec, engine, n, J.asker_for(J.find(spec, n), executor), limit=args.limit)
+        if r["stopped"]:
+            code = 75
+    print(json.dumps(out))
+    return code
 
 
 def cmd_set(args):
@@ -267,11 +303,16 @@ def main(argv=None):
     r = sub.add_parser("registry", help="roles and the model chosen for each")
     r.add_argument("--json", action="store_true")
     r.set_defaults(fn=cmd_registry)
-    e = sub.add_parser("eval", help="experiments: list | run NAME | report NAME [--out FILE] | forget NAME")
-    e.add_argument("action", choices=["list", "run", "report", "forget"])
+    e = sub.add_parser(
+        "eval", help="experiments: list | run NAME | judge NAME [--judge J] | report NAME [--out FILE] | forget NAME"
+    )
+    e.add_argument("action", choices=["list", "run", "judge", "report", "forget"])
     e.add_argument("name", nargs="?")
     e.add_argument("--candidate", action="append", help="only this candidate (repeatable)")
-    e.add_argument("--limit", type=int, help="only the first N items (a trial run)")
+    e.add_argument("--limit", type=int, help="only the first N items (a trial run); judge: at most N pairs per judge")
+    e.add_argument(
+        "--judge", action="append", help="judge: only this model judge (repeatable; default every judge in the spec)"
+    )
     e.add_argument("--out", help="write the report here")
     e.add_argument("--json", action="store_true")
     e.set_defaults(fn=cmd_eval)

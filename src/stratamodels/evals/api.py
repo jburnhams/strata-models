@@ -12,7 +12,11 @@ GET  /api/evals/{name}/pair                  a blind pair to judge: one item, tw
                                              end results only: a pipeline's intermediate steps are left out
 GET  /api/evals/{name}/outputs[?item_id=]    every candidate's full output per item, a pipeline's every step (what it was sent, what it answered)
 POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
-GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names"""
+GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names
+GET  /api/evals/{name}/verdicts/{item_id}    every judgment of an item, people's and model judges' (shown once a person has judged it)
+POST /api/evals/{name}/judges/{judge}/run    a model judge judges what it has still to judge (?limit=N), in the background (evals.judges)
+GET  /api/evals/{name}/judges/status         those runs' progress
+A person's judgment also starts every judge with `auto = true` on that pair, in the background."""
 
 import base64
 import hashlib
@@ -87,6 +91,39 @@ def mount(app, scheduler):
     engine = lambda: scheduler.store.engine
     sims = {}  # sims: (result key, result key) -> similarity, outputs never change under a key
     summaries = app.state.eval_summaries = Summaries(engine)
+    judging = {}  # (experiment, judge) -> run state; one run per judge at a time
+    judging_lock = threading.Lock()
+
+    def start_judge(s, judge, limit=None, only=None):
+        """Run a judge in the background; a run already going for it is left to finish (an auto pair it misses is judged on the next run)."""
+        from stratamodels.evals import judges as J
+
+        k = (s.name, judge)
+        with judging_lock:
+            if judging.get(k, {}).get("state") == "running":
+                return judging[k]
+            st = judging[k] = dict(state="running", judge=judge, started_at=time.time(), log=[])
+
+        def go():
+            try:
+                j = J.find(s, judge)
+                st["result"] = J.run_judge(
+                    s,
+                    engine(),
+                    judge,
+                    J.asker_for(j, C.SchedulerExecutor(scheduler)),
+                    limit=limit,
+                    only=only,
+                    log=st["log"].append,
+                )
+                st["state"] = "done"
+            except Exception as e:
+                st["state"], st["error"] = "failed", f"{type(e).__name__}: {e}"
+            st["finished_at"] = time.time()
+            summaries.refresh(s.name)
+
+        threading.Thread(target=go, name=f"judge-{s.name}-{judge}", daemon=True).start()
+        return st
 
     def analysis(s):
         """The analysis as kept in the database, worked out in the background when what it reads changes (evals.summaries)."""
@@ -230,7 +267,9 @@ def mount(app, scheduler):
         with C.session(engine()) as ses:  # a judgment of outputs that are no longer the candidates' does not count
             judged = {
                 (j.item_id, frozenset((j.a, j.b)))
-                for j in ses.scalars(select(EvalJudgment).where(EvalJudgment.experiment == name))
+                for j in ses.scalars(
+                    select(EvalJudgment).where(EvalJudgment.experiment == name, EvalJudgment.judge.is_(None))
+                )  # people's: a model judge's verdicts do not make a pair judged
                 if j.a_key and current.get((j.a, j.item_id)) == j.a_key and current.get((j.b, j.item_id)) == j.b_key
             }
         fresh = [
@@ -290,7 +329,28 @@ def mount(app, scheduler):
             )
             ses.commit()
         summaries.refresh(name)
+        s = spec_or_404(name)
+        for j in s.judges:
+            if j["auto"]:
+                start_judge(s, j["name"], only=(d["i"], d["x"], d["y"]))
         return dict(ok=True, item_id=d["i"], x=d["x"], y=d["y"], winner=win)
+
+    @app.get("/api/evals/{name}/verdicts/{item_id}")
+    def get_verdicts(name: str, item_id: str):
+        from stratamodels.evals import judges as J
+
+        return dict(item_id=item_id, judgments=J.verdicts_on(engine(), spec_or_404(name), item_id))
+
+    @app.post("/api/evals/{name}/judges/{judge}/run", status_code=202)
+    def post_judge_run(name: str, judge: str, limit: int | None = None):
+        s = spec_or_404(name)
+        if not any(j["name"] == judge for j in s.judges):
+            raise HTTPException(404, f"{name}: no judge {judge!r}")
+        return start_judge(s, judge, limit=limit)
+
+    @app.get("/api/evals/{name}/judges/status")
+    def get_judge_status(name: str):
+        return {j: st for (e, j), st in judging.items() if e == name}
 
     @app.get("/api/evals/{name}/outputs")
     def get_outputs(name: str, item_id: str | None = None):

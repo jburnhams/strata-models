@@ -3,7 +3,7 @@ where to look. A person adds the parts no number gives (what the failures look l
 
 Sections: Question and answer (the decision first), Setup (dataset and version, candidates with their full config, metrics and how they are
 computed, the decision rule), Results (every metric with its 95 % interval), Comparisons with the baseline (paired differences, intervals, p
-before and after Holm), Human judgments (if any), Cost (run time, load time), Failures (examples, by item id), Method notes (the standard
+before and after Holm), Human judgments (if any), Model judges (if the spec names any: agreement with people), Cost (run time, load time), Failures (examples, by item id), Method notes (the standard
 text on intervals and tests), Decision and follow-ups (for the person), Reproduce (the commands)."""
 
 import datetime
@@ -44,6 +44,48 @@ def _d(m, x):
 
 def _p(p):
     return "n/a" if p is None or (isinstance(p, float) and math.isnan(p)) else ("< 0.001" if p < 0.001 else f"{p:.3f}")
+
+
+def _share(d):
+    if not d or not d.get("n") or d.get("value") is None or d["value"] != d["value"]:
+        return "n/a"
+    return f"{d['value'] * 100:.0f} % [{d['low'] * 100:.0f}, {d['high'] * 100:.0f}] of {d['n']}"
+
+
+def judges_section(judges, base):
+    """Model judges: how far each agrees with people on the pairs both judged, and what it alone would say against the baseline."""
+    L = [
+        "## Model judges",
+        "",
+        "Model verdicts on the same blind pairs, kept beside people's and never counted as theirs. Agreement: the share of pairs both judged where"
+        " the judge gave the person's answer (winner or tie). Same winner: of the pairs where both picked a winner, the share where they picked the"
+        " same one. Kappa: agreement beyond chance (1 perfect, 0 chance). Order-consistent: the share of pairs where the judge gave the same answer"
+        " with X and Y swapped (a tie otherwise).",
+        "",
+        "| Judge | Kind | Model | Verdicts | With people | Agreement | Same winner | Kappa | Order-consistent |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for n, j in judges.items():
+        k = j.get("kappa")
+        L.append(
+            f"| `{n}` | {j.get('kind', '')} | `{j.get('model') or '?'}`{' via ' + j['via'] if j.get('via') not in (None, 'queue') else ''} | {j['judged']} |"
+            f" {j['with_people']} | {_share(j['agree'])} | {_share(j['decided'])} | {'n/a' if k is None or k != k else f'{k:.2f}'} | {_share(j['consistent'])} |"
+        )
+    L.append("")
+    for n, j in judges.items():
+        comps = [(c, v) for c, v in (j.get("comparisons") or {}).items() if v.get("n")]
+        if comps:
+            L.append(
+                f"`{n}` alone, against `{base}`: "
+                + "; ".join(f"`{c}` won {v['wins']}, lost {v['losses']}, tied {v['ties']}" for c, v in comps)
+                + "."
+            )
+        for d in (j.get("disagreements") or [])[:5]:
+            L.append(
+                f"- `{d['item_id']}` (`{d['a']}` v `{d['b']}`): people {d['person']}, `{n}` {d['judge']}. {d.get('reason') or ''}".rstrip()
+            )
+        L.append("")
+    return L
 
 
 def render(res, examples=None, date=None, pipelines=None):
@@ -155,6 +197,8 @@ def render(res, examples=None, date=None, pipelines=None):
             f"- `{n}`: {s[0]:.2f} [{s[1]:.2f}, {s[2]:.2f}]"
             for n, s in sorted(res["judgments"]["strength"].items(), key=lambda kv: -kv[1][0])
         ] + [""]
+    if res.get("judges"):
+        L += judges_section(res["judges"], base)
     L += [
         "## Cost",
         "",

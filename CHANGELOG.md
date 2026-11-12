@@ -4,6 +4,17 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Evals: model judges beside people, and how far each agrees with them (branch `claude/project-thread-kjwkpt`)**
+Jonathan asked whether models judge eval outputs (they did not: only his blind A/B picks) and wanted a model's verdict recorded beside his on the same pairs, to learn how good a judge it is before relying on it more; and judges sorted by kind, each with its own model.
+
+- `src/stratamodels/evals/judges.py`: **new**. A spec's `[[judges]]`: kind `text` or `vision` (registry roles `judge-text`, `judge-vision`, each with its chosen model; a judge may name another model to trial it), or a cloud model via `cli = "codex" | "agy"` on the plan. A judge reads the item (and its pictures, for vision), the two answers as X and Y with every field that names the model removed, and answers {reason, winner}; asked both ways round by default, and a judge that changes its mind with the order gives a tie. `pairs = "judged"` (default: the pairs people judged) or `"all"`, `limit` per run, `auto` (judge each pair right after a person does). The analysis gains `judges`: verdicts, agreement with people (tie included), same winner where both picked one, Cohen's kappa, order consistency, disagreements, and what the judge alone would say against the baseline.
+- `db/models.py`, `migrations/20261112_7b3e9d2c4f18_judgment_judges.py`: `eval_judgments.judge` (the judge's config hash; null for a person) and `detail` (each order's answer and reason). Nullable: every existing row stays a person's. A changed judge config or a new model for its kind is a new judge.
+- `core.judgments` and the Judge tab count people only: a judge never decides a `judged` experiment or makes a pair look judged.
+- `evals/api.py`: `POST /api/evals/{name}/judges/{judge}/run`, `GET .../judges/status`, `GET .../verdicts/{item_id}`; a person's judgment starts the `auto` judges on that pair. CLI `strata-models eval judge NAME [--judge J] [--limit N]` (exit 75 when a plan's allowance runs out).
+- `evals/report.py`: a **Model judges** section after Human judgments. `evals/cloud.py`: the codex/agy calls moved out of `scripts/evals/record_cloud.py` (which imports them) so judges use the same official-CLI path.
+- `models.toml`: roles `judge-text` and `judge-vision` (qwen3.5-9b-vl to start, unmeasured), served by the llama-server models.
+- `web/`: the experiment page's Model judges table; after a judgment the unblinded pair shows what each judge said about it.
+
 **Scheduler: several jobs at once, cloud and CPU jobs beside the GPU's (branch `claude/project-thread-kf7tb7`)**
 The one worker thread ran one job at a time, so a 30 s cloud CLI call (the subscription-backends idea) or a CPU model would hold up the GPU queue, and two small GPU models that fit together still took turns.
 

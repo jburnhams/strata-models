@@ -195,3 +195,30 @@ def test_the_cli_never_migrates_a_database_at_another_revision(capsys, monkeypat
         cli.main(["role", "faces", "buffalo_l"])
     assert cli.main(["eval", "list"]) == 0 and "reading the files" in capsys.readouterr().err
     e.dispose()
+
+
+def test_eval_judge_command(capsys, monkeypatch, tmp_path, setup):
+    import os
+    import sys
+    import types
+
+    monkeypatch.setenv("STRATAMODELS_DATABASE_URL", "sqlite:///" + str(tmp_path / "db.sqlite"))
+    with pytest.raises(SystemExit, match="names no judges"):
+        cli.main(["eval", "judge", "fake-asr"])
+    spec = open(os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", "fake-asr.toml")).read()
+    spec = spec.replace('name = "fake-asr"', 'name = "fake-asr-j"') + (
+        '[[judges]]\nname = "local"\nkind = "text"\n\n[[judges]]\nname = "flash"\ncli = "agy"\nmodel = "gemini-3.8-flash-low"\n'
+    )
+    open(os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", "fake-asr-j.toml"), "w").write(spec)
+    with pytest.raises(SystemExit, match="no judge 'nope'"):
+        cli.main(["eval", "judge", "fake-asr-j", "--judge", "nope"])
+    monkeypatch.setitem(
+        sys.modules, "strata_models_client", types.SimpleNamespace(available=lambda: False, url=lambda: "http://x")
+    )
+    with pytest.raises(SystemExit, match="local judge's jobs go through its queue"):
+        cli.main(["eval", "judge", "fake-asr-j"])
+    capsys.readouterr()
+    assert (
+        cli.main(["eval", "judge", "fake-asr-j", "--judge", "flash"]) == 0
+    )  # a cloud judge needs no service; no pairs judged yet
+    assert '"flash": {"judged": 0' in capsys.readouterr().out

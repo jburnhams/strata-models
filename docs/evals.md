@@ -18,7 +18,7 @@ can be compared and revisited when a new model appears.
    Faces: found, missed, verification AUC and TAR at 1 % FAR. Generic: exact match, JSON parse rate, failure rate, run time, peak VRAM.
 5. **Statistics** (`stats.py`), the same everywhere: Wilson intervals for shares, item bootstrap for means and corpus rates, **paired**
    comparisons with the baseline (bootstrap interval, permutation p, exact McNemar for right/wrong), Holm's correction across candidates,
-   Bradley-Terry with bootstrap intervals for blind human judgments, and an estimate of the items needed when a result is unclear.
+   Bradley-Terry with bootstrap intervals for blind human judgments, Cohen's kappa for a model judge's agreement with people, and an estimate of the items needed when a result is unclear.
 6. **A decision per candidate**: *adopt* (the whole interval is on the better side, the gain reaches the minimum effect, every guard holds),
    *reject* (worse, too small, or a guard broken), or *unclear* (the interval includes no change; the report says roughly how many items
    would settle it).
@@ -49,6 +49,22 @@ runtime.
 - **`[score]`** names a second model that reads every output with a file (`role`, optional `model`, `params`): after a run, each output gets
   a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
   the words are scored against the text that was to be spoken, an intelligibility guard for text to speech.
+
+## Model judges: a model's verdict beside a person's
+People's blind judgments are slow to gather, so a spec can name **model judges** (`[[judges]]`, see `src/stratamodels/evals/judges.py`) that
+judge the same pairs. Their verdicts are kept beside people's and **never counted as theirs**: a `judged` decision and the Judge tab's order
+use people only. What the judges are for, for now, is measuring them: the analysis (and the write-up's **Model judges** section) gives each
+judge's agreement with people on the pairs both judged (tie included), the same-winner share where both picked one, Cohen's kappa (agreement
+beyond chance) and how often it gave the same answer with X and Y swapped. A judge that agrees well across experiments is the one to trust with
+more later (pairs nobody has time for, or a first pass before people).
+- **Kinds**, by what a judge must read: `text` (transcripts, captions, JSON) and `vision` (photo descriptions, generated pictures: it sees the
+  item's pictures and the candidates'). Each kind is a registry role (`judge-text`, `judge-vision`) with its chosen model, picked like any model:
+  by an eval, here on agreement with people. A judge may name another model serving the role to trial it. Voices have no judge kind yet.
+- **Cloud judges** (`cli = "codex" | "agy"`, `model` the CLI's slug) call the vendor's own CLI on the plan, never its sign-in token
+  elsewhere. Give a dear one a `limit`, like a sampled candidate. A judge that is also a candidate tends to prefer its own answers.
+- Which pairs: `pairs = "judged"` (default; the ones agreement is measured on) or `"all"`; `auto = true` judges each pair right after a person
+  does. Run with `./strata-models eval judge NAME`, or POST `/api/evals/{name}/judges/{judge}/run`. A changed prompt, criteria, params or model
+  makes a new judge, whose verdicts start again.
 
 ## Pipelines: a step before the candidate
 A candidate can run **stages** before its own job (`[[candidates.stages]]`: role, optional model, params, `input` template over the item's

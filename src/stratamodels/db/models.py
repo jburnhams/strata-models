@@ -4,7 +4,7 @@ what the web app formats anyway.
   registry      models, roles, model_roles (which roles a model may serve; a role's `model` is the one chosen for it)
   config        settings (the service's own: folders, VRAM reserve), preferences (an app's own choice of model or default params for a role)
   requests      jobs (every run and lease), results (a run's output, dropped after a week), files (paths a job read or wrote: never the bytes)
-  evals         eval_datasets + eval_items, eval_experiments + eval_candidates, eval_results (cached outputs), eval_judgments (blind A/B choices)
+  evals         eval_datasets + eval_items, eval_experiments + eval_candidates, eval_results (cached outputs), eval_judgments (blind A/B choices, people's and model judges')
 
 Files in the repository (models.toml, evals/specs/*.toml, dataset .jsonl files) are SEEDS: imported at start, and followed while the row has not
 been edited here (`edited`); see registry.seed and evals.core."""
@@ -68,7 +68,8 @@ class EvalResult(Base):
 
 class EvalJudgment(Base):
     """A person's blind choice between two candidates' outputs for one item (or a tie): what metrics cannot measure (is this transcript better,
-    is this caption right). Analysed with Bradley-Terry."""
+    is this caption right). Analysed with Bradley-Terry. A model judge's verdict on the same pair is a row too, with `judge` set (evals.judges):
+    kept beside people's to measure how far the judge agrees with them, never counted as a person's."""
 
     __tablename__ = "eval_judgments"
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
@@ -86,6 +87,12 @@ class EvalJudgment(Base):
     b_key: Mapped[str | None] = mapped_column(
         sa.String(64), default=None
     )  # while they are still the candidates' outputs
+    judge: Mapped[str | None] = mapped_column(
+        sa.String(32), default=None, index=True
+    )  # a model judge's config hash (evals.judges.judge_key; `rater` is its name); None: a person
+    detail: Mapped[dict | None] = mapped_column(
+        sa.JSON, default=None
+    )  # a model judge's answers: each order it was asked in, what it said and why, whether they agreed
 
 
 class EvalSummary(Base):

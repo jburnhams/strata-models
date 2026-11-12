@@ -381,3 +381,75 @@ def test_a_run_refreshes_every_experiment_sharing_its_dataset(client, monkeypatc
         "fake-asr",
         "twin",
     ]  # twin's outputs may have been rescored in place: worked out again though unchanged
+
+
+JUDGED_SPEC = """name = "fake-asr-judges"
+question = "Which fake transcriber, with a model judge beside the person?"
+role = "echo"
+dataset = "speech"
+metrics = ["wer", "failed"]
+judge = true
+[decision]
+primary = "wer"
+baseline = "base"
+[[candidates]]
+name = "base"
+model = "small"
+params = { drop = 4 }
+[[candidates]]
+name = "better"
+model = "big"
+params = { drop = 12 }
+[[judges]]
+name = "fox"
+kind = "text"
+role = "other"
+model = "other"
+params = { favour = "fox" }
+auto = true
+"""
+
+
+def wait_judge(client, name, judge):
+    for _ in range(1200):
+        st = client.get(f"/api/evals/{name}/judges/status").json().get(judge)
+        if st and st["state"] != "running":
+            return st
+        time.sleep(0.05)
+    raise AssertionError("the judge did not finish")
+
+
+def test_model_judge_beside_a_person(client):
+    import os
+
+    open(os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", "fake-asr-judges.toml"), "w").write(
+        JUDGED_SPEC
+    )
+    name = "fake-asr-judges"
+    client.post(f"/api/evals/{name}/run", params=dict(limit=3))
+    wait_run(client, name)
+    p = client.get(f"/api/evals/{name}/pair").json()
+    assert p["remaining"] == 3
+    j = client.post(f"/api/evals/{name}/judgments", json=dict(token=p["pair"]["token"], winner="tie")).json()
+    st = wait_judge(client, name, "fox")  # auto: the judge took the same pair right after the person
+    assert st["state"] == "done" and st["result"]["judged"] == 1
+    v = client.get(f"/api/evals/{name}/verdicts/{j['item_id']}").json()["judgments"]
+    assert [x["rater"] for x in v] == ["fox", "jonathan"] and v[0]["winner"] == "better" and v[1]["winner"] == "tie"
+    assert (
+        client.get(f"/api/evals/{name}/pair").json()["remaining"] == 2
+    )  # the judge's verdict does not make a pair judged for people
+    for _ in range(200):  # the kept analysis catches up with the judge's verdict in the background
+        a = client.get(f"/api/evals/{name}").json()
+        if a.get("judges", {}).get("fox", {}).get("judged") == 1:
+            break
+        time.sleep(0.05)
+    assert (
+        a["judges"]["fox"]["with_people"] == 1
+        and a["judges"]["fox"]["tally"]["person_tie"] == 1
+        and a["judgments"]["n"] == 1
+    )
+    assert client.post(f"/api/evals/{name}/judges/nope/run").status_code == 404
+    assert client.post(f"/api/evals/{name}/judges/fox/run").json()["state"] == "running"
+    assert (
+        wait_judge(client, name, "fox")["result"]["judged"] == 0
+    )  # pairs = judged: nothing new until people judge more
