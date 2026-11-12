@@ -847,16 +847,18 @@ def item_field(item, dotted):
     return v
 
 
+def with_values(spec, item):
+    """The item fields a [score] `with` sends, as resolved for this item ({} without `with`, or when no item is known)."""
+    if item is None:
+        return {}
+    return {k: v for k, d in (spec.score.get("with") or {}).items() if (v := item_field(item, d)) is not None}
+
+
 def score_params(spec, output, item):
     """The scoring job's params: the [score] params, path = the output's file, and each `with` param taken from the item (e.g. with =
     {reference = "reference.audio"}: the clean recording a noisy item was made from, for measures that compare with it). A param whose field
     the item lacks is left out."""
-    p = {**(spec.score.get("params") or {}), "path": output["path"]}
-    for k, dotted in (spec.score.get("with") or {}).items():
-        v = item_field(item or {}, dotted)
-        if v is not None:
-            p[k] = v
-    return p
+    return {**(spec.score.get("params") or {}), "path": output["path"], **with_values(spec, item or {})}
 
 
 def score_outputs(spec, engine, executor, keys, log=print, batch=32):
@@ -868,7 +870,12 @@ def score_outputs(spec, engine, executor, keys, log=print, batch=32):
     rows = [
         r
         for r in cached(engine, list(keys)).values()
-        if r.output and isinstance(r.output.get("path"), str) and sk not in readings(r.output)
+        if r.output
+        and isinstance(r.output.get("path"), str)
+        and (
+            sk not in readings(r.output)
+            or readings(r.output)[sk].get("with", {}) != with_values(spec, items.get(r.key))
+        )  # not read, or read with item fields that have changed since (a corrected or added reference)
     ]
     if rows:
         log(f"{spec.name}: scoring {len(rows)} outputs with {spec.score['role']}")
@@ -890,6 +897,9 @@ def score_outputs(spec, engine, executor, keys, log=print, batch=32):
                 reading = (
                     dict(result=j.get("result")) if j["status"] == "done" else dict(error=j.get("error") or j["status"])
                 )
+                wv = with_values(spec, items.get(r.key))
+                if wv:
+                    reading["with"] = wv  # the item fields it was read with: a change reads it again
                 r.output = {
                     **{k: v for k, v in r.output.items() if k != "scored"},
                     "scores": {**readings(r.output), sk: reading},

@@ -226,6 +226,16 @@ def test_score_takes_params_from_the_item(tts, scheduler):
         assert r["scored"] == 9 and all(
             p["drop"] == 0 and "reference" not in p for p in Spy.sent
         )  # the items have no tags.drop
+        # a field that changes after the reading (a corrected reference) reads the output again; unchanged, it does not
+        tts.score = dict(sp, **{"with": dict(drop="reference.text")})
+        assert C.run(tts, scheduler.store.engine, Spy(scheduler), limit=3, log=lambda m: None)["scored"] == 9
+        assert C.run(tts, scheduler.store.engine, Spy(scheduler), limit=3, log=lambda m: None)["scored"] == 0
+        ds = C.load_dataset("lines")
+        C.write_dataset(
+            "lines",
+            [dict(it, reference=dict(text="changed")) if it["id"] == ds.items[0]["id"] else it for it in ds.items],
+        )
+        assert C.run(tts, scheduler.store.engine, Spy(scheduler), limit=3, log=lambda m: None)["scored"] == 3
     finally:
         stop.set()
     for bad in ({"with": "reference.audio"}, {"with": dict(reference=3)}):
