@@ -165,3 +165,17 @@ def test_main_skips_recorded_items_and_stops_on_quota(tmp_path, monkeypatch):
 def test_an_empty_answer_is_a_failure_so_a_rerun_tries_again(tmp_path):
     with pytest.raises(R.CallError, match="answered nothing"):
         R.record_one(dict(prompt="hi"), "agy", call=lambda *a, **k: dict(text="", usage=None))
+
+
+def test_latency_of_a_recorded_output_is_the_time_it_took_when_made():
+    from stratamodels.evals import metrics as M
+
+    lat = M.METRICS["latency_s"].score
+    assert (
+        lat(dict(_run_s=0.001), dict(json={}, seconds=18.5, cli="agy"), None) == 18.5
+    )  # made by record_cloud: its own seconds
+    assert (
+        lat(dict(_run_s=0.001), dict(json={}, recorded=True), None) is None
+    )  # replayed with no time recorded: none, not 0
+    assert lat(dict(_run_s=4.2), dict(text="x", seconds=4.2), None) == 4.2  # a model run here: the job's run time
+    assert lat(dict(_run_s=4.2), None, "boom") is None

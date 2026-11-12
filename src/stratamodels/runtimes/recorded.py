@@ -36,7 +36,9 @@ def run(handle, params):
         raise RunError(f"give {handle['by']}: recorded outputs are found by it")
     if str(k) not in handle["outputs"]:
         raise RunError(f"nothing recorded for {handle['by']}={k!r}")
-    return dict(handle["outputs"][str(k)], model=handle["key"])
+    return dict(
+        handle["outputs"][str(k)], model=handle["key"], recorded=True
+    )  # marked, so latency reads the recorded `seconds`, not the replay
 
 
 def unload(handle):
