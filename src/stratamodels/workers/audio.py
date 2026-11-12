@@ -188,9 +188,15 @@ def load(model, models_dir):
 
         E["m"] = ClearVoice(task="speech_enhancement", model_names=[o.get("model") or model.get("name")])
         return dict(device=dev)
+    from pathlib import Path
+
+    from huggingface_hub import snapshot_download
     from resemble_enhance.enhancer import inference  # resemble
 
-    E["m"] = inference
+    # its own download() needs git-lfs and writes into the venv: fetch the weights into the models folder instead and load them now
+    repo = snapshot_download("ResembleAI/resemble-enhance", local_dir=os.path.join(models_dir, "audio", "resemble-enhance"))
+    E["m"], E["run_dir"] = inference, Path(repo) / "enhancer_stage2"
+    inference.load_enhancer(E["run_dir"], dev)
     return dict(device=dev)
 
 
@@ -238,7 +244,7 @@ def denoise(x, p):
     t = torch.from_numpy(x)  # resemble: 44.1 kHz inside; it resamples itself
     mode = p.get("mode", "denoise")
     if mode == "denoise":
-        y, sr = m.denoise(t, SR, E["device"])
+        y, sr = m.denoise(t, SR, E["device"], run_dir=E["run_dir"])
     elif mode == "enhance":
         y, sr = m.enhance(
             t,
@@ -248,6 +254,7 @@ def denoise(x, p):
             solver="midpoint",
             lambd=float(p.get("lambd", 0.9)),
             tau=float(p.get("tau", 0.5)),
+            run_dir=E["run_dir"],
         )
     else:
         raise ParamError("mode is denoise or enhance")

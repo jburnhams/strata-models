@@ -252,14 +252,16 @@ def test_clearvoice_runs_file_to_file(ff, fake_torch, monkeypatch):
 
 def test_resemble_denoises_or_enhances_and_comes_back_at_48k(ff, fake_torch, monkeypatch):
     _, src, out = ff
-    pkg, enh, inf = (
+    pkg, enh, inf, hub = (
         types.ModuleType(n)
-        for n in ("resemble_enhance", "resemble_enhance.enhancer", "resemble_enhance.enhancer.inference")
+        for n in ("resemble_enhance", "resemble_enhance.enhancer", "resemble_enhance.enhancer.inference", "huggingface_hub")
     )
     got = {}
-    inf.denoise = lambda t, sr, dev: (T(t.a * 0.5), SR)
+    hub.snapshot_download = lambda repo, local_dir: got.update(repo=repo) or local_dir
+    inf.load_enhancer = lambda run_dir, dev: got.update(run_dir=run_dir.name)
+    inf.denoise = lambda t, sr, dev, run_dir: (T(t.a * 0.5), SR)
 
-    def enhance(t, sr, dev, nfe, solver, lambd, tau):
+    def enhance(t, sr, dev, nfe, solver, lambd, tau, run_dir):
         got.update(nfe=nfe, lambd=lambd, tau=tau)
         return T(t.a[: len(t.a) // 2]), 24000  # another rate: written and decoded back at 48 kHz
 
@@ -269,12 +271,14 @@ def test_resemble_denoises_or_enhances_and_comes_back_at_48k(ff, fake_torch, mon
         ("resemble_enhance", pkg),
         ("resemble_enhance.enhancer", enh),
         ("resemble_enhance.enhancer.inference", inf),
+        ("huggingface_hub", hub),
     ):
         monkeypatch.setitem(sys.modules, n, m)
     load("resemble")
+    assert got == dict(repo="ResembleAI/resemble-enhance", run_dir="enhancer_stage2")
     assert A.run(dict(path=src, highpass=0, out_dir=out))["removed_db"] == pytest.approx(6.02, abs=0.05)
     r = A.run(dict(path=src, highpass=0, mode="enhance", nfe=32, out_dir=out))
-    assert got == dict(nfe=32, lambd=0.9, tau=0.5) and r["duration_s"] == 3.0
+    assert got["nfe"] == 32 and got["lambd"] == 0.9 and got["tau"] == 0.5 and r["duration_s"] == 3.0
     with pytest.raises(ParamError, match="denoise or enhance"):
         A.run(dict(path=src, mode="loud", out_dir=out))
 
