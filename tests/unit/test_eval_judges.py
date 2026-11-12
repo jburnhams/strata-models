@@ -398,3 +398,43 @@ def test_a_new_model_for_a_judges_role_changes_the_analysis_signature(ran, sched
     a = summaries.signature(ran, engine)
     monkeypatch.setattr(J, "resolve", lambda engine, j: "gemma")
     assert summaries.signature(ran, engine) != a
+
+
+def test_a_vision_judge_sees_videos_as_region_stills_beside_the_tape():
+    spec = C.parse_spec(
+        dict(
+            name="v",
+            question="Which upscale is better?",
+            role="video-enhance",
+            dataset="d",
+            metrics=["judged"],
+            candidates=[dict(name="a", model="m")],
+        )
+    )
+    j = J.parse_judge(dict(name="v", kind="vision", criteria="detail without invented texture"))
+    crop = lambda k, i: dict(id=i, label=i.title(), path=f"/g/{k}.{i}.mp4", stills=[f"/g/{k}.{i}.3s.png"])
+    item = dict(
+        id="c",
+        input=dict(path="/c.mkv", crop=[14, 0, 692, 568]),
+        reference=dict(preview="/m/c.mp4", crops=[dict(id="face", stills=["/m/c.face.3s.png"])]),
+    )
+    x = dict(path="/g/x.mp4", model="secret", crops=[crop("x", "face"), crop("x", "text")], stills=["/g/x.1s.png"])
+    y = dict(path="/g/y.mp4", crops=[crop("y", "face"), crop("y", "text")], stills=["/g/y.1s.png"])
+    _, text, imgs = J.prompt(spec, j, item, x, y)
+    assert imgs == ["/m/c.face.3s.png", "/g/x.face.3s.png", "/g/y.face.3s.png", "/g/x.text.3s.png", "/g/y.text.3s.png"]
+    assert (
+        "Region Face, moment 1: picture 1 is the tape (source, enlarged without enhancement), picture 2 is X, picture 3 is Y."
+        in text
+    )
+    assert "Region Text, moment 1: picture 4 is X, picture 5 is Y." in text  # no tape crop for this region
+    assert "Reference" not in text and "secret" not in text and "/m/c.mp4" not in text
+    bare = J.prompt(
+        spec,
+        j,
+        dict(id="c", input={}),
+        dict(path="/g/x.mp4", stills=["/g/x.1s.png"]),
+        dict(path="/g/y.mp4", stills=["/g/y.1s.png"]),
+    )
+    assert bare[2] == ["/g/x.1s.png", "/g/y.1s.png"] and "Whole frame, moment 1" in bare[1]
+    text_judge = J.parse_judge(dict(name="t", kind="text"))
+    assert J.prompt(spec, text_judge, item, x, y)[2] == []  # a text judge sees no pictures

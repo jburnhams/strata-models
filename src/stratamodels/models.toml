@@ -59,6 +59,10 @@ model = "realplksr-nomos"
 description = "Learned denoise of developed raw pictures"
 model = "scunet-real"
 
+[roles.video-enhance]
+description = "Make old video look better: deinterlace, then upscale and restore (digitised VHS); the result is a playable MP4 at the asked size"
+model = "video-lanczos"                      # the classical baseline until eval video-enhance-vhs decides (judged blind, on crops and whole frames)
+
 [roles.nsfw]
 description = "Flag pictures that should not be shown"
 model = "nudenet-320n"
@@ -602,3 +606,116 @@ licence = "Gemma Terms of Use"
 source = "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF"
 used_by = []
 options = { model = "unsloth/gemma-4-E4B-it-GGUF:gemma-4-E4B-it-UD-Q4_K_XL.gguf", mmproj = "unsloth/gemma-4-E4B-it-GGUF:mmproj-F16.gguf", ctx = 16384 }
+
+# Video enhancement runs in venvs of its own (runtime venv-worker, worker script stratamodels/workers/video.py, which deinterlaces, crops and
+# resizes the same way for every engine so candidates differ only in the enhancement). Make them with scripts/setup_worker_venv.sh video |
+# seedvr2 | flashvsr-plus. vram_gb are first estimates for 768 x 576 frames in; the worker measures each run's peak.
+[models.video-lanczos]
+runtime = "venv-worker"
+name = "bwdif + lanczos (ffmpeg)"
+roles = ["video-enhance"]
+vram_gb = 0.0
+licence = "LGPL/GPL (ffmpeg)"
+source = "https://ffmpeg.org/ffmpeg-filters.html#bwdif"
+used_by = []
+options = { worker = "video", venv = "video", engine = "ffmpeg" }
+
+[models.video-lanczos-hqdn3d]
+runtime = "venv-worker"
+name = "bwdif + hqdn3d + lanczos (ffmpeg)"
+roles = ["video-enhance"]
+vram_gb = 0.0
+licence = "LGPL/GPL (ffmpeg)"
+source = "https://ffmpeg.org/ffmpeg-filters.html#hqdn3d"
+used_by = []
+options = { worker = "video", venv = "video", engine = "ffmpeg", filters = "hqdn3d=2:1.5:3:3" }
+
+[models.video-lanczos-cleanup]
+runtime = "venv-worker"
+name = "bwdif + a 1x cleanup model + lanczos"
+roles = ["video-enhance"]
+vram_gb = 1.5                                # the cleanup stage's 1x model (BleedOut, BaldrickVHSFix...) on the card: GPU-accounted, unlike video-lanczos
+licence = "LGPL/GPL (ffmpeg); the cleanup model's own (see scripts/setup_worker_venv.sh video)"
+source = "https://openmodeldb.info/"
+used_by = []
+options = { worker = "video", venv = "video", engine = "ffmpeg" }
+
+[models.video-realesrgan-x4plus]
+runtime = "venv-worker"
+name = "RealESRGAN_x4plus.pth"
+roles = ["video-enhance"]
+vram_gb = 3.0
+licence = "BSD-3-Clause"
+source = "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.1.0"
+used_by = []
+options = { worker = "video", venv = "video", engine = "spandrel", file = "RealESRGAN_x4plus.pth" }
+
+[models.video-realesrgan-x2plus]
+runtime = "venv-worker"
+name = "RealESRGAN_x2plus.pth"
+roles = ["video-enhance"]
+vram_gb = 2.0
+licence = "BSD-3-Clause"
+source = "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.1"
+used_by = []
+options = { worker = "video", venv = "video", engine = "spandrel", file = "RealESRGAN_x2plus.pth" }
+
+[models.video-realesr-general-x4v3]
+runtime = "venv-worker"
+name = "realesr-general-x4v3.pth (SRVGGNet, small)"
+roles = ["video-enhance"]
+vram_gb = 1.5
+licence = "BSD-3-Clause"
+source = "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0"
+used_by = []
+options = { worker = "video", venv = "video", engine = "spandrel", file = "realesr-general-x4v3.pth" }
+
+[models.video-realplksr-nomos]
+runtime = "venv-worker"
+name = "4xNomosWebPhoto_RealPLKSR.pth"
+roles = ["video-enhance"]
+vram_gb = 3.0
+licence = "CC-BY-4.0"
+source = "https://github.com/Phhofm/models/releases/tag/4xNomosWebPhoto_RealPLKSR"
+used_by = []
+options = { worker = "video", venv = "video", engine = "spandrel", file = "4xNomosWebPhoto_RealPLKSR.pth" }
+
+[models.video-swinir-real-x4]
+runtime = "venv-worker"
+name = "SwinIR-L real-world x4 (BSRGAN degradations, GAN)"
+roles = ["video-enhance"]
+vram_gb = 5.0
+licence = "Apache-2.0"
+source = "https://github.com/JingyunLiang/SwinIR/releases/tag/v0.0"
+used_by = []
+options = { worker = "video", venv = "video", engine = "spandrel", file = "003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth", tile = 256 }
+
+[models.video-seedvr2-3b]
+runtime = "venv-worker"
+name = "SeedVR2 3B FP8 (numz CLI v2.5.24)"
+roles = ["video-enhance"]
+vram_gb = 10.0                               # with block swap; batch_size 5 (4n+1 frames) keeps the 12 GB card clear
+licence = "Apache-2.0"
+source = "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler"
+used_by = []
+options = { worker = "video", venv = "seedvr2", engine = "seedvr2", args = { dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", batch_size = 5, blocks_to_swap = 16, dit_offload_device = "cpu", vae_encode_tiled = true, vae_decode_tiled = true, color_correction = "lab" } }
+
+[models.video-flashvsr-plus-turbo]
+runtime = "venv-worker"
+name = "FlashVSR+ Turbo"
+roles = ["video-enhance"]
+vram_gb = 10.0
+licence = "Apache-2.0"
+source = "https://github.com/OpenImagingLab/FlashVSR_Plus"
+used_by = []
+options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", args = { mode = "turbo", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }
+
+[models.video-flashvsr-plus-base]
+runtime = "venv-worker"
+name = "FlashVSR+ Base"
+roles = ["video-enhance"]
+vram_gb = 10.0
+licence = "Apache-2.0"
+source = "https://github.com/OpenImagingLab/FlashVSR_Plus"
+used_by = []
+options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", args = { mode = "base", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }

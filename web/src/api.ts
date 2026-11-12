@@ -114,7 +114,7 @@ export const evalsApi = {
   outputs: (name: string, item?: string) => get<{ candidates: Candidate[]; items: ItemOutputs[] }>(`/api/evals/${encodeURIComponent(name)}/outputs${item ? `?item_id=${encodeURIComponent(item)}` : ''}`),
   judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; item_id: string; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
   verdicts: (name: string, item: string) => get<{ item_id: string; judgments: JudgmentRow[] }>(`/api/evals/${encodeURIComponent(name)}/verdicts/${encodeURIComponent(item)}`),
-  mediaUrl: (name: string, item: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}`),
+  mediaUrl: (name: string, item: string, file?: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}${file ? `?file=${encodeURIComponent(file)}` : ''}`),
 }
 
 // ---- image generation ----------------------------------------------------------------------------------------------------------------------

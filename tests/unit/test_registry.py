@@ -213,3 +213,20 @@ def test_an_edited_row_on_a_removed_runtime_moves_to_its_successor(engine, tmp_p
     m = Registry.from_db(engine).models["w"]
     assert out["updated"] == ["model w (runtime venv-worker)"] and m.runtime == "venv-worker" and m.vram_gb == 0.8
     assert m.options == dict(worker="whisper", venv="whisper", compute_type="float16") and m.served
+
+
+def test_cleanup_models_run_on_a_gpu_accounted_model():
+    # A 1x cleanup model goes on the card: the candidate must run on a model the scheduler counts VRAM for, not the CPU lane's video-lanczos.
+    import os
+    import tomllib
+
+    from stratamodels import registry
+
+    d = tomllib.load(open(registry.BUILTIN, "rb"))
+    assert d["models"]["video-lanczos"]["vram_gb"] == 0.0 and d["models"]["video-lanczos-cleanup"]["vram_gb"] > 0
+    spec = tomllib.load(
+        open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "vhs-chroma-cleanup.toml"), "rb")
+    )
+    for c in spec["candidates"]:
+        if (c.get("params") or {}).get("cleanup", {}).get("model"):
+            assert c["model"] == "video-lanczos-cleanup", c["name"]

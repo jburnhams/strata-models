@@ -222,7 +222,7 @@ def test_the_most_different_pairs_come_first(client, scheduler, setup):
                 role="r",
                 dataset="d",
                 metrics=["wer"],
-                similarity="video",
+                similarity="smell",
                 candidates=[dict(name="a", model="m")],
             )
         )
@@ -453,3 +453,29 @@ def test_model_judge_beside_a_person(client):
     assert (
         wait_judge(client, name, "fox")["result"]["judged"] == 0
     )  # pairs = judged: nothing new until people judge more
+
+
+def test_media_serves_an_items_reference_previews_and_nothing_else(client, tmp_path, setup):
+    from stratamodels.evals import core as C
+
+    clip, preview, face, other = (tmp_path / n for n in ("c.mkv", "c.source.mp4", "c.source.face.mp4", "secret.mp4"))
+    for f in (clip, preview, face, other):
+        f.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    ref = dict(text="x", preview=str(preview), crops=[dict(id="face", path=str(face)), dict(id="bad"), "junk"])
+    C.write_dataset(
+        "speech",
+        [
+            dict(id="v", input=dict(path=str(clip), say="x"), reference=ref),
+            dict(id="w", input=dict(say="x"), reference=None),
+        ],
+    )
+    r = client.get("/api/evals/fake-asr/media/v", params=dict(file=str(preview)))
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
+    assert client.get("/api/evals/fake-asr/media/v", params=dict(file=str(face))).status_code == 200
+    assert (
+        client.get("/api/evals/fake-asr/media/v", params=dict(file=str(other))).status_code == 404
+    )  # a file the item does not name
+    assert client.get("/api/evals/fake-asr/media/w", params=dict(file=str(preview))).status_code == 404
+    assert client.get("/api/evals/fake-asr/media/zz", params=dict(file=str(preview))).status_code == 404
+    face.unlink()
+    assert client.get("/api/evals/fake-asr/media/v", params=dict(file=str(face))).status_code == 404  # named but gone

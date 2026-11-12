@@ -432,3 +432,42 @@ def test_judge_audio_on_the_gpu(key, tmp_path):
         dict(path=noisy),
         key=key,
     )
+
+
+VIDEO = os.environ.get(
+    "STRATAMODELS_TEST_VIDEO"
+)  # a short interlaced PAL clip (a few seconds of digitised VHS), e.g. one of vhs-clips-8
+ENHANCERS = [
+    "video-lanczos",
+    "video-realesr-general-x4v3",
+    "video-realesrgan-x2plus",
+    "video-realesrgan-x4plus",
+    "video-realplksr-nomos",
+    "video-swinir-real-x4",
+    "video-seedvr2-3b",
+    "video-flashvsr-plus-turbo",
+    "video-flashvsr-plus-base",
+]
+
+
+@pytest.mark.skipif(not VIDEO, reason="needs STRATAMODELS_TEST_VIDEO")
+@pytest.mark.parametrize("key", ENHANCERS)
+def test_video_enhance_on_the_gpu(key, tmp_path):
+    """One clip through each engine: a 1440 x 1080 50p result with the source's length, a face region and stills. Slow for the diffusion engines."""
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().models[key]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip(f"no venv for {key}: scripts/setup_worker_venv.sh {m.options.get('venv')}")
+    rt = runtimes.get(m.runtime)
+    h = rt.load(m, MODELS)
+    try:
+        out = rt.run(
+            h, dict(path=VIDEO, crop=[14, 0, 692, 568], regions=[dict(id="face", box=[200, 90, 260, 195])], stills=[1])
+        )
+    finally:
+        rt.unload(h)
+    print(f"\n{key}: {out['enhance_s']:.1f} s ({out['fps_enhance']} frames/s), peak {out['peak_vram_mb']:.0f} MB")
+    assert (out["width"], out["height"], out["fps"]) == (1440, 1080, 50.0) and os.path.isfile(out["path"])
+    assert [c["id"] for c in out["crops"]] == ["face"] and len(out["stills"]) == 1
+    assert out["peak_vram_mb"] < 11.5 * 1024  # fits the 12 GB card with room for the service

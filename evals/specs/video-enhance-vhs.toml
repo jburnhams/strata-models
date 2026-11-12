@@ -1,0 +1,95 @@
+name = "video-enhance-vhs"
+question = "Which model should serve video-enhance for digitised VHS: does any upscaler beat plain deinterlace + lanczos, judged by eye?"
+role = "video-enhance"
+dataset = "vhs-clips-8"      # scripts/evals/video_clips.py: 8 clips of 8 s from a digitised PAL tape, two regions each (faces, text, stripes, detail)
+metrics = ["judged", "latency_s", "peak_vram_gb", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
+judge = true                 # no reference exists: blind pairs on the Judge tab, the regions enlarged nearest-neighbour beside the whole frame
+similarity = "video"         # the stills of each output, frame for frame: the most different pairs are judged first
+
+# Every candidate gets the same preparation (workers/video.py): bwdif to 50p with the field order forced to TFF, the active picture cropped
+# (no black bars or head-switching lines, the item's crop), square pixels at 768 x 576; then its own enhancement; then lanczos to 1440 x 1080,
+# x264 crf 14, the source's audio. So the candidates differ only in the enhancement.
+[decision]
+primary = "judged"           # head to head with plain lanczos; ties count half
+baseline = "lanczos"
+min_effect = 0.1             # win at least 60 % of the pairs with the baseline
+# Guards are ratios to the baseline, which takes about 9 s a clip and no GPU: peak VRAM is context, not a guard (the 12 GB card bounds it,
+# and a run that does not fit fails, which the failed guard catches). 100x the baseline's time is ~15 min per 8 s clip, ~40 h for a 21 min tape.
+guards = { latency_s = 100.0, failed = 1.0 }
+
+[[candidates]]
+name = "lanczos"
+model = "video-lanczos"
+note = "the baseline: what ffmpeg does on its own"
+
+[[candidates]]
+name = "lanczos+hqdn3d"
+model = "video-lanczos-hqdn3d"
+note = "a light classical denoise before the resize"
+
+[[candidates]]
+name = "realesrgan-x4plus"
+model = "video-realesrgan-x4plus"
+note = "Real-ESRGAN x4plus, per frame (the common choice; tends to paint skin smooth)"
+
+[[candidates]]
+name = "realesrgan-x2plus"
+model = "video-realesrgan-x2plus"
+note = "Real-ESRGAN x2plus, per frame: a smaller step, less invention"
+
+[[candidates]]
+name = "realesr-general-x4v3"
+model = "video-realesr-general-x4v3"
+note = "Real-ESRGAN general v3 (small SRVGGNet), per frame: fast"
+
+[[candidates]]
+name = "realplksr-nomos"
+model = "video-realplksr-nomos"
+note = "4xNomosWebPhoto RealPLKSR, per frame: trained on degraded web photos (strata-360's upscale model)"
+
+[[candidates]]
+name = "swinir-real-x4"
+model = "video-swinir-real-x4"
+note = "SwinIR-L real-world x4 (GAN), per frame, 256 px tiles: slow"
+
+[[candidates]]
+name = "seedvr2-3b"
+model = "video-seedvr2-3b"
+note = "SeedVR2 3B FP8, one-step video diffusion, 5-frame batches, block swap 16: temporally consistent, slow"
+
+[[candidates]]
+name = "flashvsr-plus-turbo"
+model = "video-flashvsr-plus-turbo"
+params = { engine_size = [1536, 1152] }
+note = "FlashVSR+ Turbo, streaming one-step video diffusion at 2x (1536 x 1152, then lanczos to 1440 x 1080)"
+
+[[candidates]]
+name = "flashvsr-plus-base"
+model = "video-flashvsr-plus-base"
+params = { engine_size = [1536, 1152] }
+note = "FlashVSR+ Base: the quality preset"
+
+# Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
+# agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a digitised VHS home video, enlarged without smoothing: the tape itself (when shown), then two enhanced versions X and Y. Prefer the one with more real detail and fewer artefacts: sharper edges and text that match the tape, natural faces and skin (not waxy, painted or plastic), no invented texture or patterns that are not in the tape, no halos or ringing, colours true to the tape. Real detail a little soft beats crisp invented detail."
+auto = true
+
+[[judges]]
+name = "gemma-vision"
+kind = "vision"
+model = "gemma-4-12b-vl"     # a trial of another model serving judge-vision
+criteria = "The pictures are crops of the same moment of a digitised VHS home video, enlarged without smoothing: the tape itself (when shown), then two enhanced versions X and Y. Prefer the one with more real detail and fewer artefacts: sharper edges and text that match the tape, natural faces and skin (not waxy, painted or plastic), no invented texture or patterns that are not in the tape, no halos or ringing, colours true to the tape. Real detail a little soft beats crisp invented detail."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a digitised VHS home video, enlarged without smoothing: the tape itself (when shown), then two enhanced versions X and Y. Prefer the one with more real detail and fewer artefacts: sharper edges and text that match the tape, natural faces and skin (not waxy, painted or plastic), no invented texture or patterns that are not in the tape, no halos or ringing, colours true to the tape. Real detail a little soft beats crisp invented detail."
+limit = 20                   # pairs per run: run again for the rest
+auto = true
+
