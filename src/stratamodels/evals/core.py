@@ -36,6 +36,12 @@ A dataset is JSON lines in `<data>/evals/datasets/<name>.jsonl`, one item per li
 {what the metrics read}, "tags": {...}}. Its version is the hash of the file, written in every report. Datasets stay out of git: they name
 private files.
 
+Samples: a candidate with `items = N` runs on the dataset's first N items only (`items = "<dataset>"`: on the items of that other dataset),
+for a model whose every call is dear (a cloud model on a plan's small allowance). The analysis pairs each candidate with the baseline on the
+items both have, so a sample gets the wider intervals its size earns (and "unclear" says how many items would settle it) without shrinking the
+other candidates' comparisons to its few items. Give the candidates with the biggest samples the dataset's own order (items are shuffled with
+a fixed seed when a dataset is built), so the first N are a fair sample.
+
 Both live in the database (eval_experiments + eval_candidates, eval_datasets + eval_items) once the service has seen them: the files are SEEDS,
 imported when they are new or changed (a spec edited through the API, `edited`, is no longer overwritten by its file), and anything with an engine
 reads the tables. Without an engine (scripts, the offline CLI) the files are read as before.
@@ -261,11 +267,16 @@ class Candidate:
     stages: list = dataclasses.field(
         default_factory=list
     )  # steps run before this candidate's job (see the module docstring)
+    items: int | str | None = (
+        None  # a sample: the dataset's first N items, or the items of another dataset (see "Samples" in the module docstring)
+    )
 
     def to_json(self):
         d = dataclasses.asdict(self)
         if not self.stages:
             d.pop("stages")
+        if self.items is None:
+            d.pop("items")
         return d
 
 
@@ -336,6 +347,24 @@ class Spec:
         )
 
 
+def _sample_size(v):
+    if v is None or (isinstance(v, str) and v):
+        return v
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ValueError(f"a candidate's items is a number of items (at least 1) or a dataset's name (got {v!r})")
+    return v
+
+
+def sample(c, items, engine=None):
+    """The items candidate c runs on: all, the first `items`, or those whose ids are in the dataset named by `items`."""
+    if c.items is None:
+        return items
+    if isinstance(c.items, int):
+        return items[: c.items]
+    ids = {it["id"] for it in load_dataset(c.items, engine=engine).items}
+    return [it for it in items if it["id"] in ids]
+
+
 def parse_spec(d, source=""):
     try:
         dec = d.get("decision") or {}
@@ -347,6 +376,7 @@ def parse_spec(d, source=""):
                 options=dict(c.get("options") or {}),
                 note=str(c.get("note", "")),
                 stages=[parse_stage(x) for x in c.get("stages") or []],
+                items=_sample_size(c.get("items")),
             )
             for c in d["candidates"]
         ]
@@ -688,13 +718,13 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     cands = [spec.candidate(c) for c in candidates] if candidates else spec.candidates
     todo = []
     for c in cands:
-        keys = {result_key(spec, c, it): it for it in items}
+        keys = {result_key(spec, c, it): it for it in sample(c, items, engine)}
         have = cached(engine, keys)
         queued = {k for _, _, k in todo}
         todo += [
             (c, it, k) for k, it in keys.items() if k not in have and k not in queued
         ]  # two candidates that are the same job run it once
-    total = len(cands) * len(items)
+    total = sum(len(sample(c, items, engine)) for c in cands)
     log(f"{spec.name}: {total - len(todo)} of {total} outputs cached, {len(todo)} to run")
     failed = 0
     ran = len(todo)
@@ -943,21 +973,27 @@ def analyse(spec, engine, dataset=None, seed=None):
     names = [c.name for c in spec.candidates]
     ran = [
         n for n in names if n == spec.baseline or any(o is not None for o in outs[n])
-    ]  # a candidate with no output at all is not run yet: it waits, it does not hold the others' comparison at 0 items
-    complete = [
-        i for i in range(len(ds.items)) if all(outs[n][i] is not None for n in ran)
-    ]  # compare only on items every candidate that has run has
-    items = [ds.items[i] for i in complete]
+    ]  # a candidate with no output at all is not run yet: it waits
+    base = spec.baseline
+    on_base = [i for i in range(len(ds.items)) if outs[base][i] is not None]
+    # Each candidate is compared with the baseline on the items BOTH have (paired), not only on the items every candidate has: a candidate run on a
+    # sample (`items = N`, e.g. a cloud model with a small allowance) gets wider intervals from its fewer items, and does not shrink the others'.
+    shared = {n: on_base if n == base else [i for i in on_base if outs[n][i] is not None] for n in names}
 
-    def its(n):
-        return [dict(it, _run_s=(runs[n][i] or {}).get("run_s")) for it, i in zip(items, complete)]
+    def its(n, on=None):
+        return [dict(ds.items[i], _run_s=(runs[n][i] or {}).get("run_s")) for i in shared[on or n]]
 
-    def oo(n):
-        return [outs[n][i] for i in complete]
+    def oo(n, on=None):
+        return [outs[n][i] for i in shared[on or n]]
 
     res = dict(
         experiment=spec.to_json(),
-        dataset=dict(ds.to_json(), compared=len(complete), not_run=[n for n in names if n not in ran]),
+        dataset=dict(
+            ds.to_json(),
+            compared=len(on_base),
+            every=sum(1 for i in on_base if all(outs[n][i] is not None for n in ran)),
+            not_run=[n for n in names if n not in ran],
+        ),
         candidates={},
         comparisons={},
         metrics={m: M.METRICS[m].to_json() for m in spec.metrics},
@@ -967,10 +1003,12 @@ def analyse(spec, engine, dataset=None, seed=None):
         loads = [r["load_s"] for r in runs[n] if r and r.get("load_s")]
         res["candidates"][n] = dict(
             done=done,
+            compared=len(shared[n]) if n in ran else 0,
+            sample=spec.candidate(n).items,
             failed=sum(1 for o in outs[n] if o and o[1]),
             load_s=max(loads) if loads else None,
             metrics={m: M.summarise(m, its(n), oo(n), seed) for m in spec.metrics if m != "judged"}
-            if complete and n in ran
+            if shared[n] and n in ran
             else {},
         )
     current = {(c.name, it["id"]): result_key(spec, c, it) for c in spec.candidates for it in ds.items}
@@ -979,16 +1017,18 @@ def analyse(spec, engine, dataset=None, seed=None):
     if "judged" in spec.metrics:
         for n in names:
             res["candidates"][n]["metrics"]["judged"] = judged_share(j, n)
-    base = spec.baseline
     pvals = []
     for n in names:
-        if n == base or not complete or n not in ran:
+        if n == base or not shared[n] or n not in ran:
             continue
+        items = [ds.items[i] for i in shared[n]]
         res["comparisons"][n] = {
-            m: M.compare(m, items, oo(base), oo(n), seed) for m in spec.metrics if m not in ("latency_s", "judged")
+            m: dict(M.compare(m, items, oo(base, n), oo(n), seed), items=len(items))
+            for m in spec.metrics
+            if m not in ("latency_s", "judged")
         }  # latency: each side's own run time, below
         if "latency_s" in spec.metrics:
-            a = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(base), oo(base))]
+            a = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(base, n), oo(base, n))]
             b = [M.METRICS["latency_s"].score(it, *o) for it, o in zip(its(n), oo(n))]
             r = S.paired_diff(
                 [x if x is not None else float("nan") for x in a],
@@ -1002,7 +1042,13 @@ def analyse(spec, engine, dataset=None, seed=None):
         pvals.append((n, res["comparisons"][n][spec.primary]["p"]))
     for (n, _), adj in zip(pvals, S.holm([p for _, p in pvals])):
         res["comparisons"][n][spec.primary]["p_holm"] = adj
-    res["decision"] = decide(spec, res, items, oo, base)
+    for n in res[
+        "comparisons"
+    ]:  # the guards hold a candidate to the baseline on the same items, so a sample is held to a like value
+        res["candidates"][n]["baseline_on_items"] = {
+            g: M.summarise(g, its(base, n), oo(base, n), seed)["value"] for g in spec.guards
+        }
+    res["decision"] = decide(spec, res, lambda n: ([ds.items[i] for i in shared[n]], oo(base, n), oo(n)), base)
     if j:
         res["judgments"] = dict(
             n=len(j), strength={k: list(v) for k, v in S.bradley_terry_ci(j, names, b=500, seed=seed).items()}
@@ -1062,7 +1108,7 @@ def judged_vs(j, n, base):
     )
 
 
-def decide(spec, res, items, oo, base):
+def decide(spec, res, pair, base):
     """Per candidate: 'adopt' (better on the primary metric beyond min_effect with the interval clear of 0, and within every guard), 'reject'
     (worse, or a guard broken), or 'unclear' with the items an answer would need. The overall recommendation is the adoptable candidate with the
     biggest improvement, else keep the baseline."""
@@ -1074,7 +1120,9 @@ def decide(spec, res, items, oo, base):
         gain = sign * c["diff"] if c["n"] else float("nan")
         broken = []
         for g, limit in spec.guards.items():
-            bv = res["candidates"][base]["metrics"][g]["value"]
+            bv = (res["candidates"][n].get("baseline_on_items") or {}).get(
+                g, res["candidates"][base]["metrics"][g]["value"]
+            )
             cv = res["candidates"][n]["metrics"][g]["value"]
             if bv is None or cv is None or bv != bv or cv != cv:
                 continue  # no observations on one side: nothing to hold the guard to
@@ -1104,6 +1152,7 @@ def decide(spec, res, items, oo, base):
                     (0.98 / spec.min_effect) ** 2
                 )  # pairs with the baseline for a 95 % interval of +-min_effect
             elif m.shape != "dataset" and spec.min_effect:
+                items, base_oo, cand_oo = pair(n)  # the items this candidate shares with the baseline
                 d = [
                     (
                         lambda x, y: (
@@ -1114,13 +1163,13 @@ def decide(spec, res, items, oo, base):
                             else float(y) - float(x)
                         )
                     )(m.score(it, *a), m.score(it, *b))
-                    for it, a, b in zip(items, oo(base), oo(n))
+                    for it, a, b in zip(items, base_oo, cand_oo)
                 ]
                 need = S.items_needed(d, spec.min_effect)
             unit = "judged pairs with the baseline" if m.shape == "judged" else "items"
             verdict, why = (
                 "unclear",
-                f"difference {_fmt(m, gain)}, interval includes no change"
+                f"difference {_fmt(m, gain)} on {c['n']} items, interval includes no change"
                 + (f"; about {need} {unit} would show a {_fmt(m, spec.min_effect)} difference" if need else ""),
             )
         out[n] = dict(verdict=verdict, why=why, gain=gain)

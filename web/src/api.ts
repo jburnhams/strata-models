@@ -82,8 +82,8 @@ export interface Comparison { n: number; mean_a: number; mean_b: number; diff: n
 export interface Verdict { verdict: 'adopt' | 'reject' | 'unclear'; why: string; gain: number }
 export interface Analysis {
   experiment: Experiment & { candidates: Candidate[]; metrics: string[]; primary: string; baseline: string }
-  dataset: DatasetInfo & { compared: number; n: number; not_run?: string[] }
-  candidates: Record<string, { done: number; failed: number; load_s: number | null; metrics: Record<string, Interval> }>
+  dataset: DatasetInfo & { compared: number; every?: number; n: number; not_run?: string[] }
+  candidates: Record<string, { done: number; compared?: number; sample?: number | string | null; failed: number; load_s: number | null; metrics: Record<string, Interval> }>
   comparisons: Record<string, Record<string, Comparison>>
   metrics: Record<string, MetricInfo>
   decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }

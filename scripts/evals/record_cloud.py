@@ -184,6 +184,10 @@ def record_one(params, cli, model=None, effort=None, timeout=600, call=None, clo
     system, text, images, schema = job(params)
     t0 = clock()
     r = (call or CLIS[cli])(system, text, images, schema, model=model, effort=effort, timeout=timeout)
+    if not r["text"]:
+        raise CallError(
+            f"{cli} answered nothing"
+        )  # a CLI hiccup, not the model's answer: left out, so a rerun tries the item again
     out = dict(text=r["text"], seconds=round(clock() - t0, 2), cli=cli, cli_model=model or "default")
     if schema:
         out["json"] = parse_json(r["text"])

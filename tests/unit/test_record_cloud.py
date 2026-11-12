@@ -160,3 +160,8 @@ def test_main_skips_recorded_items_and_stops_on_quota(tmp_path, monkeypatch):
         "/img/p1.jpg",
         "/img/p2.jpg",
     ]
+
+
+def test_an_empty_answer_is_a_failure_so_a_rerun_tries_again(tmp_path):
+    with pytest.raises(R.CallError, match="answered nothing"):
+        R.record_one(dict(prompt="hi"), "agy", call=lambda *a, **k: dict(text="", usage=None))

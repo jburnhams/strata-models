@@ -135,8 +135,12 @@ def test_run_caches_outputs_and_analysis_decides(setup, scheduler, engine):
             and C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=["same"], limit=5, log=log.append)["ran"]
             == 5
         )
-        partial = C.analyse(s, engine)
-        assert partial["dataset"]["compared"] == 5
+        partial = C.analyse(
+            s, engine
+        )  # "same" is now a 5-item sample: compared with the baseline on its 5, the others keep their 40
+        assert partial["dataset"]["compared"] == 40 and partial["dataset"]["every"] == 5
+        assert partial["candidates"]["same"]["compared"] == 5 and partial["comparisons"]["same"]["wer"]["n"] == 5
+        assert all(partial["comparisons"][n]["wer"]["n"] == 40 for n in partial["comparisons"] if n != "same")
     finally:
         stop.set()
 
@@ -322,7 +326,7 @@ def test_a_higher_is_better_guard_rejects_a_candidate_that_falls_too_far_below_t
             c=dict(metrics=dict(parsed=dict(value=0.9))),  # within the guard
         ),
     )
-    d = C.decide(s, res, [], lambda _name: [], "a")
+    d = C.decide(s, res, lambda _name: ([], [], []), "a")
     assert (
         d["per_candidate"]["b"]["verdict"] == "reject"
         and "parsed 0.30x the baseline (limit 1/2)" in d["per_candidate"]["b"]["why"]
@@ -409,3 +413,58 @@ def test_a_candidate_not_run_yet_does_not_hold_the_others_at_zero_items(setup, s
         assert all(res["candidates"][n]["metrics"] for n in others)
     finally:
         stop.set()
+
+
+def test_a_sample_runs_only_its_items_and_is_compared_on_them(setup, scheduler, engine):
+    """`items = N` (or a dataset's name): a candidate whose calls are dear runs on a sample; it is paired with the baseline on its items, its
+    intervals widen with fewer items, and the full candidates keep their whole comparison."""
+    C.write_dataset("speech-few", [it for it in C.load_dataset("speech").items if it["id"] in ("u3", "u7", "u9")])
+    s = C.parse_spec(
+        dict(
+            name="sampled",
+            question="q",
+            role="echo",
+            dataset="speech",
+            metrics=["wer", "failed"],
+            decision=dict(primary="wer", baseline="base", min_effect=0.02, guards=dict(failed=1.0)),
+            candidates=[
+                dict(name="base", model="small", params=dict(drop=4)),
+                dict(name="full", model="big", params=dict(drop=12)),
+                dict(name="ten", model="big", params=dict(drop=12, seed=1), items=10),
+                dict(name="few", model="big", params=dict(drop=12, seed=2), items="speech-few"),
+            ],
+        )
+    )
+    assert s.candidate("ten").to_json()["items"] == 10 and "items" not in s.candidate("full").to_json()
+    stop = scheduler.start()
+    try:
+        r = C.run(s, engine, C.SchedulerExecutor(scheduler), log=lambda m: None)
+    finally:
+        stop.set()
+    assert r == dict(ran=40 + 40 + 10 + 3, cached=0, failed=0)
+    res = C.analyse(s, engine)
+    cs, cmp = res["candidates"], res["comparisons"]
+    assert cs["ten"]["compared"] == 10 and cs["ten"]["sample"] == 10 and cs["few"]["compared"] == 3
+    assert cmp["full"]["wer"]["n"] == 40 and cmp["ten"]["wer"]["n"] == 10 and cmp["few"]["wer"]["n"] == 3
+    assert res["dataset"]["compared"] == 40 and res["dataset"]["every"] == 3
+    assert (
+        cs["ten"]["metrics"]["wer"]["n"] == 10 and cs["base"]["metrics"]["wer"]["n"] == 40
+    )  # each summarised on its own items
+    assert cs["few"]["failed"] == 0 and cs["few"]["baseline_on_items"] == {
+        "failed": 0.0
+    }  # items not in the sample are not failures
+
+
+def test_a_sample_size_must_be_a_count_or_a_dataset():
+    for bad in (0, -1, True, 2.5, ""):
+        with pytest.raises(C.EvalError, match="items"):
+            C.parse_spec(
+                dict(
+                    name="x",
+                    question="q",
+                    role="r",
+                    dataset="d",
+                    metrics=["wer"],
+                    candidates=[dict(name="a", model="m", items=bad)],
+                )
+            )

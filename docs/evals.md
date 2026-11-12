@@ -32,6 +32,15 @@ can be compared and revisited when a new model appears.
    follow-ups (a person writes it), Method, Reproduce. Final reports go in the docs repo under `tech/code/strata-models/evals/`
    (private: they may name private items); the decision goes into `models.toml` with the report linked.
 
+## Samples: candidates whose calls are dear
+A candidate can run on a sample: `items = N` (the dataset's first N items; datasets are shuffled with a fixed seed when built) or
+`items = "<dataset>"` (the items of another dataset, e.g. the judged 20). Items outside the sample are never run, so they are not failures.
+Each candidate is compared with the baseline **on the items both have** (paired), so a sample gets the wider interval its size earns, and an
+"unclear" verdict says how many items would settle it, while the full candidates keep their whole comparison. The guards hold a candidate
+to the baseline's value on the same items. This is how cloud models on a plan's allowance stand in an eval: calls in proportion to what the
+plan allows (cheap models on every item, dear ones on a few), recorded by `scripts/evals/record_cloud.py` and replayed by the `recorded`
+runtime.
+
 ## Judged experiments and a second reader
 - **`primary = "judged"`** decides by blind human judgment where nothing can be scored automatically (a voice, a picture): the Judge tab then
   offers only pairs with the baseline, and a candidate is adopted when it wins enough of them (ties count half): the Wilson interval of its
