@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-12
 
+**Video pairs play on their own, round and round (branch `claude/video-autoplay`)**
+Jonathan: "when video compares load then autoplay them on full loop immediately".
+
+- Judge tab: a video pair starts playing as soon as its videos can (muted, `audio="none"`: browsers block autoplay with sound), and loops the whole clip (0 to the shorter output's last frame) unless a range is set with `i`/`o`; `c` goes back to the whole clip. `CompareVideo` has no autoPlay yet (strata-react#203), so the page presses its own Play once (`useAutoPlay`); remove that when #203 ships. Someone with reduced motion set is left to press Play.
+- Outputs tab: `VideoCompare` takes `autoPlay` (muted, once every video can play); it already loops.
+
 **Scheduler: models and leases above 10 GB get the whole card (branch `claude/project-thread-ecj9cv`)**
 Jonathan: "above 10gb any model can run as long as it gets whole card reservation", so bigger models can be tried at their own risk instead of waiting forever or being refused.
 
