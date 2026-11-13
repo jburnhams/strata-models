@@ -8,6 +8,7 @@ ends, so its memory is really freed; the worker's GPU memory counts as the servi
 models.toml options (besides the worker's own, passed through on load):
   worker   the script in stratamodels/workers/ (without .py), e.g. "tts"
   venv     the venv's folder name under <models>/venvs/, or an absolute path (default: the worker's name)
+  timeout_s  how long one job may run before the worker is stopped (default 1800)
 
 Protocol, one JSON object per line: the service writes {"op": "load", "model": <registry model as JSON>, "models_dir": ...} once, then
 {"op": "run", "params": {...}} per job; the worker answers each with {"ok": true, "result": ...} or {"ok": false, "error": "...", "params":
@@ -28,6 +29,7 @@ import threading
 from stratamodels import settings
 from stratamodels.runtimes import RunError
 
+DEFAULT_TIMEOUT_S = 1800.0
 WORKERS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "workers")
 
 
@@ -123,13 +125,18 @@ def load(model, models_dir, popen=subprocess.Popen):
     if not r.get("ok"):
         w.close()
         raise RunError(f"{model.key} could not load: {r.get('error')}")
-    return dict(key=model.key, worker=w, info=r.get("result") or {})
+    # how long one job may take before the worker is stopped: models.toml options.timeout_s (default 30 min); a model that processes whole
+    # videos frame by frame (SwinIR, the video diffusion engines) needs hours, not the half hour that suits speech or a picture
+    timeout = float(model.options.get("timeout_s") or DEFAULT_TIMEOUT_S)
+    return dict(key=model.key, worker=w, info=r.get("result") or {}, timeout_s=timeout)
 
 
 def run(handle, params):
     out_dir = os.path.join(settings.data_dir(), "generated", datetime.date.today().isoformat())
     os.makedirs(out_dir, exist_ok=True)
-    r = handle["worker"].ask(dict(op="run", params={**params, "out_dir": out_dir}))
+    r = handle["worker"].ask(
+        dict(op="run", params={**params, "out_dir": out_dir}), timeout=handle.get("timeout_s", DEFAULT_TIMEOUT_S)
+    )
     if r.get("ok"):
         return r.get("result")
     if r.get("params"):

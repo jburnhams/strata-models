@@ -214,3 +214,29 @@ def test_a_worker_gets_its_own_cuda_libraries_and_none_of_the_services(tmp_path,
     worker.load(m, str(tmp_path), popen=popen)
     path = seen["env"]["LD_LIBRARY_PATH"].split(os.pathsep)
     assert path[0] == str(lib) and service_lib not in path and "/opt/other/.venv-like/lib" in path
+
+
+def test_a_model_sets_how_long_a_job_may_run(env):
+    # SwinIR on an 8 s clip takes ~40 min: the default half hour stopped every one of its jobs (2026-11-13)
+    h, _ = load(env, worker="echo")
+    assert h["timeout_s"] == worker.DEFAULT_TIMEOUT_S == 1800.0
+    h2, _ = load(env, worker="echo", timeout_s=7200)
+    seen = []
+    real = h2["worker"].ask
+    h2["worker"].ask = lambda msg, timeout=None: seen.append(timeout) or real(msg, timeout=timeout)
+    assert worker.run(h2, dict(text="hi"))["echo"]["text"] == "hi" and seen == [7200.0]
+
+
+def test_the_slow_video_models_have_room_to_finish():
+    from stratamodels.registry import Registry
+
+    m = Registry.load().models
+    assert m["video-swinir-real-x4"].options["timeout_s"] >= 7200
+    assert (
+        m["video-seedvr2-3b"].options["timeout_s"] >= 7200
+        and m["video-flashvsr-plus-base"].options["timeout_s"] >= 7200
+    )
+    assert (
+        m["video-realplksr-nomos"].options["timeout_s"] >= 3600
+        and m["video-lanczos-cleanup"].options["timeout_s"] >= 3600
+    )
