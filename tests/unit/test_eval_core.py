@@ -468,3 +468,24 @@ def test_a_sample_size_must_be_a_count_or_a_dataset():
                     candidates=[dict(name="a", model="m", items=bad)],
                 )
             )
+
+
+def test_a_sample_can_name_its_items():
+    spec = dict(name="x", question="q", role="r", dataset="d", metrics=["wer"])
+    s = C.parse_spec(dict(spec, candidates=[dict(name="a", model="m", items=["u2", "u0", "nope"])]))
+    items = [dict(id=f"u{i}") for i in range(4)]
+    assert [it["id"] for it in C.sample(s.candidates[0], items)] == [
+        "u0",
+        "u2",
+    ]  # the dataset's order; an id it lacks is no item
+    for bad in ([], ["u1", 3], [""]):
+        with pytest.raises(C.EvalError, match="item ids"):
+            C.parse_spec(dict(spec, candidates=[dict(name="a", model="m", items=bad)]))
+
+
+def test_the_video_spec_runs_swinir_on_the_face_close_up_only():
+    import tomllib
+
+    s = C.parse_spec(tomllib.load(open(os.path.join(C.REPO_SPECS, "video-enhance-vhs.toml"), "rb")))
+    assert s.candidate("swinir-real-x4").items == ["07-face-zoom-closeup"]
+    assert s.candidate("lanczos").items is None

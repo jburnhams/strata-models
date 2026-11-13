@@ -36,7 +36,8 @@ A dataset is JSON lines in `<data>/evals/datasets/<name>.jsonl`, one item per li
 {what the metrics read}, "tags": {...}}. Its version is the hash of the file, written in every report. Datasets stay out of git: they name
 private files.
 
-Samples: a candidate with `items = N` runs on the dataset's first N items only (`items = "<dataset>"`: on the items of that other dataset),
+Samples: a candidate with `items = N` runs on the dataset's first N items only (`items = "<dataset>"`: on the items of that other dataset;
+`items = ["id", ...]`: on the items named),
 for a model whose every call is dear (a cloud model on a plan's small allowance). The analysis pairs each candidate with the baseline on the
 items both have, so a sample gets the wider intervals its size earns (and "unclear" says how many items would settle it) without shrinking the
 other candidates' comparisons to its few items. Give the candidates with the biggest samples the dataset's own order (items are shuffled with
@@ -267,8 +268,8 @@ class Candidate:
     stages: list = dataclasses.field(
         default_factory=list
     )  # steps run before this candidate's job (see the module docstring)
-    items: int | str | None = (
-        None  # a sample: the dataset's first N items, or the items of another dataset (see "Samples" in the module docstring)
+    items: int | str | list[str] | None = (
+        None  # a sample: the dataset's first N items, the items of another dataset, or a list of item ids (see "Samples" in the module docstring)
     )
 
     def to_json(self):
@@ -354,17 +355,28 @@ class Spec:
 def _sample_size(v):
     if v is None or (isinstance(v, str) and v):
         return v
+    if isinstance(
+        v, list
+    ):  # named items: ids of the dataset's own items (the hard clips a dear candidate is worth running on)
+        if not v or not all(isinstance(x, str) and x for x in v):
+            raise ValueError(f"a candidate's items list names item ids (got {v!r})")
+        return list(v)
     if isinstance(v, bool) or not isinstance(v, int) or v < 1:
-        raise ValueError(f"a candidate's items is a number of items (at least 1) or a dataset's name (got {v!r})")
+        raise ValueError(
+            f"a candidate's items is a number of items (at least 1), a dataset's name or a list of item ids (got {v!r})"
+        )
     return v
 
 
 def sample(c, items, engine=None):
-    """The items candidate c runs on: all, the first `items`, or those whose ids are in the dataset named by `items`."""
+    """The items candidate c runs on: all, the first `items`, those whose ids `items` lists, or those whose ids are in the dataset named by `items`."""
     if c.items is None:
         return items
     if isinstance(c.items, int):
         return items[: c.items]
+    if isinstance(c.items, list):
+        ids = set(c.items)
+        return [it for it in items if it["id"] in ids]
     ids = {it["id"] for it in load_dataset(c.items, engine=engine).items}
     return [it for it in items if it["id"] in ids]
 
