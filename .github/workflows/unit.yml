@@ -29,14 +29,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - name: Install Tesseract (the ocr role's runtime runs the real command in the tests)
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr ;;
-            macOS) brew install tesseract ;;
-            Windows) choco install tesseract -y --no-progress ;;
-          esac
       - run: uv sync --locked
       - name: Lockfile, lint, format and types (once, on the newest Python)
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'

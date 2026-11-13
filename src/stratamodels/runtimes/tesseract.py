@@ -77,7 +77,7 @@ def _union(boxes: list[list[int]]) -> list[int]:
 
 def parse_tsv(tsv: str) -> dict[str, Any]:
     """Tesseract's TSV (one row per page, block, paragraph, line and word) into lines of words. A line is keyed by (block, paragraph, line),
-    because line numbers restart in every paragraph; words with no text (Tesseract emits empty level-5 rows for picture blocks) are dropped,
+    because line numbers restart in every paragraph (and a second page is refused, since every number restarts there); words with no text (Tesseract emits empty level-5 rows for picture blocks) are dropped,
     and a line left with no words is dropped with them, so an engraving never turns into an empty line."""
     width = height = 0
     order: list[tuple[int, int, int]] = []
@@ -85,6 +85,10 @@ def parse_tsv(tsv: str) -> dict[str, Any]:
     for r in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
         level = int(r["level"] or 0)
         if level == 1:
+            if (
+                width or height
+            ):  # a second page (a multipage TIFF): its numbers restart, so its lines would merge with the first's
+                raise RunError("tesseract reads one page at a time: give it a single-page picture")
             width, height = int(r["width"]), int(r["height"])
         if level != 5:
             continue

@@ -11,8 +11,9 @@ Jonathan is turning strata-scan into an app for scanned books (rotate, crop, tex
 - `runtimes/tesseract.py`: each job runs with `OMP_THREAD_LIMIT=1`. Tesseract's own threads fought the CPU lane's four jobs: a 360 dpi page took 80 s under load and 2 s with one thread each.
 - `models.toml`: role `ocr`, model `tesseract-eng` (vram 0).
 - `client`: `sm.ocr(path, app, pdf=...)`; README.
-- `tests/unit/test_tesseract_runtime.py` (**new**): TSV parsing, the real command on a page drawn with Pillow, failures. `tests/integration/test_service.py`: the role through the service and client.
-- `.github/workflows/unit.yml`, `integration.yml`: install Tesseract (apt, brew, choco) so the tests run the real command. README: the role in the table.
+- `tests/unit/test_tesseract_runtime.py` (**new**): TSV parsing. `tests/integration/test_tesseract_runtime.py` (**new**): the real command on a page drawn with Pillow, and its failures (moved out of the unit suite after review: unit tests run no external processes). `tests/integration/test_service.py`: the role through the service and client.
+- `runtimes/tesseract.py`: a picture with more than one page (a multipage TIFF) is refused, since Tesseract restarts its block and line numbers on each page and lines would merge across pages.
+- `.github/workflows/integration.yml`: installs Tesseract (apt, brew, choco) so the tests run the real command. README: the role in the table.
 
 **Samples can name their items; SwinIR once, on the face close-up, with 4 hours (branch `claude/swinir-one-clip`)**
 SwinIR-L needs over 2 hours an 8 s clip on the RTX 3060 (two runs timed out, at 30 min then 2 h). Jonathan chose to see it once, on one hard clip.
