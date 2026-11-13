@@ -50,6 +50,7 @@ note = "4xNomosWebPhoto RealPLKSR, per frame: trained on degraded web photos (st
 [[candidates]]
 name = "swinir-real-x4"
 model = "video-swinir-real-x4"
+items = ["01-title-card-static", "02-kids-on-striped-sofa", "05-face-reading-book", "07-face-zoom-closeup"]   # ~45 min a clip on the RTX 3060: the text, stripes and faces clips only
 note = "SwinIR-L real-world x4 (GAN), per frame, 256 px tiles: slow"
 
 [[candidates]]

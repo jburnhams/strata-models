@@ -2,6 +2,14 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-13
+
+**Samples can name their items; SwinIR on the hard VHS clips only (branch `claude/swinir-hard-clips`)**
+SwinIR-L takes about 45 minutes a clip on the RTX 3060 (tiled 4x on every frame), so 6 hours for the 8.
+
+- `evals/core.py`: a candidate's `items` may be a list of item ids (beside a count or another dataset's name): the candidate runs on those items, in the dataset's order, and is compared with the baseline on them.
+- `evals/specs/video-enhance-vhs.toml`: swinir-real-x4 runs on the text, stripes and faces clips (01, 02, 05, 07).
+
 ## 2026-11-12
 
 **Video pairs play on their own, round and round (branch `claude/video-autoplay`)**
