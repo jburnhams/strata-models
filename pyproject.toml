@@ -122,7 +122,7 @@ extraPaths = ["client"]   # the standard-library client package is installed edi
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 # Ratchet: files listed here are checked strictly; the rest in basic mode. Add a file when it is fully annotated; never remove one.
-strict = ["src/stratamodels/__init__.py"]   # settings.py left the list when main's database-backed rewrite replaced the typed library version (2026-11-09): type it, then add it back
+strict = ["src/stratamodels/__init__.py", "src/stratamodels/runtimes/tesseract.py"]   # settings.py left the list when main's database-backed rewrite replaced the typed library version (2026-11-09): type it, then add it back
 # Findings in the code that is not yet in the strict list above are warnings, so they are visible without blocking: they come from dict(...) literals whose value types
 # pyright narrows too far, and from SQLAlchemy's Result.rowcount. They become errors file by file as each file moves into the list.
 reportArgumentType = "warning"

@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-13
 
+**An `ocr` role on Tesseract, for strata-scan (branch `claude/project-thread-0n1ijc`)**
+Jonathan is turning strata-scan into an app for scanned books (rotate, crop, text and pictures out) and asked for the model work to live here. A page needs its lines and words with boxes, which Tesseract gives on the CPU, so the role uses the CPU lane and never waits for the GPU; a vision-language reader is the eval to run against it later.
+
+- `runtimes/tesseract.py` (**new**, in pyright's strict list): runs the `tesseract` command with TSV output (and `pdf`, a searchable PDF page, when a job asks), and turns it into lines of words with boxes and confidences; params `lang`, `psm`, `dpi`, `pdf`. `runtimes/__init__.py`: registered, and `available()` names a missing command.
+- `models.toml`: role `ocr`, model `tesseract-eng` (vram 0).
+- `client`: `sm.ocr(path, app, pdf=...)`; README.
+- `tests/unit/test_tesseract_runtime.py` (**new**): TSV parsing, the real command on a page drawn with Pillow, failures. `tests/integration/test_service.py`: the role through the service and client.
+- `.github/workflows/unit.yml`, `integration.yml`: install Tesseract (apt, brew, choco) so the tests run the real command. README: the role in the table.
+
 **Samples can name their items; SwinIR once, on the face close-up, with 4 hours (branch `claude/swinir-one-clip`)**
 SwinIR-L needs over 2 hours an 8 s clip on the RTX 3060 (two runs timed out, at 30 min then 2 h). Jonathan chose to see it once, on one hard clip.
 

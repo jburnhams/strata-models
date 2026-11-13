@@ -117,6 +117,16 @@ def transcribe(path, app, role="transcribe", priority="batch", model=None, **par
     return run(role, params, app, priority=priority, model=model)
 
 
+def ocr(path, app, priority="batch", model=None, **params):
+    """Printed text from a page picture (role `ocr`): params lang ('eng', 'eng+fra'), psm (Tesseract's page segmentation), dpi, pdf (a .pdf path
+    to write as well: the picture with its text searchable). Returns {width, height, text, lines: [{text, box: [x, y, w, h], conf, block,
+    words: [{text, box, conf}]}], engine, lang, seconds}; conf is 0-100."""
+    params["path"] = os.path.abspath(path)
+    if params.get("pdf"):
+        params["pdf"] = os.path.abspath(params["pdf"])
+    return run("ocr", params, app, priority=priority, model=model)
+
+
 def role_model(role):
     """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
     by an earlier model is made again when an eval changes the role's model."""
