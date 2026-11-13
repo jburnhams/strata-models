@@ -638,7 +638,7 @@ vram_gb = 1.5                                # the cleanup stage's 1x model (Ble
 licence = "LGPL/GPL (ffmpeg); the cleanup model's own (see scripts/setup_worker_venv.sh video)"
 source = "https://openmodeldb.info/"
 used_by = []
-options = { worker = "video", venv = "video", engine = "ffmpeg" }
+options = { worker = "video", venv = "video", engine = "ffmpeg", timeout_s = 3600 }   # BaldrickVHSFix (1x ESRGAN on every frame) ~11 min a clip
 
 [models.video-realesrgan-x4plus]
 runtime = "venv-worker"
@@ -648,7 +648,7 @@ vram_gb = 3.0
 licence = "BSD-3-Clause"
 source = "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.1.0"
 used_by = []
-options = { worker = "video", venv = "video", engine = "spandrel", file = "RealESRGAN_x4plus.pth" }
+options = { worker = "video", venv = "video", engine = "spandrel", file = "RealESRGAN_x4plus.pth", timeout_s = 3600 }   # ~14 min a clip
 
 [models.video-realesrgan-x2plus]
 runtime = "venv-worker"
@@ -678,7 +678,7 @@ vram_gb = 3.0
 licence = "CC-BY-4.0"
 source = "https://github.com/Phhofm/models/releases/tag/4xNomosWebPhoto_RealPLKSR"
 used_by = []
-options = { worker = "video", venv = "video", engine = "spandrel", file = "4xNomosWebPhoto_RealPLKSR.pth" }
+options = { worker = "video", venv = "video", engine = "spandrel", file = "4xNomosWebPhoto_RealPLKSR.pth", timeout_s = 3600 }   # ~20 min a clip (no margin under the default 30)
 
 [models.video-swinir-real-x4]
 runtime = "venv-worker"
@@ -688,7 +688,7 @@ vram_gb = 5.0
 licence = "Apache-2.0"
 source = "https://github.com/JingyunLiang/SwinIR/releases/tag/v0.0"
 used_by = []
-options = { worker = "video", venv = "video", engine = "spandrel", file = "003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth", tile = 256 }
+options = { worker = "video", venv = "video", engine = "spandrel", file = "003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth", tile = 256, timeout_s = 7200 }   # ~35-45 min an 8 s clip on the RTX 3060
 
 [models.video-seedvr2-3b]
 runtime = "venv-worker"
@@ -698,7 +698,7 @@ vram_gb = 10.0                               # with block swap; batch_size 5 (4n
 licence = "Apache-2.0"
 source = "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler"
 used_by = []
-options = { worker = "video", venv = "seedvr2", engine = "seedvr2", args = { dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", batch_size = 5, blocks_to_swap = 16, dit_offload_device = "cpu", vae_encode_tiled = true, vae_decode_tiled = true, color_correction = "lab" } }
+options = { worker = "video", venv = "seedvr2", engine = "seedvr2", timeout_s = 10800, args = { dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", batch_size = 5, blocks_to_swap = 16, dit_offload_device = "cpu", vae_encode_tiled = true, vae_decode_tiled = true, color_correction = "lab" } }
 
 [models.video-flashvsr-plus-turbo]
 runtime = "venv-worker"
@@ -708,7 +708,7 @@ vram_gb = 10.0
 licence = "Apache-2.0"
 source = "https://github.com/OpenImagingLab/FlashVSR_Plus"
 used_by = []
-options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", args = { mode = "turbo", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }
+options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", timeout_s = 7200, args = { mode = "turbo", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }
 
 [models.video-flashvsr-plus-base]
 runtime = "venv-worker"
@@ -718,4 +718,4 @@ vram_gb = 10.0
 licence = "Apache-2.0"
 source = "https://github.com/OpenImagingLab/FlashVSR_Plus"
 used_by = []
-options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", args = { mode = "base", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }
+options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", timeout_s = 10800, args = { mode = "base", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true } }

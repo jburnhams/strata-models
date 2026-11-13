@@ -2,6 +2,14 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-13
+
+**A venv-worker model sets how long one job may run (branch `claude/video-worker-timeout`)**
+SwinIR (video-enhance-vhs) failed on all 8 clips, about 6 hours of GPU time: each 8 s clip takes 35-45 min on the RTX 3060 and the venv-worker runtime stopped every job at its fixed 1800 s.
+
+- `runtimes/worker.py`: models.toml `options.timeout_s` (default 1800, as before) is how long one job may run before the worker is stopped.
+- `models.toml`: SwinIR 7200, SeedVR2 3B 10800, FlashVSR+ Turbo 7200 and Base 10800 (not yet measured here: generous), Real-ESRGAN x4plus, RealPLKSR and the 1x cleanup model 3600 (they took 14, 20 and 11 min a clip: too close to the old limit).
+
 ## 2026-11-12
 
 **Video pairs play on their own, round and round (branch `claude/video-autoplay`)**
