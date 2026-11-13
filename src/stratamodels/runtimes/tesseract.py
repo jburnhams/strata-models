@@ -133,7 +133,10 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         if handle.get("tessdata"):
             cmd += ["--tessdata-dir", str(handle["tessdata"])]
         cmd += ["tsv"] + (["pdf"] if pdf else [])
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
+        # One thread a page: the service runs up to cpu_jobs pages at once, and Tesseract's OpenMP threads on top of that oversubscribe
+        # the CPU so badly that a page took 80 s instead of 2 (measured with four pages at once on four cores).
+        env = dict(os.environ, OMP_THREAD_LIMIT="1")
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False, env=env)
         if out.returncode != 0 or not os.path.isfile(base + ".tsv"):
             raise RunError(f"tesseract failed on {path}: {(out.stderr or '').strip()[-500:]}")
         with open(base + ".tsv", encoding="utf8") as f:

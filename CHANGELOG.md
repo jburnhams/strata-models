@@ -8,6 +8,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 Jonathan is turning strata-scan into an app for scanned books (rotate, crop, text and pictures out) and asked for the model work to live here. A page needs its lines and words with boxes, which Tesseract gives on the CPU, so the role uses the CPU lane and never waits for the GPU; a vision-language reader is the eval to run against it later.
 
 - `runtimes/tesseract.py` (**new**, in pyright's strict list): runs the `tesseract` command with TSV output (and `pdf`, a searchable PDF page, when a job asks), and turns it into lines of words with boxes and confidences; params `lang`, `psm`, `dpi`, `pdf`. `runtimes/__init__.py`: registered, and `available()` names a missing command.
+- `runtimes/tesseract.py`: each job runs with `OMP_THREAD_LIMIT=1`. Tesseract's own threads fought the CPU lane's four jobs: a 360 dpi page took 80 s under load and 2 s with one thread each.
 - `models.toml`: role `ocr`, model `tesseract-eng` (vram 0).
 - `client`: `sm.ocr(path, app, pdf=...)`; README.
 - `tests/unit/test_tesseract_runtime.py` (**new**): TSV parsing, the real command on a page drawn with Pillow, failures. `tests/integration/test_service.py`: the role through the service and client.
