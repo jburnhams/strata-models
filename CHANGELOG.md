@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-13
 
+**SeedVR2 decodes in 512 px tiles (branch `claude/seedvr2-decode-tiles`)**
+The first SeedVR2 3B run on the RTX 3060 (one clip, 2026-11-13) finished its DiT pass (80 batches of 5 frames, ~6.5 min) and ran out of memory at the first VAE decode batch: 1024 px tiles took allocation from 8.8 to 10.7 GiB. `models.toml`: VAE encode and decode tiles 512 px with 64 px overlap.
+
 **Samples can name their items; SwinIR once, on the face close-up, with 4 hours (branch `claude/swinir-one-clip`)**
 SwinIR-L needs over 2 hours an 8 s clip on the RTX 3060 (two runs timed out, at 30 min then 2 h). Jonathan chose to see it once, on one hard clip.
 
