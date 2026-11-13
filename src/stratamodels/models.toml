@@ -67,6 +67,10 @@ model = "video-lanczos"                      # the classical baseline until eval
 description = "Flag pictures that should not be shown"
 model = "nudenet-320n"
 
+[roles.ocr]
+description = "Printed text from a page picture: lines and words with boxes and confidences (scanned books)"
+model = "tesseract-eng"                      # first pick (2026-11-13, for strata-scan): boxes on the CPU; a vision-language reader is the eval to run against it
+
 [models.buffalo_l]
 runtime = "insightface"
 name = "buffalo_l"
@@ -349,6 +353,16 @@ vram_gb = 0.3
 licence = "AGPL-3.0"
 source = "https://github.com/notAI-tech/NudeNet"
 used_by = ["strata-stills"]
+
+[models.tesseract-eng]
+runtime = "tesseract"
+name = "eng"
+roles = ["ocr"]
+vram_gb = 0.0
+licence = "Apache-2.0"
+source = "https://github.com/tesseract-ocr/tesseract (pacman -S tesseract tesseract-data-eng)"
+used_by = ["strata-scan"]
+options = { psm = 3, oem = 1 }
 
 [roles.image-generate]
 description = "Pictures from a prompt, optionally edited from reference images"

@@ -4,6 +4,17 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-13
 
+**An `ocr` role on Tesseract, for strata-scan (branch `claude/project-thread-0n1ijc`)**
+Jonathan is turning strata-scan into an app for scanned books (rotate, crop, text and pictures out) and asked for the model work to live here. A page needs its lines and words with boxes, which Tesseract gives on the CPU, so the role uses the CPU lane and never waits for the GPU; a vision-language reader is the eval to run against it later.
+
+- `runtimes/tesseract.py` (**new**, in pyright's strict list): runs the `tesseract` command with TSV output (and `pdf`, a searchable PDF page, when a job asks), and turns it into lines of words with boxes and confidences; params `lang`, `psm`, `dpi`, `pdf`. `runtimes/__init__.py`: registered, and `available()` names a missing command.
+- `runtimes/tesseract.py`: each job runs with `OMP_THREAD_LIMIT=1`. Tesseract's own threads fought the CPU lane's four jobs: a 360 dpi page took 80 s under load and 2 s with one thread each.
+- `models.toml`: role `ocr`, model `tesseract-eng` (vram 0).
+- `client`: `sm.ocr(path, app, pdf=...)`; README.
+- `tests/unit/test_tesseract_runtime.py` (**new**): TSV parsing. `tests/integration/test_tesseract_runtime.py` (**new**): the real command on a page drawn with Pillow, and its failures (moved out of the unit suite after review: unit tests run no external processes). `tests/integration/test_service.py`: the role through the service and client.
+- `runtimes/tesseract.py`: a picture with more than one page (a multipage TIFF) is refused, since Tesseract restarts its block and line numbers on each page and lines would merge across pages.
+- `.github/workflows/integration.yml`: installs Tesseract (apt, brew, choco) so the tests run the real command. README: the role in the table.
+
 **Samples can name their items; SwinIR once, on the face close-up, with 4 hours (branch `claude/swinir-one-clip`)**
 SwinIR-L needs over 2 hours an 8 s clip on the RTX 3060 (two runs timed out, at 30 min then 2 h). Jonathan chose to see it once, on one hard clip.
 
