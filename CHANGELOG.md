@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-13
 
+**Samples can name their items; SwinIR once, on the face close-up, with 4 hours (branch `claude/swinir-one-clip`)**
+SwinIR-L needs over 2 hours an 8 s clip on the RTX 3060 (two runs timed out, at 30 min then 2 h). Jonathan chose to see it once, on one hard clip.
+
+- `evals/core.py`: a candidate's `items` may be a list of item ids (beside a count or another dataset's name): the candidate runs on those items, in the dataset's order, and is compared with the baseline on them.
+- `evals/specs/video-enhance-vhs.toml`: swinir-real-x4 runs on 07-face-zoom-closeup only; `models.toml`: its job limit 4 h.
+
 **A venv-worker model sets how long one job may run (branch `claude/video-worker-timeout`)**
 SwinIR (video-enhance-vhs) failed on all 8 clips, about 6 hours of GPU time: each 8 s clip takes 35-45 min on the RTX 3060 and the venv-worker runtime stopped every job at its fixed 1800 s.
 

@@ -231,7 +231,7 @@ def test_the_slow_video_models_have_room_to_finish():
     from stratamodels.registry import Registry
 
     m = Registry.load().models
-    assert m["video-swinir-real-x4"].options["timeout_s"] >= 7200
+    assert m["video-swinir-real-x4"].options["timeout_s"] >= 14400
     assert (
         m["video-seedvr2-3b"].options["timeout_s"] >= 7200
         and m["video-flashvsr-plus-base"].options["timeout_s"] >= 7200

@@ -33,8 +33,9 @@ can be compared and revisited when a new model appears.
    (private: they may name private items); the decision goes into `models.toml` with the report linked.
 
 ## Samples: candidates whose calls are dear
-A candidate can run on a sample: `items = N` (the dataset's first N items; datasets are shuffled with a fixed seed when built) or
-`items = "<dataset>"` (the items of another dataset, e.g. the judged 20). Items outside the sample are never run, so they are not failures.
+A candidate can run on a sample: `items = N` (the dataset's first N items; datasets are shuffled with a fixed seed when built),
+`items = "<dataset>"` (the items of another dataset, e.g. the judged 20) or `items = ["id", ...]` (the items named: a slow model on the
+hard cases only, e.g. SwinIR, over 2 h a clip, on the VHS face close-up). Items outside the sample are never run, so they are not failures.
 Each candidate is compared with the baseline **on the items both have** (paired), so a sample gets the wider interval its size earns, and an
 "unclear" verdict says how many items would settle it, while the full candidates keep their whole comparison. The guards hold a candidate
 to the baseline's value on the same items. This is how cloud models on a plan's allowance stand in an eval: calls in proportion to what the

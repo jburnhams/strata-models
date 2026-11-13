@@ -688,7 +688,7 @@ vram_gb = 5.0
 licence = "Apache-2.0"
 source = "https://github.com/JingyunLiang/SwinIR/releases/tag/v0.0"
 used_by = []
-options = { worker = "video", venv = "video", engine = "spandrel", file = "003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth", tile = 256, timeout_s = 7200 }   # ~35-45 min an 8 s clip on the RTX 3060
+options = { worker = "video", venv = "video", engine = "spandrel", file = "003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth", tile = 256, timeout_s = 14400 }   # over 2 h an 8 s clip on the RTX 3060 (timed out at 30 min, then at 2 h)
 
 [models.video-seedvr2-3b]
 runtime = "venv-worker"
