@@ -18,7 +18,14 @@ def test_reads_each_page_once_records_its_source_and_stops_at_the_cap(tmp_path, 
 
     def run(role, params, app, priority, model):
         calls.append((role, params["system_preset"], params["image"].endswith(".png"), app, model))
-        return dict(text=" Punch and Judy. \n", cost_usd=0.6, tokens_in=1500, tokens_out=300)
+        cut = params["image"].endswith("ward1874-p043.png")
+        return dict(
+            text=" Punch and Judy. \n",
+            cost_usd=0.0 if cut else 0.6,
+            tokens_in=1500,
+            tokens_out=300,
+            finish="max_tokens" if cut else "end_turn",
+        )
 
     monkeypatch.setattr(R, "from_strata_scan", fetch)
     monkeypatch.setattr(R.sm, "run", run)
@@ -47,6 +54,7 @@ def test_reads_each_page_once_records_its_source_and_stops_at_the_cap(tmp_path, 
         set(src) == {"ward1874-p019", "ward1874-p040"}
         and src["ward1874-p040"]["kind"] == "unclear"
         and src["ward1874-p040"]["cost_usd"] == 0.6
+        and src["ward1874-p040"]["finish"] == "end_turn"
     )
     assert 0 < src["ward1874-p019"]["cer_exact_vs_typed"] < 1  # the hand-typed page exists: Opus is checked against it
     assert (

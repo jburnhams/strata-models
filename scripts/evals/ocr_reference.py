@@ -8,7 +8,8 @@ read the same way say how close (its cer_exact against the typed text, in SOURCE
 
 Each page is fetched from strata-scan, read through strata-models (role vision-language, preset ocr-read-v1, the same instructions the local readers get)
 and written to scripts/evals/ocr_hard/<item>.txt; SOURCES.json keeps, per item, the kind of error that got it picked, the model, its cost and
-the date. A page that already has a reading is not read again. Stops before the next call once --max-usd has been spent. Then build the
+the date. A page that already has a reading is not read again; a reading cut off at max_tokens is not saved, so it is tried again next time. An empty
+reading is kept: the right answer for a page of ornaments read as text is no text. Stops before the next call once --max-usd has been spent. Then build the
 dataset with `ocr_pages.py --refs scripts/evals/ocr_hard --name ocr-hard` (evals/specs/ocr-hard.toml)."""
 
 import argparse
@@ -25,6 +26,11 @@ from ocr_pages import HERE as TYPED
 from ocr_pages import from_strata_scan
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr_hard")
+TRUNCATED = (
+    "max_tokens",
+    "MAX_TOKENS",
+    "length",
+)  # stop reasons for a cut-off answer: Claude, Gemini, OpenAI-compatible (NIM)
 PARAMS = dict(system_preset="ocr-read-v1", prompt="Transcribe this page.", max_tokens=4096, effort="high")
 
 
@@ -73,6 +79,14 @@ def main(argv=None):
             )
             text = (r.get("text") or "").strip()
             spent += r.get("cost_usd") or 0.0
+            if (
+                r.get("finish") in TRUNCATED
+            ):  # a partial page as the reference would count the rest of a full reading as insertions
+                print(
+                    f"{item}: the reading stopped at max_tokens ({r.get('finish')}); not saved, run again with a higher limit",
+                    file=sys.stderr,
+                )
+                continue
             with open(os.path.join(a.out, f"{item}.txt"), "w", encoding="utf8") as f:
                 f.write(text + "\n")
             typed = os.path.join(TYPED, f"{item}.txt")
@@ -83,6 +97,7 @@ def main(argv=None):
                 cost_usd=r.get("cost_usd"),
                 tokens_in=r.get("tokens_in"),
                 tokens_out=r.get("tokens_out"),
+                finish=r.get("finish"),
                 date=datetime.date.today().isoformat(),
                 **({"cer_exact_vs_typed": round(check, 4)} if check is not None else {}),
             )
