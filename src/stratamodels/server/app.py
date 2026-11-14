@@ -24,6 +24,9 @@ API (JSON), for apps (through the client in client/) and for the web app:
   POST /api/leases/{id}/heartbeat        keep a held lease alive (it expires `ttl_s` after the last one)
   DELETE /api/leases/{id}                give it back
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
+  GET  /api/catalogue                    every backend (local lanes, subscriptions, API keys) and cloud model, with roles, tier and cost (routing.py)
+  GET  /api/route/{role}?goal=cheapest|best&private=&min_tier=&allowance=true   every way to serve the role, ranked, and the pick
+  GET  /api/allowances                   what is left of each cloud backend's allowance (read from its CLI or spend tracking, cached 5 min)
   GET/PUT /api/settings
   GET  /api/images?before=&limit=        generated pictures (image-generate jobs), newest first
   GET  /api/images/file?path=            one generated or uploaded picture
@@ -270,6 +273,55 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     @app.get("/api/usage")
     def get_usage(hours: float = 24.0):
         return dict(hours=hours, rows=s.store.usage(s.clock() - max(hours, 0.0) * 3600))
+
+    from stratamodels import routing
+
+    app.state.catalogue = routing.Catalogue.load()
+    app.state.allowances = routing.Allowances(app.state.catalogue)
+
+    @app.get("/api/catalogue")
+    def get_catalogue():
+        return app.state.catalogue.to_json()
+
+    @app.get("/api/allowances")
+    def get_allowances():
+        cat = app.state.catalogue
+        out = {}
+        for b in cat.backends.values():
+            if b.kind == "local":
+                continue
+            models = sorted({o.model for o in cat.offers.values() if o.backend == b.key})
+            out[b.key] = (
+                {m: app.state.allowances.left(b.key, m) for m in models}
+                if b.allowance == "agy"
+                else app.state.allowances.left(b.key, models[0] if models else None)
+            )
+        return out
+
+    @app.get("/api/route/{role}")
+    def get_route(
+        role: str, goal: str = "cheapest", private: bool = False, min_tier: int | None = None, allowance: bool = True
+    ):
+        g = latest()
+        card = (
+            g["total_mb"] / 1024 if g and g.get("total_mb") else None
+        )  # a model bigger than the reserve allows still runs alone (whole card)
+        try:
+            return routing.plan(
+                app.state.catalogue,
+                s.registry,
+                role,
+                store=s.store,
+                engine=s.store.engine,
+                allowances=app.state.allowances if allowance else None,
+                missing=runtimes.available(),
+                card_gb=card,
+                goal=goal,
+                private=private,
+                min_tier=min_tier,
+            )
+        except ValueError as e:
+            raise HTTPException(404 if str(e).startswith("no role") else 400, str(e))
 
     @app.get("/api/settings")
     def get_settings():

@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**A routing catalogue: every cloud backend and local model by role, power and cost (branch `claude/project-thread-2aatsx`)**
+Jonathan asked for every cloud API mapped to capabilities, power and cost, so jobs can be routed between cloud and local models.
+
+- `catalogue.toml` (**new**): the backends (local GPU and CPU lanes, agy, codex, Claude API, NVIDIA NIM, the free and paid Gemini keys) with Jonathan's order and use rules and their reserves; their models (roles, family, tier, price per Mtok or measured quota per call, the recorded models that stand for them in evals). NIM ids from its public model list.
+- `routing.py` (**new**): `Catalogue`, eval evidence from `eval_summaries`, `Allowances` (agy and codex usage from their CLIs, the API keys from `stratamodels.spend` once it lands, cached 5 min), `options()` and `route()` (cheapest or best; private, tier floor, reserve and budget rules; `would_pick`).
+- `server/app.py`: `GET /api/catalogue`, `GET /api/route/{role}`, `GET /api/allowances`. `cli.py`: `catalogue`, `route ROLE`.
+- `tests/unit/test_routing.py` (**new**); server and CLI tests. `docs/routing.md` (**new**), README.
+
 **Model judges for OCR, scored against the hand-typed text (branch `claude/project-thread-0n1ijc`)**
 Jonathan asked whether qwen or Gemini could judge how good each OCR setting is. On the ten typed pages a judge can be checked against the character error rate, and one that agrees well can then rank settings on the pages nobody has typed (the rest of both books).
 

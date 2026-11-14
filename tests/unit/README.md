@@ -13,3 +13,4 @@ Fast and isolated: synthetic data and fakes; no external services, no network. `
 | `oslib.py` | `test_oslib.py` | 100% | done | file locks, process liveness, process tree termination, priority, venv/cli helpers |
 | `cli.py` | `test_cli.py` | 100% | done | doctor, hello, messages, set, serve delegation |
 | `server/app.py` | `test_server.py` | 100% | done | landing/static index, health, settings, hello, messages endpoints |
+| `routing.py` | `test_routing.py` | 99% | done | catalogue load/merge/errors, eval evidence, options (local, registered cloud, offers, card fit, family evals), route rules (reserve, budget, private, tier, fallback, would_pick), allowances (CLI, spend, cache, errors) |
