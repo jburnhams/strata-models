@@ -10,3 +10,5 @@ For each block:
 - lines: the text of each printed line, as printed.
 
 Figures: pictures, engravings, ornaments (a small decorative device such as —o—) and short decorative rules standing between blocks, each with its box and kind (figure, engraving, ornament, initial, rule). Leave out the border round the page, the rule under a running head, library stamps, handwriting, stains and the show-through of the next page.
+
+Answer with JSON only, in the shape {"blocks": [{"box": [x0, y0, x1, y1], "role": "...", "lines": ["..."]}], "figures": [{"box": [x0, y0, x1, y1], "kind": "..."}]}.

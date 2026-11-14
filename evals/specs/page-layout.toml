@@ -28,7 +28,7 @@ model = "pagebuild"
 [[candidates.stages]]
 role = "vision-language"
 model = "qwen3.5-9b-vl"
-params = { system_preset = "page-layout-v1", prompt = "Read the layout of this page.", max_tokens = 8192, temperature = 0.0 }
+params = { preset = "page-layout-v1", max_tokens = 8192, temperature = 0.0 }
 input = "{image}"
 send = "image"
 into = "layout"
@@ -40,7 +40,7 @@ model = "pagebuild"
 [[candidates.stages]]
 role = "vision-language"
 model = "gemma-4-12b-vl"
-params = { system_preset = "page-layout-v1", prompt = "Read the layout of this page.", max_tokens = 8192, temperature = 0.0 }
+params = { preset = "page-layout-v1", max_tokens = 8192, temperature = 0.0 }
 input = "{image}"
 send = "image"
 into = "layout"
@@ -53,7 +53,7 @@ note = "the free key first; Flash thinks before it answers, hence the token budg
 [[candidates.stages]]
 role = "vision-language"
 model = "gemini-3.8-flash-api"
-params = { system_preset = "page-layout-v1", prompt = "Read the layout of this page.", max_tokens = 16384 }
+params = { preset = "page-layout-v1", max_tokens = 16384 }
 input = "{image}"
 send = "image"
 into = "layout"
@@ -66,7 +66,7 @@ note = "about a cent a page"
 [[candidates.stages]]
 role = "vision-language"
 model = "claude-haiku-5-5-api"
-params = { system_preset = "page-layout-v1", prompt = "Read the layout of this page.", max_tokens = 8192 }
+params = { preset = "page-layout-v1", max_tokens = 8192 }
 input = "{image}"
 send = "image"
 into = "layout"

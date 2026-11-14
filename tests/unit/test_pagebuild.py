@@ -2,6 +2,7 @@
 synthetic descriptions, checked by what a reader of the PDF gets back (its text in order, its size, the raster beside it)."""
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -236,3 +237,19 @@ def test_the_raster_has_the_scans_own_size(tmp_path):
     with Image.open(r["png"]) as im:
         assert im.size == (2660, 4056)
         assert im.getpixel((2659, 4055)) == 255  # padded with paper, not ink
+
+
+def test_the_layout_preset_carries_its_schema_and_the_spec_sends_it():
+    # `preset` (not `system_preset`) is what makes llama and the cloud runtimes send a preset's schema, so every vision stage must use it
+    import tomllib
+
+    from stratamodels.runtimes import llama
+
+    text, schema = llama.preset("page-layout-v1")
+    assert "thousandths" in text
+    assert schema["required"] == ["blocks", "figures"]
+    with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-layout.toml"), "rb") as f:
+        spec = tomllib.load(f)
+    stages = [s for c in spec["candidates"] for s in c.get("stages", [])]
+    assert len(stages) == 4
+    assert all(s["params"].get("preset") == "page-layout-v1" and "prompt" not in s["params"] for s in stages)
