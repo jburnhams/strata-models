@@ -823,14 +823,21 @@ def _latency(item, output, error):
 
 def _cost(item, output, error):
     """US dollars the item cost: a cloud API model's `cost_usd` (from the ledger's price, runtimes/cloud.py), 0 for a model run here (its cost
-    is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item."""
+    is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item. A pipeline adds
+    the cost of each step in its trace."""
     if error or not isinstance(output, dict):
         return None
-    if isinstance(output.get("cost_usd"), (int, float)):
-        return float(output["cost_usd"])
-    if output.get("recorded") or output.get("cli"):
-        return None
-    return 0.0
+    # a pipeline's steps (a cloud model's layout, then a local drawing) each cost what their answer says: the item cost all of them
+    steps = [t for t in output.get("pipeline") or [] if isinstance(t, dict)][
+        :-1
+    ]  # the last entry is the candidate's own job: `output` itself
+    total = 0.0
+    for o in [*steps, output]:
+        if isinstance(o.get("cost_usd"), (int, float)):
+            total += float(o["cost_usd"])
+        elif o.get("recorded") or o.get("cli"):
+            return None
+    return total
 
 
 def _exact(item, output, error):

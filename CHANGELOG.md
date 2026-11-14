@@ -9,6 +9,18 @@ Trial on omarchy (scripts/evals/font_match_trial.py, 36 real and 29 synthetic bl
 - `fetch` wrote every download to `<face>.ttf.part`, so parallel fits fetching the same face collided (52 failed fits at 6 jobs): each writer now has its own temporary name.
 - `parse_candidates` takes the closest id for a near miss (gemma wrote `libra-bodoni` for libre-bodoni in 26 of 65 answers).
 
+**page-layout: Tesseract's lines regrouped by a vision model (branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py`: `list_lines` (Tesseract's lines numbered, in thousandths, split at wide gaps between words) and `groups` (a model's blocks named by those numbers, drawn with Tesseract's measured lines).
+- `evals/core.py`: a stage's `also` passes item fields as they are beside the one sent (the page image beside a text); kept out of the parsed stage when not given, so existing pipelines keep their result keys.
+- `runtimes/llama.py`, `runtimes/cloud.py`: a preset's `{context}` takes a text as it is (a dict is still JSON).
+- Preset `page-layout-fix-v1` (**new**, with a schema); candidates `qwen-fix`, `flash-fix`, `haiku-fix`, `sonnet-fix` in `evals/specs/page-layout.toml`. The labels' own grouping of Tesseract's lines scores block_f1 97.6 %, the approach's ceiling; OCR's best preprocessing (psm 4, flatten) finds fewer blocks than psm 3, so psm 3 stays.
+
+**page-layout: Sonnet as a candidate (branch `claude/project-thread-dvu0cz`)**
+Haiku found 24 % of the labelled blocks (Flash 83 %, Tesseract 77 %); `sonnet-layout` asks whether the larger Claude reads page layouts well enough. Only it runs on the next `eval run page-layout` (the others are cached).
+
+**cost_usd counts a pipeline's cloud steps (branch `claude/project-thread-dvu0cz`)**
+The page-layout run on omarchy (2026-11-14) showed cost_usd 0 for every candidate, though Gemini Flash's and Haiku's layout steps cost $0.088 and $0.011: the metric read only the last job's output (page-build, local). Each step in a pipeline's trace now keeps its answer's `cost_usd` (or the mark of a subscription CLI or recording), `cost_usd` adds the steps to the last job, and `outputs_for` fills the cost of steps saved before this from their own cached rows, so the existing run's report is right without running anything again. `runtimes/fake.py`'s text model takes a `cost_usd` param for the test (`test_eval_pipeline.py`).
+
 **Page rebuild: the `page-layout` eval, ten labelled pages and the page ink score (#67, branch `claude/project-thread-dvu0cz`)**
 - `runtimes/pagebuild.py`: a third input, `layout` (a vision model's reading, preset `page-layout-v1`: boxes in thousandths of the page, blocks in reading order, lines without boxes, figures), drawn in the picture's pixels; `page`, `ocr` and `layout` each also come as JSON text (a model's answer, code fences allowed) or a JSON file's path. The raster is put back on the scan's own size (pdfium rounds a page's size in points up, so a 2660 px scan at 500 dpi came back 2661 wide and matched none of its ink), and the answer names it as `path` too, for the Judge and Outputs tabs.
 - `evals/metrics.py`: `page_ink_f1`, the rebuilt page's raster against the scan within the reference text blocks (evals/ink.py).

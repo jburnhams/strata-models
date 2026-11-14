@@ -48,6 +48,9 @@ def run(handle, params):
             text=f'"{params.get("style", "detailed")}: {params["expand"]}"',
             tokens_out=len(str(params["expand"]).split()) + 1,
             model=handle["model"],
+            **(
+                {"cost_usd": float(params["cost_usd"])} if "cost_usd" in params else {}
+            ),  # a cloud text model's price, for cost tests
         )
     if "say" in params:  # a fake transcriber for eval tests: says the text, dropping every `drop`-th word
         words = str(params["say"]).split()

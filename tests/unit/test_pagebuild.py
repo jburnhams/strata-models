@@ -250,6 +250,93 @@ def test_the_layout_preset_carries_its_schema_and_the_spec_sends_it():
     assert schema["required"] == ["blocks", "figures"]
     with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-layout.toml"), "rb") as f:
         spec = tomllib.load(f)
-    stages = [s for c in spec["candidates"] for s in c.get("stages", [])]
-    assert len(stages) == 4
-    assert all(s["params"].get("preset") == "page-layout-v1" and "prompt" not in s["params"] for s in stages)
+    stages = [s for c in spec["candidates"] for s in c.get("stages", []) if s["role"] == "vision-language"]
+    assert len(stages) == 9
+    assert all(
+        s["params"].get("preset") in ("page-layout-v1", "page-layout-fix-v1") and "prompt" not in s["params"]
+        for s in stages
+    )
+    fix = [s for s in stages if s["params"]["preset"] == "page-layout-fix-v1"]
+    assert len(fix) == 4 and all(
+        s["send"] == "context" and s["also"] == ["image"] and s["into"] == "groups" for s in fix
+    )
+    text, schema = llama.preset("page-layout-fix-v1")
+    assert "{context}" in text and schema["properties"]["blocks"]["items"]["required"] == ["lines", "role"]
+
+
+# ---- Tesseract's lines regrouped by a vision model (preset page-layout-fix-v1): list_lines numbers them, groups names them by number ------
+SPLIT = dict(
+    width=1000,
+    height=500,
+    lines=[
+        dict(
+            text="THE HISTORY OF PUNCH. 17",  # a running head and its folio, read as one line: split at the gap
+            box=[100, 20, 800, 20],
+            block=1,
+            words=[
+                dict(text="THE", box=[100, 20, 60, 20]),
+                dict(text="HISTORY", box=[170, 20, 140, 20]),
+                dict(text="OF", box=[320, 20, 40, 20]),
+                dict(text="PUNCH.", box=[370, 20, 120, 20]),
+                dict(text="17", box=[860, 20, 40, 20]),
+            ],
+        ),
+        dict(
+            text="First line of text",
+            box=[100, 100, 800, 20],
+            block=2,
+            words=[dict(text="First", box=[100, 100, 90, 20])],
+        ),
+        dict(text="second line", box=[100, 130, 500, 20], block=3),
+        dict(text="%%", box=[950, 480, 20, 10], block=4),  # show-through: in no block
+    ],
+)
+
+
+def test_list_lines_numbers_tesseract_lines_in_thousandths_split_at_wide_gaps():
+    assert pagebuild.list_lines(SPLIT).splitlines() == [
+        "1 b1 [100,40,490,80] THE HISTORY OF PUNCH.",
+        "2 b1 [860,40,900,80] 17",
+        "3 b2 [100,200,900,240] First line of text",
+        "4 b3 [100,260,600,300] second line",
+        "5 b4 [950,960,970,980] %%",
+    ]
+    out = pagebuild.run(handle(), dict(list_lines=True, ocr=json.dumps(SPLIT)))
+    assert out["lines"] == 5 and out["text"].startswith("1 b1")
+    with pytest.raises(RunError, match="needs an ocr"):
+        pagebuild.run(handle(), dict(list_lines=True))
+    with pytest.raises(RunError, match="no page size"):
+        pagebuild.list_lines(dict(lines=[]))
+
+
+def test_groups_keep_tesseracts_lines_in_the_models_blocks(tmp_path):
+    groups = dict(
+        blocks=[
+            dict(lines=[1], role="running-head"),
+            dict(lines=[2, "x", 99], role="folio"),  # not a number, out of range: skipped
+            dict(lines=[4, 3, 1], role="body"),  # Tesseract's order within a block; 1 is taken already
+            dict(lines=[], role="other"),  # nothing: dropped
+        ],
+        figures=[dict(box=[100, 500, 900, 900], kind="engraving")],
+    )
+    pic = str(tmp_path / "p.png")
+    Image.new("L", (1000, 500), 255).save(pic, dpi=(200, 200))
+    out = pagebuild.run(
+        handle(),
+        dict(
+            ocr=json.dumps(SPLIT),
+            groups="```json\n" + json.dumps(groups) + "\n```",
+            image=pic,
+            out=str(tmp_path / "g.pdf"),
+        ),
+    )
+    page = out["page"]
+    assert [(b.get("role", "body"), b["box"], b.get("order")) for b in page["blocks"]] == [
+        ("running-head", [100, 20, 390, 20], 0),
+        ("folio", [860, 20, 40, 20], 1),
+        ("body", [100, 100, 800, 50], 2),
+    ]
+    assert [ln["spans"][0]["text"] for ln in page["blocks"][2]["lines"]] == ["First line of text", "second line"]
+    assert page["figures"] == [dict(box=[100, 250, 800, 200], kind="engraving")] and page["dpi"] == 200
+    with pytest.raises(RunError, match="bad groups"):
+        pagebuild.page_of(dict(ocr=SPLIT, groups=dict(blocks=[dict(lines=[1], role="nonsense")]), dpi=200))

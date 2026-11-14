@@ -125,7 +125,7 @@ def parse(params):
             raise RunError("give a prompt or a preset, not both")
         text, pschema = llama.preset(params["preset"])
         schema = pschema if schema is None else schema
-        text = text.replace("{context}", json.dumps(params.get("context") or {}, ensure_ascii=False))
+        text = llama.fill_context(text, params.get("context"))
     else:
         text = params.get("prompt")
         if not isinstance(text, str) or not text.strip():
