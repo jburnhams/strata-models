@@ -61,15 +61,3 @@ def test_reads_each_page_once_records_its_source_and_stops_at_the_cap(tmp_path, 
         "cer_exact_vs_typed" not in src["ward1874-p040"]
         and (tmp_path / "ward1874-p040.txt").read_text() == "Punch and Judy.\n"
     )
-
-
-def test_a_page_over_the_api_limit_is_shrunk(tmp_path):
-    from PIL import Image
-
-    small = tmp_path / "small.png"
-    Image.new("L", (100, 150), 255).save(small)
-    assert R.fit(str(small)) == str(small)
-    big = tmp_path / "big.png"
-    Image.effect_noise((3000, 4500), 120).save(big)  # noise does not compress: well over 10 MB as base64
-    out = R.fit(str(big))
-    assert out != str(big) and max(Image.open(out).size) == 2576 and os.path.getsize(out) * 4 / 3 < R.LIMIT

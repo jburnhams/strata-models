@@ -378,3 +378,31 @@ def test_nim_run_retries_429_and_records(ledger, tmp_path, monkeypatch):  # noqa
     with pytest.raises(RunError, match="could not reach"):
         nim.run(h, dict(prompt="hi"), post=Post(RunError("could not reach x")))
     assert [(c["ok"], c["tokens_in"]) for c in ledger.api_log()] == [(False, 0), (False, 0), (True, 21)]
+
+
+def test_a_picture_over_the_limit_is_shrunk_and_a_small_one_sent_as_it_is(tmp_path, monkeypatch):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from stratamodels.runtimes import cloud
+
+    small = tmp_path / "small.png"
+    Image.new("L", (100, 150), 255).save(small)
+    assert cloud.encode(str(small)) == ("image/png", base64.b64encode(small.read_bytes()).decode())
+    big = tmp_path / "page.png"
+    Image.effect_noise((3000, 4500), 120).save(big)  # noise does not compress: a strata-scan page's size
+    mime, b64 = cloud.encode(str(big))
+    im = Image.open(io.BytesIO(base64.b64decode(b64)))
+    assert (
+        len(b64) < cloud.MAX_B64
+        and max(im.size) == cloud.LONG_EDGE
+        and im.mode == "L"
+        and mime in ("image/png", "image/jpeg")
+    )
+    monkeypatch.setattr(cloud, "MAX_B64", 100_000)  # even the scaled PNG is too big: JPEG
+    colour = tmp_path / "photo.png"
+    Image.merge("RGB", [Image.effect_noise((400, 300), 100)] * 3).save(colour)
+    mime, b64 = cloud.encode(str(colour))
+    assert mime == "image/jpeg" and Image.open(io.BytesIO(base64.b64decode(b64))).mode == "RGB"

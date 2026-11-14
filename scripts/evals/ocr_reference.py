@@ -34,28 +34,6 @@ TRUNCATED = (
 PARAMS = dict(system_preset="ocr-read-v1", prompt="Transcribe this page.", max_tokens=4096, effort="high")
 
 
-LIMIT = 10 * 1024 * 1024  # the Claude API's largest image, counted as base64
-
-
-def fit(path, long_edge=2576):
-    """A copy of the page small enough to send: under the API's 10 MB (base64) and no longer than `long_edge` on its long side (the API scales
-    bigger pictures down anyway, so nothing it would read is lost). A page that already fits is sent as it is."""
-    if not os.path.exists(path) or os.path.getsize(path) * 4 / 3 < LIMIT * 0.95:
-        return path
-    from PIL import Image
-
-    im = Image.open(path).convert("L")
-    if max(im.size) > long_edge:
-        k = long_edge / max(im.size)
-        im = im.resize((round(im.width * k), round(im.height * k)), Image.Resampling.LANCZOS)
-    out = path[: -len(".png")] + ".api.png"
-    im.save(out, optimize=True)
-    if os.path.getsize(out) * 4 / 3 >= LIMIT * 0.95:
-        out = out[: -len(".png")] + ".jpg"
-        im.save(out, quality=92)
-    return out
-
-
 def exact_cer(ref, hyp):
     """cer_exact of a reading against a hand-typed page (the eval's own metric, imported late: the script runs without the service's code too)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
@@ -98,7 +76,9 @@ def main(argv=None):
             # role vision-language: the cloud runtime reads the same params under either role, and every cloud model serves it
             r = sm.run(
                 "vision-language",
-                dict(PARAMS, image=fit(pages[item][0])),
+                dict(
+                    PARAMS, image=pages[item][0]
+                ),  # a page over the APIs' image limit is shrunk by the runtime (cloud.encode)
                 app="evals",
                 priority="normal",
                 model=a.model,
