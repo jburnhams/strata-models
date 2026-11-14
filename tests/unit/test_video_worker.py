@@ -792,7 +792,7 @@ def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
         (dict(cleanup=dict(vs=dict(degrain=dict(radius=2)))), "whole numbers"),
         (dict(cleanup=dict(vs=dict(degrain={}), planes="red")), "planes is all, luma or chroma"),
         (dict(cleanup=dict(vs=dict(degrain={}, planes="red"))), "planes is all, luma or chroma"),
-        (dict(cleanup=dict(vs=dict(degrain={}, strength=2))), "cleanup vs is"),
+        (dict(cleanup=dict(vs=dict(degrain={}, strength=2))), "cleanup vs takes"),
     ],
 )
 def test_vs_script_refuses_bad_stages(kw, match):
