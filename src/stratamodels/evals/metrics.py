@@ -408,18 +408,34 @@ def _main_light(d):
 
 
 # The fields an app filters or sorts on, each read the same way from both descriptions. Free text (caption, place, event) is judged blind instead.
+def _either(d, nested, flat):
+    """A field from a full description (schema-v1, nested) or from the flat photo-fields preset."""
+    v = _g(d, nested)
+    return d.get(flat) if v is None and isinstance(d, dict) else v
+
+
+def _children(d):
+    n = _either(d, "people.children", "children")
+    return None if not isinstance(n, int) or isinstance(n, bool) else n > 0
+
+
+def _has_text(d):
+    t = _g(d, "text_visible")
+    return len(t) > 0 if isinstance(t, list) else t if isinstance(t, bool) else None
+
+
 DESCRIPTION_FIELDS = {
-    "indoor_outdoor": lambda d: _g(d, "setting.indoor_outdoor"),
-    "time_of_day": lambda d: _g(d, "setting.time_of_day"),
-    "weather": lambda d: _g(d, "setting.weather"),
-    "people": lambda d: _bucket(_g(d, "people.count")),
-    "children": lambda d: None if not isinstance(_g(d, "people.children"), int) else _g(d, "people.children") > 0,
-    "person_subject": lambda d: _g(d, "people.main_subject_is_person"),
-    "main_light": _main_light,
-    "light_level": lambda d: _g(d, "lighting.level"),
-    "sharpness": lambda d: _g(d, "exposure.sharpness"),
-    "skin_visible": lambda d: _g(d, "colour.skin_visible"),
-    "has_text": lambda d: None if not isinstance(_g(d, "text_visible"), list) else len(_g(d, "text_visible")) > 0,
+    "indoor_outdoor": lambda d: _either(d, "setting.indoor_outdoor", "indoor_outdoor"),
+    "time_of_day": lambda d: _either(d, "setting.time_of_day", "time_of_day"),
+    "weather": lambda d: _either(d, "setting.weather", "weather"),
+    "people": lambda d: _bucket(_either(d, "people.count", "people_count")),
+    "children": _children,
+    "person_subject": lambda d: _either(d, "people.main_subject_is_person", "main_subject_is_person"),
+    "main_light": lambda d: _main_light(d) or (d.get("main_light") if isinstance(d, dict) else None),
+    "light_level": lambda d: _either(d, "lighting.level", "light_level"),
+    "sharpness": lambda d: _either(d, "exposure.sharpness", "sharpness"),
+    "skin_visible": lambda d: _either(d, "colour.skin_visible", "skin_visible"),
+    "has_text": _has_text,
 }
 
 
