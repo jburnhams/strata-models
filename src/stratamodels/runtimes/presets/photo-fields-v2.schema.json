@@ -1,0 +1,144 @@
+{
+ "type": "object",
+ "properties": {
+  "indoor_outdoor": {
+   "type": "string",
+   "enum": [
+    "indoor",
+    "outdoor",
+    "mixed",
+    "unknown"
+   ]
+  },
+  "time_of_day": {
+   "type": "string",
+   "enum": [
+    "dawn",
+    "day",
+    "golden hour",
+    "dusk",
+    "night",
+    "unknown"
+   ]
+  },
+  "weather": {
+   "type": "string",
+   "enum": [
+    "sunny",
+    "overcast",
+    "rain",
+    "snow",
+    "fog",
+    "n/a",
+    "unknown"
+   ]
+  },
+  "season": {
+   "type": "string",
+   "enum": [
+    "spring",
+    "summer",
+    "autumn",
+    "winter",
+    "unknown"
+   ]
+  },
+  "people_count": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "children": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "main_subject_is_person": {
+   "type": "boolean"
+  },
+  "main_light": {
+   "type": "string",
+   "enum": [
+    "daylight",
+    "overcast sky",
+    "shade",
+    "sunset sun",
+    "tungsten",
+    "halogen",
+    "fluorescent",
+    "LED white",
+    "LED coloured",
+    "stage lights",
+    "candle",
+    "fire",
+    "flash",
+    "screen",
+    "street light",
+    "mixed"
+   ]
+  },
+  "light_level": {
+   "type": "string",
+   "enum": [
+    "very dark",
+    "dark",
+    "normal",
+    "bright",
+    "very bright"
+   ]
+  },
+  "sharpness": {
+   "type": "string",
+   "enum": [
+    "sharp",
+    "soft",
+    "motion blur",
+    "out of focus"
+   ]
+  },
+  "skin_visible": {
+   "type": "boolean"
+  },
+  "text_visible": {
+   "type": "boolean"
+  },
+  "nudity": {
+   "type": "string",
+   "enum": [
+    "none",
+    "partial",
+    "explicit"
+   ]
+  },
+  "private_document": {
+   "type": "boolean"
+  },
+  "technical": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 5
+  },
+  "aesthetic": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 5
+  }
+ },
+ "required": [
+  "indoor_outdoor",
+  "time_of_day",
+  "weather",
+  "season",
+  "people_count",
+  "children",
+  "main_subject_is_person",
+  "main_light",
+  "light_level",
+  "sharpness",
+  "skin_visible",
+  "text_visible",
+  "nudity",
+  "private_document",
+  "technical",
+  "aesthetic"
+ ],
+ "additionalProperties": false
+}
