@@ -15,6 +15,12 @@ The ocr-pages eval put qwen-read at 0.16 % CER, yet Jonathan saw unclear and pla
 - `runtimes/cloud.py` `encode`: a picture over 5 MB (base64) is sent scaled to 2576 px on its long side, as PNG or else JPEG: a strata-scan page at full size is about 16 MB and the Claude API refuses one over 10 MB.
 - `scripts/evals/ocr_hard/` (**new**): Opus 5.5's readings of the ten worst pages, $0.28 in all; on the four of them that were hand-typed, `cer_exact` against the typing is 0.00 %.
 
+**Eval runs save each output as it finishes, and can recover a run lost to a restart (branch `claude/eval-save-each`)**
+A service restart at 12:26 on 2026-11-14 (a deploy) came in the middle of a 7-clip SeedVR2 batch: five clips had finished (about 32 min each) but none reached eval_results, because a batch of up to 32 jobs was saved only once all of them had been waited for.
+
+- `evals/core.py` `run`: each output is saved the moment its job is waited for; the batch's jobs are still all queued at once. A restart now loses only the job running then.
+- `run(..., recover=True)` (`POST /api/evals/{name}/run?recover=1`, CLI `eval run --recover`): before queuing a job, a finished job of the same role and model with exactly the same params (load options included) whose result is still kept (a week) is taken instead (`done_job`). Off by default, so `forget` then `run` still makes new outputs.
+
 **Cloud API clients (Claude, Google AI Studio, NVIDIA NIM) with budgets and a Cloud page (branch `claude/project-thread-gl1u9l`)**
 Jonathan has a Claude API key, two Google AI Studio keys (free tier and a paid one) and an NVIDIA NIM key, and wants their spend watched closely so nothing is wasted. Checked 2026-11-14 with one tiny call each: none of the four shows its remaining credit to the key (the Claude key gets 401 on every Admin endpoint: usage, cost and spend limits need an Admin or organization-scoped key; NIM's credits endpoint is 403; Google's balance is only in Cloud Billing). So the service keeps its own ledger and budgets.
 
