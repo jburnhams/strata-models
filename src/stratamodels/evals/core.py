@@ -760,10 +760,38 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
                         load_s=r.load_s,
                         tokens_out=(r.output or {}).get("tokens_out"),
                         key=sk,
+                        **_stage_cost(r.output),
                     )
                 )
                 st["inp"][stage["into"]] = text
     return {k: ((None, st["err"]) if st["err"] else (st["inp"], st["trace"])) for k, st in state.items()}
+
+
+def _stage_cost(output):
+    """What a stage's answer says it cost, kept in the pipeline's trace so cost_usd adds every step: a cloud API's `cost_usd`, or the mark of a
+    subscription CLI or a recording (paid in quota, not dollars)."""
+    o = output if isinstance(output, dict) else {}
+    return {k: o[k] for k in ("cost_usd", "cli", "recorded") if o.get(k) is not None}
+
+
+def _with_stage_costs(engine, outputs):
+    """Pipeline outputs whose trace was saved before stages carried their cost (2026-11-14): each step's cost read from its own cached row, so
+    an old run's report counts the cloud stage without running anything again."""
+    missing = {
+        t["key"]
+        for o in outputs
+        if isinstance(o, dict)
+        for t in o.get("pipeline") or []
+        if isinstance(t, dict) and t.get("key") and not any(k in t for k in ("cost_usd", "cli", "recorded"))
+    }
+    if not missing:
+        return outputs
+    rows = cached(engine, missing)
+    fill = lambda t: {**t, **_stage_cost(rows[t["key"]].output)} if t.get("key") in rows else t
+    return [
+        {**o, "pipeline": [fill(t) for t in o["pipeline"]]} if isinstance(o, dict) and o.get("pipeline") else o
+        for o in outputs
+    ]
 
 
 def cached(engine, keys):
@@ -1166,7 +1194,11 @@ def outputs_for(spec, engine, dataset=None):
     for c in spec.candidates:
         keys = [result_key(spec, c, it) for it in ds.items]
         have = cached(engine, keys)
-        out[c.name] = [(scored_view(spec, have[k].output), have[k].error) if k in have else None for k in keys]
+        views = _with_stage_costs(engine, [have[k].output if k in have else None for k in keys]) if c.stages else None
+        out[c.name] = [
+            (scored_view(spec, views[i] if views is not None else have[k].output), have[k].error) if k in have else None
+            for i, k in enumerate(keys)
+        ]
         runs[c.name] = [dict(run_s=have[k].run_s, load_s=have[k].load_s) if k in have else None for k in keys]
     return ds, out, runs
 

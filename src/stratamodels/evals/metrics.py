@@ -11,6 +11,7 @@ job counts as wrong for binary metrics and as all errors for ratios, never silen
 
 import collections
 import dataclasses
+import functools
 import json
 import math
 import re
@@ -561,6 +562,251 @@ AUDIO_METRICS = [
 ]
 
 
+# ---- rebuilt pages (page-build and the readers that fill its page description: reference.page is the cleaned page, as a description) ------
+def _page_ref(item):
+    return (item.get("reference") or {}).get("page")
+
+
+def _page_out(output):
+    return output.get("page") if isinstance(output, dict) and isinstance(output.get("page"), dict) else None
+
+
+def _xyxy(box):
+    x, y, w, h = (float(v) for v in box)
+    return [x, y, x + w, y + h]
+
+
+def _area(b):
+    return (b[2] - b[0]) * (b[3] - b[1])
+
+
+def _pieces(whole, parts, min_share=0.1):
+    """Indices of the `parts` that lie mostly inside `whole` (over half of each inside) and are not slivers of it (at least `min_share` of
+    its area): two or more such parts are `whole` split, or, read the other way, merged into it."""
+    w = _xyxy(whole["box"])
+    out = []
+    for k, p in enumerate(parts):
+        b = _xyxy(p["box"])
+        a = _area(b)
+        inter = max(0.0, min(w[2], b[2]) - max(w[0], b[0])) * max(0.0, min(w[3], b[3]) - max(w[1], b[1]))
+        if a > 0 and inter / a > 0.5 and a >= min_share * _area(w):
+            out.append(k)
+    return out
+
+
+def match_boxes(ref, got, min_iou=0.5):
+    """Pairs (i, j) of reference and output parts (each a dict with an [x, y, w, h] `box`) that are the same part: greedily by best IoU first,
+    each used once, at least `min_iou`. A reference part the output split (two or more output parts mostly inside it) and an output part that
+    merged reference parts match nothing, whatever their IoU: an even split has IoU 0.5 with each half, an uneven one more, and either would
+    otherwise be scored as a found block when it is the segmentation error these metrics measure."""
+    split = {i for i, r in enumerate(ref) if len(_pieces(r, got)) > 1}
+    merged = {j for j, g in enumerate(got) if len(_pieces(g, ref)) > 1}
+    scored = sorted(
+        (
+            (iou(_xyxy(r["box"]), _xyxy(g["box"])), i, j)
+            for i, r in enumerate(ref)
+            if i not in split
+            for j, g in enumerate(got)
+            if j not in merged
+        ),
+        reverse=True,
+    )
+    used_r, used_g, out = set(), set(), []
+    for v, i, j in scored:
+        if v < min_iou:
+            break
+        if i not in used_r and j not in used_g:
+            used_r.add(i)
+            used_g.add(j)
+            out.append((i, j))
+    return sorted(out)
+
+
+def _parts_f1(key):
+    def score(item, output, error):
+        ref = _page_ref(item)
+        if ref is None:
+            return None
+        r = ref.get(key) or []
+        g = [] if error else (_page_out(output) or {}).get(key) or []
+        if not r and not g:
+            return None  # nothing to find and nothing found: says nothing about the reader
+        return 2 * len(match_boxes(r, g)) / (len(r) + len(g))
+
+    return score
+
+
+def _matched_blocks(item, output, error):
+    ref, got = _page_ref(item), None if error else _page_out(output)
+    if ref is None or got is None:
+        return None
+    r, g = ref.get("blocks") or [], got.get("blocks") or []
+    return [(r[i], g[j], i, j) for i, j in match_boxes(r, g)]
+
+
+def _role_acc(item, output, error):
+    m = _matched_blocks(item, output, error)
+    if not m:
+        return None
+    return sum((a.get("role") or "body") == (b.get("role") or "body") for a, b, _, _ in m) / len(m)
+
+
+def _reading_rank(blocks):
+    """Each block's place in reading order, as strata_python.pages reads it: numbered blocks by number, then the rest as listed."""
+    idx = sorted(range(len(blocks)), key=lambda k: (blocks[k].get("order") is None, blocks[k].get("order") or 0, k))
+    return {k: n for n, k in enumerate(idx)}
+
+
+def _order_tau(item, output, error):
+    m = _matched_blocks(item, output, error)
+    if not m or len(m) < 2:
+        return None
+    ref, got = _page_ref(item)["blocks"], _page_out(output)["blocks"]
+    rr, gr = _reading_rank(ref), _reading_rank(got)
+    pairs = [(rr[i], gr[j]) for _, _, i, j in m]
+    s = sum(np.sign(a[0] - b[0]) * np.sign(a[1] - b[1]) for k, a in enumerate(pairs) for b in pairs[k + 1 :])
+    return float(s) / (len(pairs) * (len(pairs) - 1) / 2)  # Kendall's tau (no ties: ranks are distinct)
+
+
+@functools.lru_cache(maxsize=64)
+def _page_scan_ink(image, boxes):
+    """(the scan's ink, the reference text blocks as a mask, dpi) for page_ink_f1: the page binarised as the font eval does (not deskewed: a
+    rebuild draws in the scan's own pixels), and the union of the cleaned page's text blocks (4 px around), so borders, rules, pictures, library
+    stamps and show-through from the next leaf count for no candidate."""
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    im = Image.open(image)
+    found = im.info.get("dpi")
+    dpi = round(float(found[0]), 1) if found and found[0] > 1 else 300.0
+    full, _ = INK.binarise(im, dpi, deskew=False)
+    mask = np.zeros_like(full)
+    for x, y, w, h in boxes:
+        mask |= INK.box_mask(full.shape, [x - 4, y - 4, w + 8, h + 8])
+    return full, mask, dpi
+
+
+def _page_ink_f1(item, output, error):
+    """F1 of the rebuilt page's ink (page-build's raster at the scan's dpi) against the scan's within the reference text blocks
+    (evals/ink.py): how closely the PDF's text lands on the print, whatever the reader got right about the layout."""
+    ref = _page_ref(item)
+    image = (item.get("input") or {}).get("image")
+    if ref is None or not image or not ref.get("blocks"):
+        return None
+    if error or not isinstance(output, dict) or not output.get("png"):
+        return 0.0 if error else None
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    boxes = tuple(tuple(float(v) for v in b["box"]) for b in ref["blocks"])
+    try:
+        scan, mask, dpi = _page_scan_ink(image, boxes)
+        got = np.asarray(Image.open(output["png"]).convert("L")) < 128
+    except (OSError, ValueError, TypeError):
+        return None
+    if got.shape != scan.shape:
+        return 0.0  # a page drawn at another size lands on none of the print
+    return INK.ink_f1(scan, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
+
+
+# ---- fonts (role font-match) ----------------------------------------------------------------------------------------------------------
+@functools.lru_cache(maxsize=256)
+def _scan_ink(image, ocr):
+    """(the item's ink, the area of its words) for ink_f1: the picture binarised as runtimes/fontfit.py does, and the union of Tesseract's
+    word boxes (3 px around), so rules, ornaments and specks outside the words count for no candidate."""
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    im = Image.open(image)
+    found = im.info.get("dpi")
+    dpi = float(found[0]) if found and found[0] > 1 else 300.0
+    full, _ = INK.binarise(im, dpi, deskew=False)
+    mask = np.zeros_like(full)
+    try:
+        with open(ocr, encoding="utf8") as f:
+            lines = json.load(f).get("lines") or []
+    except (OSError, ValueError, TypeError):
+        lines = []
+    for ln in lines:
+        for w in ln.get("words") or []:
+            x, y, bw, bh = w["box"]
+            mask |= INK.box_mask(full.shape, [x - 3, y - 3, bw + 6, bh + 6])
+    return full, (mask if mask.any() else None), dpi
+
+
+def _ink_f1(item, output, error):
+    """F1 of the rendering's ink against the scan's within the words (evals/ink.py), measured here from the two pictures, not taken from the
+    runtime's own score: every candidate is held to the same reading of the scan."""
+    if error or not isinstance(output, dict) or not output.get("path"):
+        return 0.0 if error else None
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    inp = item.get("input") or {}
+    try:
+        ref, mask, dpi = _scan_ink(inp.get("image"), inp.get("ocr"))
+        got = np.asarray(Image.open(output["path"]).convert("L")) < 128
+    except (OSError, ValueError, TypeError):
+        return None
+    if got.shape != ref.shape:
+        return 0.0
+    return INK.ink_f1(ref, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
+
+
+def _ref_classes(item):
+    r = item.get("reference") or {}
+    return list(r.get("classes") or ([r["class"]] if r.get("class") else []))
+
+
+def _font_class_hit(item, output, error):
+    want = _ref_classes(item)
+    if not want:
+        return None
+    return False if error or not isinstance(output, dict) else output.get("class") in want
+
+
+def _font_class_close(item, output, error):
+    from stratamodels.runtimes.fontfit import closeness
+
+    want = _ref_classes(item)
+    if not want:
+        return None
+    if error or not isinstance(output, dict):
+        return 0.0
+    return max(closeness(output.get("class"), c) for c in want)
+
+
+def _font_face(n):
+    def score(item, output, error):
+        want = (item.get("reference") or {}).get("face")
+        if not want:
+            return None
+        if error or not isinstance(output, dict):
+            return False
+        ranked = [f.get("face") for f in output.get("faces") or []] or [output.get("face")]
+        return want in ranked[:n] if n > 1 else output.get("face") == want
+
+    return score
+
+
+def _font_style(item, output, error):
+    want = (item.get("reference") or {}).get("style")
+    if not want:
+        return None
+    return False if error or not isinstance(output, dict) else output.get("style") == want
+
+
+def _font_size_err(item, output, error):
+    want = (item.get("reference") or {}).get("size_pt")
+    if not want or error or not isinstance(output, dict) or not output.get("size_pt"):
+        return None
+    return abs(float(output["size_pt"]) - float(want)) / float(want)
+
+
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error):
     """The job's run time; for outputs recorded elsewhere (runtime `recorded`: a replay takes no time) the time they took when made, if it
@@ -577,14 +823,21 @@ def _latency(item, output, error):
 
 def _cost(item, output, error):
     """US dollars the item cost: a cloud API model's `cost_usd` (from the ledger's price, runtimes/cloud.py), 0 for a model run here (its cost
-    is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item."""
+    is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item. A pipeline adds
+    the cost of each step in its trace."""
     if error or not isinstance(output, dict):
         return None
-    if isinstance(output.get("cost_usd"), (int, float)):
-        return float(output["cost_usd"])
-    if output.get("recorded") or output.get("cli"):
-        return None
-    return 0.0
+    # a pipeline's steps (a cloud model's layout, then a local drawing) each cost what their answer says: the item cost all of them
+    steps = [t for t in output.get("pipeline") or [] if isinstance(t, dict)][
+        :-1
+    ]  # the last entry is the candidate's own job: `output` itself
+    total = 0.0
+    for o in [*steps, output]:
+        if isinstance(o.get("cost_usd"), (int, float)):
+            total += float(o["cost_usd"])
+        elif o.get("recorded") or o.get("cli"):
+            return None
+    return total
 
 
 def _exact(item, output, error):
@@ -732,6 +985,46 @@ METRICS = {
         ),
         Metric("face_found", "binary", "higher", "The labelled face was detected (IoU 0.5)", "%", _face_found),
         Metric(
+            "block_f1",
+            "mean",
+            "higher",
+            "Text blocks found where the cleaned page has them: F1 of blocks matched at IoU 0.5 (a merged or split block matches nothing)",
+            "%",
+            _parts_f1("blocks"),
+        ),
+        Metric(
+            "figure_f1",
+            "mean",
+            "higher",
+            "Pictures found where the cleaned page has them: F1 of figures matched at IoU 0.5",
+            "%",
+            _parts_f1("figures"),
+        ),
+        Metric(
+            "role_acc",
+            "mean",
+            "higher",
+            "Of the blocks found, the share given the right role (body, heading, caption, footnote, running head, folio...)",
+            "%",
+            _role_acc,
+        ),
+        Metric(
+            "order_tau",
+            "mean",
+            "higher",
+            "Reading order of the blocks found against the cleaned page's: Kendall's tau (1 the same order, -1 reversed)",
+            "",
+            _order_tau,
+        ),
+        Metric(
+            "page_ink_f1",
+            "mean",
+            "higher",
+            "The rebuilt page's ink against the scan's within the page's text blocks: F1 with a pixel or two of tolerance (evals/ink.py)",
+            "%",
+            _page_ink_f1,
+        ),
+        Metric(
             "verification_auc",
             "dataset",
             "higher",
@@ -776,6 +1069,57 @@ METRICS = {
             "exact_match", "binary", "higher", "The answer equals the reference answer after normalise()", "%", _exact
         ),
         Metric("parsed", "binary", "higher", "The output is valid JSON", "%", _parsed),
+        Metric(
+            "ink_f1",
+            "mean",
+            "higher",
+            "F1 of the fitted text's ink against the scan's within the words, a pixel or two of tolerance (evals/ink.py): how closely the face, size, width and weight reproduce the print; needs no reference",
+            "",
+            _ink_f1,
+        ),
+        Metric(
+            "font_class",
+            "binary",
+            "higher",
+            "The face's class (old-style, modern, clarendon...) is one the reference accepts",
+            "%",
+            _font_class_hit,
+        ),
+        Metric(
+            "font_close",
+            "mean",
+            "higher",
+            "Closeness of the face's class to the reference's: 1 the same, 0.5 a neighbouring class (old-style/transitional, modern/fat-face, clarendon/slab...), 0 otherwise",
+            "",
+            _font_class_close,
+        ),
+        Metric(
+            "font_top1",
+            "binary",
+            "higher",
+            "The face is the reference face (synthetic items, whose face is known)",
+            "%",
+            _font_face(1),
+        ),
+        Metric(
+            "font_top3", "binary", "higher", "The reference face is among the three best ranked", "%", _font_face(3)
+        ),
+        Metric(
+            "font_style",
+            "binary",
+            "higher",
+            "The main style (roman, italic, bold, small capitals) is the reference's",
+            "%",
+            _font_style,
+        ),
+        Metric(
+            "font_size_err",
+            "mean",
+            "lower",
+            "Relative error of the size in points (synthetic items)",
+            "%",
+            _font_size_err,
+        ),
         Metric("failed", "binary", "lower", "The job failed", "%", _failed),
         Metric(
             "peak_vram_gb",

@@ -1,0 +1,137 @@
+name = "font-match"
+question = "Which face, size, width and weight reproduce a scanned block of 19th-century type most closely, and does a vision model's shortlist find it as well as trying every face, in less time?"
+role = "font-match"
+dataset = "font-match"           # scripts/evals/font_match.py: 38 real blocks of Ward 1874 and Collier 1828 (class and style labelled), 30 synthetic blocks set in a known face and printed badly
+metrics = ["ink_f1", "font_close", "font_class", "font_top1", "font_top3", "font_style", "font_size_err", "latency_s", "cost_usd", "failed"]
+judge = true                     # blind: which rendering looks more like the scan's type (the Judge tab shows the block, then X and Y)
+similarity = "image"
+
+[decision]
+primary = "ink_f1"               # needs no reference, so it is the only score the real blocks (faces that exist in no font file) can have
+baseline = "naive"               # what a rebuild does without this role: Tesseract's boxes in Times (Tinos), each word stretched to its box
+min_effect = 0.02
+guards = { failed = 1.0 }
+# The fit maximises ink agreement, so ink_f1 rewards fitting as such: compare the fitted candidates with each other on it (shortlist vs every
+# face), and read font_top1/top3 (synthetic: is it the right face) and font_close (real: is it the right kind of type) beside it. A shortlist
+# that loses no ink_f1 and keeps font_top3 against `exhaustive` at a fraction of latency_s is the one to adopt.
+
+# ---- without a model ---------------------------------------------------------------------------------------------------------------------------
+[[candidates]]
+name = "naive"
+model = "fontfit"
+params = { mode = "naive" }
+
+[[candidates]]
+name = "exhaustive"
+model = "fontfit"
+params = { mode = "fit" }        # every face of the catalogue: a quick fit of each, the full fit of the best 6
+note = "the upper bound a shortlist should match: about a minute a block on one core"
+
+# ---- a vision model's shortlist, then the fit -----------------------------------------------------------------------------------------------
+[[candidates]]
+name = "qwen-fit"
+model = "fontfit"
+params = { mode = "fit" }
+
+[[candidates.stages]]
+role = "vision-language"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400, temperature = 0.0 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "gemma-fit"
+model = "fontfit"
+params = { mode = "fit" }
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemma-4-12b-vl"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400, temperature = 0.0 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "flash-fit"
+model = "fontfit"
+params = { mode = "fit" }
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemini-3.8-flash-api"   # the free key first
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 4096 }   # Flash thinks first: at 400 every answer stopped at MAX_TOKENS after ~40 characters
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "haiku-fit"
+model = "fontfit"
+params = { mode = "fit" }
+items = 20                       # a cheap cloud model on a sample (well under a cent a block)
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+# ---- the shortlist alone (its first face, sized from the measured x-height, no search): what the fit adds -----------------------------------
+[[candidates]]
+name = "qwen-only"
+model = "fontfit"
+params = { mode = "measure" }
+
+[[candidates.stages]]
+role = "vision-language"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400, temperature = 0.0 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "flash-only"
+model = "fontfit"
+params = { mode = "measure" }
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemini-3.8-flash-api"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 4096 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+# ---- Model judges: can a model tell which rendering matches the print? -------------------------------------------------------------------------
+# Each sees the scanned block, then two renderings of its words (black on white, same size), blind and without the labels, every candidate
+# against the baseline. The analysis scores each judge against ink_f1 (the right answer on a pair is the rendering with more ink in common).
+[[judges]]
+name = "qwen"
+kind = "vision"
+pairs = "baseline"
+reference = false
+criteria = "Picture 1 is a block of old printed type. X and Y are the same words re-set in a modern font, to rebuild the page. Prefer the one whose typeface looks more like the printed one: the letter shapes, the contrast between thick and thin strokes, the serifs, the width, the weight, and the size and position of the letters. Ignore paper colour, specks and stains."
+
+[[judges]]
+name = "gemma"
+kind = "vision"
+model = "gemma-4-12b-vl"
+pairs = "baseline"
+reference = false
+criteria = "Picture 1 is a block of old printed type. X and Y are the same words re-set in a modern font, to rebuild the page. Prefer the one whose typeface looks more like the printed one: the letter shapes, the contrast between thick and thin strokes, the serifs, the width, the weight, and the size and position of the letters. Ignore paper colour, specks and stains."
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"
+model = "gemini-3.8-flash-low"
+kind = "vision"
+pairs = "baseline"
+reference = false
+limit = 60
+criteria = "Picture 1 is a block of old printed type. X and Y are the same words re-set in a modern font, to rebuild the page. Prefer the one whose typeface looks more like the printed one: the letter shapes, the contrast between thick and thin strokes, the serifs, the width, the weight, and the size and position of the letters. Ignore paper colour, specks and stains."
