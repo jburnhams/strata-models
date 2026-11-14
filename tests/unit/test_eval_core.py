@@ -558,3 +558,37 @@ def test_recover_takes_outputs_from_jobs_that_already_finished(setup, scheduler,
         ) == dict(ran=0, cached=0, failed=0, recovered=3)  # found on the variant, not rerun
     finally:
         stop.set()
+
+
+def test_recover_waits_on_a_job_left_queued_by_a_run_a_restart_cut_short(setup, scheduler, engine):
+    # 2026-11-14: after a restart the queue still held the lost run's FlashVSR+ jobs, and the resumed run queued copies of them
+    s = C.load_spec("fake-asr")
+    c = s.candidate("base")
+    it = C.load_dataset(s.dataset).items[0]
+    left = scheduler.submit(s.role, C.job_params(s, c, it), "evals", "low", c.model, c.options)[
+        "id"
+    ]  # queued by the lost run
+    assert C.pending_job(engine, s.role, c.model, C.job_params(s, c, it), c.options) == left
+    assert C.pending_job(engine, s.role, c.model, dict(C.job_params(s, c, it), other=1), c.options) is None
+
+    started = []
+
+    class NoCopies(C.SchedulerExecutor):
+        def submit(self, *a):
+            raise AssertionError("queued a copy of a job that was already queued")
+
+        def wait(self, job_id):
+            if (
+                not started
+            ):  # the service comes back only now: the leftover job is still queued when the run looks for it
+                started.append(scheduler.start())
+            return super().wait(job_id)
+
+    try:
+        r = C.run(s, engine, NoCopies(scheduler), candidates=["base"], limit=1, log=lambda m: None, recover=True)
+        assert r == dict(ran=1, cached=0, failed=0, recovered=0)
+        assert C.cached(engine, {C.result_key(s, c, it): it})
+        assert C.done_job(engine, s.role, c.model, C.job_params(s, c, it), c.options)["id"] == left
+    finally:
+        for st in started:
+            st.set()
