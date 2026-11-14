@@ -9,6 +9,13 @@ Trial on omarchy (scripts/evals/font_match_trial.py, 36 real and 29 synthetic bl
 - `fetch` wrote every download to `<face>.ttf.part`, so parallel fits fetching the same face collided (52 failed fits at 6 jobs): each writer now has its own temporary name.
 - `parse_candidates` takes the closest id for a near miss (gemma wrote `libra-bodoni` for libre-bodoni in 26 of 65 answers).
 
+**Page rebuild: the `page-layout` eval, ten labelled pages and the page ink score (#67, branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py`: a third input, `layout` (a vision model's reading, preset `page-layout-v1`: boxes in thousandths of the page, blocks in reading order, lines without boxes, figures), drawn in the picture's pixels; `page`, `ocr` and `layout` each also come as JSON text (a model's answer, code fences allowed) or a JSON file's path. The raster is put back on the scan's own size (pdfium rounds a page's size in points up, so a 2660 px scan at 500 dpi came back 2661 wide and matched none of its ink), and the answer names it as `path` too, for the Judge and Outputs tabs.
+- `evals/metrics.py`: `page_ink_f1`, the rebuilt page's raster against the scan within the reference text blocks (evals/ink.py).
+- Preset `page-layout-v1` (**new**, with a schema); `scripts/evals/page_layout.py` and `scripts/evals/page_layout/pages.toml` (**new**: ten pages of Ward 1874 and Collier 1828 from archive.org, layout labelled by Claude, checked by eye); spec `evals/specs/page-layout.toml` (**new**: Tesseract's blocks against qwen, gemma, Gemini Flash and Haiku layouts).
+- Baseline (cloud container, 2026-11-14): Tesseract's blocks score block_f1 77 % [65, 88], role_acc 40 % (every block is body), order_tau 0.96, figure_f1 0, page_ink_f1 39 % on average.
+- Tests: layout input, JSON-text and file params, raster size, `page_ink_f1`, and a check that every labelled page is drawable and matches itself.
+
 **Font identification: role `font-match`, a catalogue of period faces, and its eval (branch `claude/project-thread-01gj43`)**
 Jonathan: font identification is a skill of its own; a vision model suggests candidates, then an optimisation finds the exact face and settings. The page rebuild (strata-scan: real text in a matching face) consumes it.
 

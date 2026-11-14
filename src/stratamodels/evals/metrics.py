@@ -668,6 +668,49 @@ def _order_tau(item, output, error):
     return float(s) / (len(pairs) * (len(pairs) - 1) / 2)  # Kendall's tau (no ties: ranks are distinct)
 
 
+@functools.lru_cache(maxsize=64)
+def _page_scan_ink(image, boxes):
+    """(the scan's ink, the reference text blocks as a mask, dpi) for page_ink_f1: the page binarised as the font eval does (not deskewed: a
+    rebuild draws in the scan's own pixels), and the union of the cleaned page's text blocks (4 px around), so borders, rules, pictures, library
+    stamps and show-through from the next leaf count for no candidate."""
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    im = Image.open(image)
+    found = im.info.get("dpi")
+    dpi = round(float(found[0]), 1) if found and found[0] > 1 else 300.0
+    full, _ = INK.binarise(im, dpi, deskew=False)
+    mask = np.zeros_like(full)
+    for x, y, w, h in boxes:
+        mask |= INK.box_mask(full.shape, [x - 4, y - 4, w + 8, h + 8])
+    return full, mask, dpi
+
+
+def _page_ink_f1(item, output, error):
+    """F1 of the rebuilt page's ink (page-build's raster at the scan's dpi) against the scan's within the reference text blocks
+    (evals/ink.py): how closely the PDF's text lands on the print, whatever the reader got right about the layout."""
+    ref = _page_ref(item)
+    image = (item.get("input") or {}).get("image")
+    if ref is None or not image or not ref.get("blocks"):
+        return None
+    if error or not isinstance(output, dict) or not output.get("png"):
+        return 0.0 if error else None
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    boxes = tuple(tuple(float(v) for v in b["box"]) for b in ref["blocks"])
+    try:
+        scan, mask, dpi = _page_scan_ink(image, boxes)
+        got = np.asarray(Image.open(output["png"]).convert("L")) < 128
+    except (OSError, ValueError, TypeError):
+        return None
+    if got.shape != scan.shape:
+        return 0.0  # a page drawn at another size lands on none of the print
+    return INK.ink_f1(scan, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
+
+
 # ---- fonts (role font-match) ----------------------------------------------------------------------------------------------------------
 @functools.lru_cache(maxsize=256)
 def _scan_ink(image, ocr):
@@ -965,6 +1008,14 @@ METRICS = {
             "Reading order of the blocks found against the cleaned page's: Kendall's tau (1 the same order, -1 reversed)",
             "",
             _order_tau,
+        ),
+        Metric(
+            "page_ink_f1",
+            "mean",
+            "higher",
+            "The rebuilt page's ink against the scan's within the page's text blocks: F1 with a pixel or two of tolerance (evals/ink.py)",
+            "%",
+            _page_ink_f1,
         ),
         Metric(
             "verification_auc",

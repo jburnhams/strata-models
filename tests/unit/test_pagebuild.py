@@ -2,6 +2,7 @@
 synthetic descriptions, checked by what a reader of the PDF gets back (its text in order, its size, the raster beside it)."""
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -151,3 +152,104 @@ def test_an_upscaled_ocr_answer_keeps_its_pixels_and_scales_the_dpi(tmp_path):
     assert (page.width, page.height, page.dpi) == (600, 400, 150)
     with pytest.raises(RunError, match="not the same page"):
         pagebuild.page_of(dict(ocr=dict(OCR, height=600), image=str(pic)))
+
+
+# ---- a vision model's layout (preset page-layout-v1): boxes in thousandths, blocks in reading order, lines without boxes -------------------
+LAYOUT = dict(
+    blocks=[
+        dict(box=[100, 50, 700, 100], role="heading", lines=["PUNCH AND JUDY"]),
+        dict(
+            box=[100, 150, 900, 500],
+            role="body",
+            lines=["The Punch Puppet, has a big belly", "and a haunch on his back", " "],
+        ),
+        dict(box=[900, 950, 860, 980], role="folio", lines=[]),  # corners given the wrong way round: sorted
+    ],
+    figures=[dict(box=[400, 600, 600, 640], kind="ornament")],
+)
+
+
+def picture(tmp_path, size=(600, 400), dpi=150):
+    pic = tmp_path / "scan.png"
+    Image.new("L", size, 255).save(pic, dpi=(dpi, dpi))
+    return str(pic)
+
+
+def test_a_layout_is_drawn_in_the_pictures_pixels(tmp_path):
+    page = pagebuild.page_of(dict(layout=LAYOUT, image=picture(tmp_path)))
+    assert (page.width, page.height, page.dpi) == (600, 400, 150)
+    assert [b.role for b in page.blocks] == ["heading", "body", "folio"]
+    assert [b.order for b in page.blocks] == [0, 1, 2]
+    assert page.blocks[0].box == pytest.approx((60, 20, 360, 20))
+    assert page.blocks[2].box == pytest.approx((516, 380, 24, 12))
+    body = page.blocks[1].lines  # the empty line dropped, the block's height shared by the rest
+    assert [ln.text for ln in body] == ["The Punch Puppet, has a big belly", "and a haunch on his back"]
+    assert [ln.box[1] for ln in body] == pytest.approx([60, 130])
+    assert page.figures[0].kind == "ornament"
+    assert page.figures[0].box == pytest.approx((240, 240, 120, 16))
+
+
+def test_a_layout_as_a_models_answer_text(tmp_path):
+    pic = picture(tmp_path)
+    fenced = "```json\n" + json.dumps(LAYOUT) + "\n```"
+    want = pagebuild.page_of(dict(layout=LAYOUT, image=pic)).to_dict()
+    assert pagebuild.page_of(dict(layout=json.dumps(LAYOUT), image=pic)).to_dict() == want
+    assert pagebuild.page_of(dict(layout=fenced, image=pic)).to_dict() == want
+    # the item's own ocr answer is given too in the eval: the model's layout is what is drawn
+    assert pagebuild.page_of(dict(layout=fenced, image=pic, ocr=OCR, dpi=150)).blocks[0].role == "heading"
+    r = pagebuild.run(handle(), dict(layout=fenced, image=pic, out=str(tmp_path / "l.pdf")))
+    assert r["text"].split()[:3] == ["PUNCH", "AND", "JUDY"]
+    assert r["path"] == r["png"]
+
+
+@pytest.mark.parametrize(
+    ("layout", "match"),
+    [
+        ("{not json", "not valid JSON"),
+        (dict(blocks=[dict(box=[0, 0, 10], role="body")]), "thousandths"),
+        (dict(blocks=[dict(box=[0, 0, 10, 10], role="sidebar")]), "bad layout"),
+        (dict(figures=[dict(box=[0, 0, 10, 10], kind="photo")]), "bad layout"),
+        ("no such answer", "no such layout"),
+    ],
+)
+def test_a_bad_layout_is_refused(tmp_path, layout, match):
+    with pytest.raises(RunError, match=match):
+        pagebuild.page_of(dict(layout=layout, image=picture(tmp_path)))
+
+
+def test_an_ocr_answer_from_a_file(tmp_path):
+    path = tmp_path / "scan.ocr.json"
+    path.write_text(json.dumps(OCR))
+    assert pagebuild.page_of(dict(ocr=str(path), dpi=150)).text == pagebuild.page_of(dict(ocr=OCR, dpi=150)).text
+
+
+def test_the_raster_has_the_scans_own_size(tmp_path):
+    # pdfium rounds a 2660 px page at 500 dpi (383.04 pt) up to 2661 px: the raster is put back on the scan's pixels for the ink metrics
+    page = dict(
+        width=2660,
+        height=4056,
+        dpi=500,
+        blocks=[
+            dict(box=[100, 100, 800, 80], lines=[dict(box=[100, 100, 800, 80], spans=[dict(text="WOODEN ACTORS")])])
+        ],
+    )
+    r = pagebuild.run(handle(), dict(page=page, out=str(tmp_path / "w.pdf")))
+    with Image.open(r["png"]) as im:
+        assert im.size == (2660, 4056)
+        assert im.getpixel((2659, 4055)) == 255  # padded with paper, not ink
+
+
+def test_the_layout_preset_carries_its_schema_and_the_spec_sends_it():
+    # `preset` (not `system_preset`) is what makes llama and the cloud runtimes send a preset's schema, so every vision stage must use it
+    import tomllib
+
+    from stratamodels.runtimes import llama
+
+    text, schema = llama.preset("page-layout-v1")
+    assert "thousandths" in text
+    assert schema["required"] == ["blocks", "figures"]
+    with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-layout.toml"), "rb") as f:
+        spec = tomllib.load(f)
+    stages = [s for c in spec["candidates"] for s in c.get("stages", [])]
+    assert len(stages) == 4
+    assert all(s["params"].get("preset") == "page-layout-v1" and "prompt" not in s["params"] for s in stages)
