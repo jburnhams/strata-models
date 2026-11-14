@@ -9,6 +9,10 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
   cpu_jobs        jobs for zero-VRAM models (recorded outputs, CPU models, cloud CLIs) that may run at once, beside the GPU's. Default: 4.
   whole_card_gb   a model or lease that needs more than this runs with the whole card to itself, the reserve ignored (to try models too big
                   to budget for, at their own risk). Default: 10.0.
+  claude_budget_usd, gemini_budget_usd   what a cloud API key may spend per period (spend.py); a call whose worst case does not fit what is
+                  left is refused. Default: 0 (nothing runs until a budget is set).
+  claude_rollover, gemini_rollover       YYYY-MM-DD: a day the budget starts again, repeated monthly on that day of the month. Unset: the
+                  budget is one pot that only goes down. (NVIDIA NIM is free and only rate-limited: no budget.)
 
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
 STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB. The database is chosen by omarchy-db:
@@ -25,6 +29,10 @@ DEFAULTS = dict(
     gpu_jobs="2",
     cpu_jobs="4",
     whole_card_gb="10.0",
+    claude_budget_usd="0",
+    claude_rollover="",
+    gemini_budget_usd="0",
+    gemini_rollover="",
 )
 ENV = dict(
     data_dir="STRATAMODELS_DATA",
@@ -33,7 +41,12 @@ ENV = dict(
     gpu_jobs="STRATAMODELS_GPU_JOBS",
     cpu_jobs="STRATAMODELS_CPU_JOBS",
     whole_card_gb="STRATAMODELS_WHOLE_CARD_GB",
+    claude_budget_usd="STRATAMODELS_CLAUDE_BUDGET_USD",
+    claude_rollover="STRATAMODELS_CLAUDE_ROLLOVER",
+    gemini_budget_usd="STRATAMODELS_GEMINI_BUDGET_USD",
+    gemini_rollover="STRATAMODELS_GEMINI_ROLLOVER",
 )
+BUDGETED = ("claude", "gemini")  # the keys that cost money
 KNOWN = tuple(DEFAULTS)
 
 
@@ -120,6 +133,10 @@ def save(changes):
             _gb(k, v)  # refuse a bad number before it is written
         if k in ("gpu_jobs", "cpu_jobs") and v is not None:
             v = _slots(k, v)
+        if k.endswith("_budget_usd") and v is not None:
+            v = _usd(k, v)
+        if k.endswith("_rollover") and v is not None:
+            v = _date(k, v) or None  # "" clears it
         if v is None:
             d.pop(k, None)
         else:
@@ -216,6 +233,41 @@ def jobs(key):
         return int(DEFAULTS[key])
 
 
+def _usd(key, v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number of US dollars, not {v!r}")
+    if not 0 <= f <= 100000:
+        raise ValueError(f"{key} must be between 0 and 100000")
+    return f
+
+
+def _date(key, v):
+    import datetime
+
+    v = str(v).strip()
+    if not v:
+        return ""
+    try:
+        return datetime.date.fromisoformat(v).isoformat()
+    except ValueError:
+        raise ValueError(f"{key} must be a date, YYYY-MM-DD, not {v!r}")
+
+
+def budget(provider):
+    """(USD a key may spend per period, its rollover date YYYY-MM-DD or None)."""
+    try:
+        usd = _usd(f"{provider}_budget_usd", _raw(f"{provider}_budget_usd"))
+    except ValueError:
+        usd = 0.0
+    try:
+        day = _date(f"{provider}_rollover", _raw(f"{provider}_rollover")) or None
+    except ValueError:
+        day = None
+    return usd, day
+
+
 def all_settings():
     return dict(
         data_dir=data_dir(),
@@ -224,4 +276,5 @@ def all_settings():
         gpu_jobs=jobs("gpu_jobs"),
         cpu_jobs=jobs("cpu_jobs"),
         whole_card_gb=whole_card_gb(),
+        **{k: v for p in BUDGETED for k, v in zip((f"{p}_budget_usd", f"{p}_rollover"), budget(p))},
     )

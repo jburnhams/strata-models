@@ -97,3 +97,27 @@ def test_the_file_is_imported_once_so_settings_reset_to_defaults_stay_reset():
     settings.bind(e)
     assert settings.load() == {} and settings.vram_reserve_gb() == 1.0
     settings.bind(None)
+
+
+def test_budgets_and_rollovers(monkeypatch):
+    assert settings.budget("claude") == (0.0, None)
+    assert settings.save(dict(claude_budget_usd="100", claude_rollover=" 2026-12-08 ")) == dict(
+        claude_budget_usd="100.0", claude_rollover="2026-12-08"
+    )
+    assert (
+        settings.budget("claude") == (100.0, "2026-12-08")
+        and settings.all_settings()["claude_rollover"] == "2026-12-08"
+    )
+    assert "claude_rollover" not in settings.save(dict(claude_rollover=""))
+    with pytest.raises(ValueError, match="US dollars"):
+        settings.save(dict(gemini_budget_usd="ten"))
+    with pytest.raises(ValueError, match="between 0 and 100000"):
+        settings.save(dict(gemini_budget_usd=-1))
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        settings.save(dict(gemini_rollover="1st"))
+    monkeypatch.setenv("STRATAMODELS_GEMINI_BUDGET_USD", "lots")
+    monkeypatch.setenv("STRATAMODELS_GEMINI_ROLLOVER", "soon")
+    assert settings.budget("gemini") == (0.0, None)
+    monkeypatch.setenv("STRATAMODELS_GEMINI_BUDGET_USD", "10")
+    monkeypatch.setenv("STRATAMODELS_GEMINI_ROLLOVER", "2026-12-01")
+    assert settings.budget("gemini") == (10.0, "2026-12-01")

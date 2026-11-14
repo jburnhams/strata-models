@@ -1,7 +1,7 @@
 // The service as the web app sees it: fixtures plus msw handlers for every endpoint the app calls (one without a handler fails the test).
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import type { Analysis, Evals, Job, Model, Pair, Registry, RunStatus, Settings, Status, Usage } from '../../src/api'
+import type { Analysis, ApiCall, Evals, Job, Model, Pair, ProviderState, Registry, RunStatus, Settings, Spend, SpendSeries, Status, Usage } from '../../src/api'
 
 export const NOW = 1_800_000_000
 const job = (o: Partial<Job>): Job => ({ id: 1, kind: 'run', app: 'bright-horizons', priority: 'batch', status: 'done', submitted_at: NOW - 60, role: 'faces', model: 'buffalo_l', note: null, params: { path: '/p/a.jpg' }, error: null, vram_gb: null, ttl_s: null, started_at: NOW - 59, finished_at: NOW - 58, heartbeat_at: null, load_s: 0.7, run_s: 0.05, wait_s: 1, ...o })
@@ -12,7 +12,7 @@ export const fixtures = {
     resident: [{ model: 'whisper-large-v3', runtime: 'faster-whisper', roles: ['transcribe'], vram_mb: 3720, load_s: 2.9, loaded_at: NOW - 600, last_used: NOW - 5, jobs: 12 }, { model: 'buffalo_l', runtime: 'insightface', roles: ['faces'], vram_mb: 580, load_s: 0.7, loaded_at: NOW - 900, last_used: NOW - 300, jobs: 300 }],
     current: job({ id: 41, role: 'transcribe', model: 'whisper-large-v3', app: 'strata-360', status: 'running', finished_at: null, run_s: null }),
     lease: null,
-    queued: [job({ id: 42, status: 'queued', started_at: null, finished_at: null }), job({ id: 43, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'queued', priority: 'interactive', started_at: null, finished_at: null })],
+    queued: [job({ id: 42, status: 'queued', priority: 'low', started_at: null, finished_at: null }), job({ id: 43, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'queued', priority: 'interactive', started_at: null, finished_at: null })],
     events: [{ at: NOW - 600, text: 'loaded whisper-large-v3 in 2.9 s (3.6 GB)' }],
   }),
   registry: (): Registry => ({
@@ -26,6 +26,27 @@ export const fixtures = {
   }),
   jobs: (): Job[] => [job({ id: 3, status: 'failed', error: 'no such image: /p/x.jpg', run_s: null }), job({ id: 2, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'running', finished_at: null }), job({ id: 1 })],
   usage: (): Usage => ({ hours: 24, rows: [{ app: 'bright-horizons', kind: 'run', role: 'faces', jobs: 300, failed: 1, gpu_s: 15 }, { app: 'strata-stills', kind: 'lease', role: null, jobs: 2, failed: 0, gpu_s: 600 }] }),
+}
+const provider = (o: Partial<ProviderState>): ProviderState => ({ provider: 'claude', label: 'Claude API', budgeted: true, unit: 'usd', budget: 100, rollover: '2027-01-08', period_start: NOW - 86400 * 6, next_rollover: NOW + 86400 * 25, spent: 62.5, calls: 1200, reserved: 0, left: 37.5, used_share: 0.625, warn: 0.5, ...o })
+const call = (o: Partial<ApiCall>): ApiCall => ({ id: 1, at: NOW - 120, provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', job_id: 7, tokens_in: 900, tokens_out: 40, cache_read: 100, cache_write: 0, cost_usd: 0.00012, ok: true, error: null, seconds: 0.8, model_key: 'claude-haiku-5-5-api', finish: 'end_turn', ...o })
+export const spendFixtures = {
+  spend: (): Spend => ({
+    providers: [
+      provider({}),
+      provider({ provider: 'gemini', label: 'Google AI Studio (paid key)', budget: null, rollover: null, next_rollover: null, period_start: null, spent: 0, calls: 0, left: 0, used_share: null, warn: 1 }),
+      provider({ provider: 'gemini-free', label: 'Google AI Studio (free tier)', budgeted: false, budget: null, rollover: null, next_rollover: null, period_start: null, spent: 0, calls: 30, left: null, used_share: null, warn: null }),
+      provider({ provider: 'nim', label: 'NVIDIA NIM (free)', budgeted: false, budget: null, rollover: null, next_rollover: null, period_start: null, spent: 0, calls: 5, left: null, used_share: null, warn: null }),
+    ],
+    keys: { claude: true, gemini: false, 'gemini-free': true, nim: true },
+    warn_at: [0.5, 0.8, 1],
+  }),
+  series: (days = 30): SpendSeries => {
+    const bucket = days <= 2 ? 3600 : 86400
+    const since = Math.floor((Date.now() / 1000 - days * 86400) / bucket) * bucket
+    return { since, bucket_s: bucket, points: [{ t: since + bucket, provider: 'claude', cost_usd: 1.5, calls: 10, failed: 1, tokens: 5000 }, { t: since + bucket, provider: 'nim', cost_usd: 0, calls: 4, failed: 0, tokens: 900 }], breakdown: [{ provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', calls: 10, failed: 1, tokens_in: 4000, tokens_out: 1000, cost_usd: 1.5 }, { provider: 'nim', model: 'nvidia/nemotron', app: null, calls: 4, failed: 0, tokens_in: 800, tokens_out: 100, cost_usd: 0 }], options: { models: ['claude-haiku-5-5', 'nvidia/nemotron'], apps: ['evals'] } }
+  },
+  calls: (): ApiCall[] => [call({ id: 3 }), call({ id: 2, provider: 'nim', model: 'nvidia/nemotron', app: null, job_id: null, ok: false, error: 'HTTP 429: slow down', cost_usd: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, seconds: null, finish: null, model_key: null })],
+  call: (id: number): ApiCall => ({ ...spendFixtures.calls().find(c => c.id === id)!, request: id === 3 ? { system: 'Be brief.', prompt: 'Describe the photo.', images: ['/p/a.jpg'], schema: { type: 'object' }, max_tokens: 512, effort: 'low' } : { prompt: 'hi' }, response: id === 3 ? '{"scene": "a beach"}' : null }),
 }
 const iv = (value: number, d = 0.01) => ({ value, low: value - d, high: value + d, n: 200 })
 const wer = { name: 'wer', shape: 'ratio', better: 'lower', description: 'Word error rate', unit: '%' } as const
@@ -64,8 +85,8 @@ export const evalFixtures = {
 
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1, gpu_jobs: 2, cpu_jobs: 4, whole_card_gb: 10 }
 
-export const mock = { settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
-export const resetMock = () => { mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }
+export const mock = { spend: spendFixtures.spend(), callPages: 1, settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
+export const resetMock = () => { mock.spend = spendFixtures.spend(); mock.callPages = 1; mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }
 
 export const handlers = [
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0', gpu: true })),
@@ -97,9 +118,21 @@ export const handlers = [
   http.get('/api/evals/:name/verdicts/:item', ({ params }) => HttpResponse.json({ item_id: params.item, judgments: [{ a: 'turbo', b: 'large-v3', winner: 'turbo', rater: 'qwen-text', judge: 'k1', at: 2, note: 'turbo keeps the last word', detail: { consistent: true }, a_key: 'a', b_key: 'b', current: true }, { a: 'turbo', b: 'large-v3', winner: 'large-v3', rater: 'qwen-text', judge: 'old', at: 1.5, note: 'an old judge on other answers', detail: null, a_key: 'z', b_key: 'b', current: false }, { a: 'turbo', b: 'large-v3', winner: 'tie', rater: 'jonathan', judge: null, at: 1, note: null, detail: null, a_key: 'a', b_key: 'b', current: true }] })),
   http.post('/api/evals/:name/judgments', async ({ request }) => { const b = (await request.json()) as { winner: string }; mock.calls.push(`judge ${b.winner}`); return HttpResponse.json({ ok: true, x: 'turbo', y: 'large-v3', winner: b.winner }, { status: 201 }) }),
   http.get('/api/evals/:name', ({ params }) => params.name === 'nope' ? HttpResponse.json({ detail: 'no experiment' }, { status: 404 }) : HttpResponse.json(mock.analysis)),
+  http.get('/api/spend', () => HttpResponse.json(mock.spend)),
+  http.get('/api/spend/series', ({ request }) => HttpResponse.json(spendFixtures.series(Number(new URL(request.url).searchParams.get('days'))))),
+  http.get('/api/spend/calls', ({ request }) => {
+    const q = new URL(request.url).searchParams
+    if (q.get('before')) return HttpResponse.json({ calls: [{ ...spendFixtures.calls()[0], id: 1, model: 'claude-sonnet-5-5' }], next: null })
+    const calls = spendFixtures.calls().filter(c => (!q.get('provider') || c.provider === q.get('provider')) && (!q.get('ok') || String(c.ok) === q.get('ok')))
+    return HttpResponse.json({ calls, next: mock.callPages > 1 && calls.length ? 2 : null })
+  }),
+  http.get('/api/spend/calls/:id', ({ params }) => HttpResponse.json(spendFixtures.call(Number(params.id)))),
   http.get('/api/settings', () => HttpResponse.json(mock.settings)),
   http.put('/api/settings', async ({ request }) => {
-    const body = (await request.json()) as Partial<Settings>
+    const body = (await request.json()) as Partial<Settings> & Record<string, unknown>
+    if (body.claude_budget_usd !== undefined) {
+      mock.spend = { ...mock.spend, providers: mock.spend.providers.map(p => p.provider === 'claude' ? { ...p, budget: Number(body.claude_budget_usd), rollover: String(body.claude_rollover || '') || null } : p) }
+    }
     if (body.models_dir && !body.models_dir.startsWith('/')) return HttpResponse.json({ detail: 'models_dir must be an absolute path' }, { status: 400 })
     mock.settings = { ...mock.settings, ...body }; return HttpResponse.json(mock.settings)
   }),

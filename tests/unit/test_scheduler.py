@@ -48,6 +48,20 @@ def test_interactive_goes_first_then_jobs_for_the_loaded_model(scheduler, clock)
     assert scheduler.step()["id"] == b2["id"]
 
 
+def test_low_waits_for_every_normal_and_high_job_and_the_old_names_still_work(scheduler, clock):
+    low = scheduler.submit("echo", {}, "evals", priority="low")
+    clock.t += 500  # however long it has waited: max_skip_s only reorders jobs of one priority
+    n = scheduler.submit("other", {}, "app", priority="batch")
+    h = scheduler.submit("other", {}, "app", priority="interactive")
+    assert (n["priority"], h["priority"]) == ("normal", "high")  # stored under the new names
+    assert [scheduler.step()["id"] for _ in range(3)] == [h["id"], n["id"], low["id"]]
+    old = scheduler.store.add(
+        kind="run", role="echo", model="small", app="a", priority="interactive"
+    )  # a row from before the rename
+    scheduler.submit("echo", {}, "b")
+    assert scheduler.step()["id"] == old["id"]
+
+
 def test_a_job_that_waited_too_long_is_not_skipped_for_the_loaded_model(scheduler, clock):
     scheduler.submit("echo", {}, "a")
     scheduler.step()
@@ -417,6 +431,16 @@ def _cloud(scheduler):
     scheduler.registry.models["cloud"] = Model(key="cloud", runtime="fake", name="", roles=("echo",), vram_gb=0.0)
 
 
+def test_low_waits_in_the_cpu_lane_too(scheduler):
+    _cloud(scheduler)
+    low = scheduler.submit("echo", {}, "evals", priority="low", model="cloud")
+    n = scheduler.submit("echo", {}, "app", model="cloud")
+    t = scheduler.dispatch()
+    assert (t["job"]["id"], t["lane"]) == (n["id"], "cpu")
+    scheduler.execute(t)
+    assert scheduler.dispatch()["job"]["id"] == low["id"]
+
+
 def test_a_cloud_job_runs_beside_a_gpu_job_and_through_an_exclusive_lease(scheduler):
     _cloud(scheduler)
     g = scheduler.submit("echo", {}, "a")
@@ -712,3 +736,40 @@ def test_a_lease_above_the_whole_card_size_gets_the_card_and_only_one_bigger_tha
     assert (
         r["id"] == huge["id"] and r["status"] == "failed" and r["error"] == "13 GB will never fit: the card has 12.0 GB"
     )
+
+
+def test_a_job_runs_inside_its_app_and_id_for_the_spend_ledger(scheduler, monkeypatch):
+    from stratamodels import spend
+    from stratamodels.runtimes import fake
+
+    seen = []
+    monkeypatch.setattr(fake, "run", lambda handle, params: seen.append(spend._job.get()) or {})
+    j = scheduler.submit("echo", {}, "bh")
+    scheduler.step()
+    assert seen == [("bh", j["id"])] and spend._job.get() == (None, None)
+
+
+def test_cost_per_task_from_the_ledger(scheduler, monkeypatch):
+    from stratamodels import spend
+    from stratamodels.runtimes import fake
+
+    spend.bind(scheduler.store)
+    monkeypatch.setattr(spend, "_reserved", {})
+
+    def run(handle, params):
+        for usd in params["usd"]:
+            spend.record(("nim", 0), "m", usd, tokens_in=10, tokens_out=4, model_key="small")
+        return {}
+
+    monkeypatch.setattr(fake, "run", run)
+    for usd in ([0.1, 0.2], [0.5]):
+        scheduler.submit("echo", dict(usd=usd), "evals")
+        scheduler.step()
+    spend.record(("nim", 0), "m", 9.0, model_key="small")  # no job: not a task
+    got = spend.per_task()
+    assert (
+        list(got) == [("echo", "small")] and got[("echo", "small")]["n"] == 2 and got[("echo", "small")]["failed"] == 0
+    )
+    assert abs(got[("echo", "small")]["usd"] - 0.4) < 1e-9 and got[("echo", "small")]["tokens_in"] == 15.0
+    spend.bind(None)
+    assert spend.per_task() == {}

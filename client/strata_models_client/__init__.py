@@ -64,7 +64,7 @@ def available(timeout=2.0):
         return False
 
 
-def submit(role, params, app, priority="batch", model=None, options=None):
+def submit(role, params, app, priority="normal", model=None, options=None):
     """Queue a job and return its row at once (poll with `wait`). `options` changes the model's load options (a variant loaded apart: evals)."""
     return _call(
         "POST",
@@ -95,12 +95,12 @@ def wait(job_id, timeout=None):
             raise TimeoutError(f"job {job_id} is still {j['status']}")
 
 
-def run(role, params, app, priority="batch", model=None, timeout=None):
-    """Run a model job and return its result (queued behind the GPU's other work; `interactive` goes ahead of `batch`)."""
+def run(role, params, app, priority="normal", model=None, timeout=None):
+    """Run a model job and return its result (queued behind the GPU's other work; priority `high` goes ahead of `normal` (the default), which goes ahead of `low`)."""
     return wait(submit(role, params, app, priority, model)["id"], timeout)
 
 
-def faces(path, app, priority="batch", model=None, **params):
+def faces(path, app, priority="normal", model=None, **params):
     """Faces in one image: params max_side, det_thresh, fields. Several images: path=None and `paths=[...]`, giving {'images': [...]}."""
     if path is not None:
         params["path"] = os.path.abspath(path)
@@ -109,7 +109,7 @@ def faces(path, app, priority="batch", model=None, **params):
     return run("faces", params, app, priority=priority, model=model)
 
 
-def transcribe(path, app, role="transcribe", priority="batch", model=None, **params):
+def transcribe(path, app, role="transcribe", priority="normal", model=None, **params):
     """Whisper on an audio or video file: params language, task, word_timestamps, vad_filter, beam_size, initial_prompt, clip=(start, end)."""
     params["path"] = os.path.abspath(path)
     if "clip" in params:
@@ -117,7 +117,7 @@ def transcribe(path, app, role="transcribe", priority="batch", model=None, **par
     return run(role, params, app, priority=priority, model=model)
 
 
-def ocr(path, app, priority="batch", model=None, **params):
+def ocr(path, app, priority="normal", model=None, **params):
     """Printed text from a page picture (role `ocr`): params lang ('eng', 'eng+fra'), psm (Tesseract's page segmentation), dpi, clean (steps that clean the page first, such as "flatten,sharpen": see runtimes/pageclean.py; boxes are then in the cleaned picture's pixels), pdf (a .pdf path
     to write as well: the picture with its text searchable). Returns {width, height, text, lines: [{text, box: [x, y, w, h], conf, block,
     words: [{text, box, conf}]}], engine, lang, seconds}; conf is 0-100."""
@@ -133,7 +133,7 @@ def role_model(role):
     return next((r["model"] for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
 
 
-def speak(text, app, priority="batch", model=None, **params):
+def speak(text, app, priority="normal", model=None, **params):
     """Speech from text (role `speak`): params voice (a preset name, or a reference recording's path for the cloning models), speed (1.0 = the
     model's own pace), instruct, language, seed. Without model and voice, the voice and settings the role's eval chose. Returns {path (a WAV on
     this machine, the service's copy: copy it if it must last), duration_s, sample_rate, seconds, engine, voice}."""
@@ -161,7 +161,7 @@ class Lease:
             _call("DELETE", f"/api/leases/{self.id}", timeout=10)
 
 
-def acquire(app, vram_gb=None, ttl_s=120, priority="batch", note=None, timeout=None):
+def acquire(app, vram_gb=None, ttl_s=120, priority="normal", note=None, timeout=None):
     """Ask for the GPU and wait until it is granted; returns a Lease (call `.release()`), TimeoutError after `timeout` (the request is withdrawn)."""
     j = _call(
         "POST",
@@ -186,7 +186,7 @@ def acquire(app, vram_gb=None, ttl_s=120, priority="batch", note=None, timeout=N
 
 
 @contextlib.contextmanager
-def gpu_lease(app, vram_gb=None, ttl_s=120, priority="batch", note=None, timeout=None, required=False):
+def gpu_lease(app, vram_gb=None, ttl_s=120, priority="normal", note=None, timeout=None, required=False):
     """`with gpu_lease('strata-stills', vram_gb=4):` 4 GB of the GPU are this app's for the block, and other work goes on in the rest (give the
     most this block will use); with vram_gb=None the whole GPU, and nothing else runs. Without the service: yields None and runs the block anyway,
     with a warning (or raises Unavailable when `required`)."""

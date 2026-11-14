@@ -4,6 +4,20 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Cloud API clients (Claude, Google AI Studio, NVIDIA NIM) with budgets and a Cloud page (branch `claude/project-thread-gl1u9l`)**
+Jonathan has a Claude API key, two Google AI Studio keys (free tier and a paid one) and an NVIDIA NIM key, and wants their spend watched closely so nothing is wasted. Checked 2026-11-14 with one tiny call each: none of the four shows its remaining credit to the key (the Claude key gets 401 on every Admin endpoint: usage, cost and spend limits need an Admin or organization-scoped key; NIM's credits endpoint is 403; Google's balance is only in Cloud Billing). So the service keeps its own ledger and budgets.
+
+- `keys.py` (**new**): keys from the environment or `~/.config/strata-models/secrets.env` (`STRATAMODELS_SECRETS`), refused when the file is readable by others; `redact` takes them out of any error text.
+- `spend.py` (**new**): the ledger (table `api_calls`, migration `a5fc50ef0727`: tokens, cost, the request with pictures as paths, the answer, the app and job), prices from each model's `price` option (cache and long-prompt tiers, dated price changes), a budget and optional monthly rollover per paid key (settings `claude_budget_usd`, `claude_rollover`, `gemini_budget_usd`, `gemini_rollover`; default 0, so nothing paid runs until a budget is set), and `reserve`: the worst case (counted input plus max_tokens) must fit what is left, or the call is refused before it is sent.
+- `runtimes/claude.py` (`claude-api`, anthropic SDK: count_tokens, then the call), `runtimes/gemini.py` (`gemini-api`: free key first, the paid key on 429/503, private pictures can opt out of the free tier with `keys = ["gemini"]`), `runtimes/nim.py` (`nvidia-nim`: OpenAI-compatible, retries 429), sharing `runtimes/cloud.py` (llama-server's params: prompt or preset, system, images, schema, max_tokens, effort).
+- `models.toml`: Claude Haiku, Sonnet and Opus 5.5; Gemini 3.8 Flash, 3.5 Flash-Lite and 4 Argon (paid key only: no free tier); NIM Nemotron 3.5 Super VL, Mistral Large 4, Gemma 4 31B. None is a role's model.
+- Job priorities (Jonathan): `high`, `normal` (the default) and `low`. Evals submit `low`, so they wait while any other app's job is queued; an app that is waiting on a job sends `high` (the client's `priority=`; `POST /api/run` defaults to it, as before). The old names `interactive` and `batch` are still accepted, stored as high and normal; old rows keep them (the column is free text, no migration). Within a priority the order is unchanged (loaded model first, `max_skip_s`). A job already running is never stopped for a higher one.
+- Evals: metric `cost_usd` (dollars per item: a cloud model's `cost_usd`, 0 for a local model, none for subscription recordings); `scripts/evals/standouts.py` (**new**) picks an eval's stand-out items for the cloud candidates (scored, local models reasonable, most room left).
+- `spend.per_task()`: the mean cost of one job per (role, model key), from the ledger (for routing and the cost-per-task evals).
+- API: `GET /api/spend`, `/api/spend/series`, `/api/spend/calls`, `/api/spend/calls/{id}`; the scheduler runs each job inside `spend.job(app, id)` so its calls name them.
+- Web: the Cloud page (budget meters warning at 50 % and 80 %, the budgets form, filters by key, model, app, outcome and period, spend and calls per day or hour, the breakdown table, and the request log, whose rows open on the prompt, schema and answer).
+- Tests: `tests/unit/test_spend.py`, `test_keys.py`, `test_cloud_runtimes.py` (**new**), and the settings, server and scheduler additions; `web/tests/integration/Cloud.test.tsx` (**new**) and logic tests.
+
 **A routing catalogue: every cloud backend and local model by role, power and cost (branch `claude/project-thread-2aatsx`)**
 Jonathan asked for every cloud API mapped to capabilities, power and cost, so jobs can be routed between cloud and local models.
 

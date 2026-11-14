@@ -1,5 +1,6 @@
 // Pure helpers the screens share: the words for a job, the VRAM breakdown, the Overview's one-line finding. Unit-tested in node.
-import type { Budget, Gpu, Job, Resident, Status } from './api'
+import { format, type Point } from 'strata-react'
+import type { Budget, Gpu, Job, ProviderState, Resident, SpendPoint, Status } from './api'
 
 export const GB = 1024
 export const gb = (mb: number) => mb / GB
@@ -10,6 +11,9 @@ export function describeJob(j: Pick<Job, 'kind' | 'role' | 'app' | 'note'>) {
 }
 
 export const STATUS_TONE = { queued: 'neutral', running: 'info', done: 'success', failed: 'danger', cancelled: 'neutral', expired: 'warning' } as const
+/** A job's priority under today's names (rows from before 2026-11-14 say interactive or batch), and its word. */
+export const PRIORITY_OF = { high: 'high', interactive: 'high', normal: 'normal', batch: 'normal', low: 'low' } as const
+export const PRIORITY_WORD = { high: 'High', normal: 'Normal', low: 'Low' } as const
 export const STATUS_WORD = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed', cancelled: 'Withdrawn', expired: 'Expired' } as const
 
 /** A short readable name for another process on the card: the script, not the interpreter. */
@@ -61,4 +65,40 @@ export function seconds(s: number | null | undefined) {
   if (s < 120) return `${Math.round(s)}\u00a0s`
   if (s < 7200) return `${Math.round(s / 60)}\u00a0min`
   return `${(s / 3600).toFixed(1)}\u00a0h`
+}
+
+// ---- cloud APIs ---------------------------------------------------------------------------------------------------------------------------
+/** US dollars: whole cents from a cent up, four places below it (a single Haiku call is a fraction of a cent). */
+export function usd(v: number | null | undefined) {
+  if (v === null || v === undefined) return '\u2013'
+  const a = Math.abs(v)
+  return `$${a === 0 || a >= 0.01 ? v.toFixed(2) : v.toFixed(4)}`
+}
+
+/** The Cloud page's one-line answer: the paid key nearest its budget, else which paid keys have no budget yet. */
+export function spendFinding(ps: ProviderState[]): string {
+  const paid = ps.filter(p => p.budgeted)
+  const set = paid.filter(p => p.budget).sort((a, b) => (b.used_share ?? 0) - (a.used_share ?? 0))
+  if (set.length) {
+    const p = set[0]
+    const until = p.next_rollover ? ` until ${format.date(p.next_rollover * 1000)}` : ''
+    return `${p.label}: ${usd(p.spent)} of ${usd(p.budget)} spent, ${usd(p.left)} left${until}.`
+  }
+  return paid.length ? `No budget is set for ${paid.map(p => p.label).join(' or ')}: their calls are refused until one is.` : 'No paid keys.'
+}
+
+/** One reading per bucket from `since` to `now`, zero where nothing was called, of one field summed over the providers shown. */
+export function bucketSeries(points: SpendPoint[], since: number, bucket: number, now: number, field: 'cost_usd' | 'calls' | 'tokens'): Point[] {
+  const sums = new Map<number, number>()
+  for (const p of points) sums.set(p.t, (sums.get(p.t) ?? 0) + p[field])
+  const out: Point[] = []
+  for (let t = since; t <= now; t += bucket) out.push({ x: t * 1000, y: sums.get(t) ?? 0 })
+  return out
+}
+
+/** Five evenly spaced ticks over a series' x range. */
+export function ticksOf(series: Point[]) {
+  if (!series.length) return []
+  const a = series[0].x, b = series[series.length - 1].x
+  return a === b ? [a] : [0, 1, 2, 3, 4].map(i => a + ((b - a) * i) / 4)
 }

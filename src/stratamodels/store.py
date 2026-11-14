@@ -10,7 +10,7 @@ import time
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from stratamodels.db.models import Job, JobFile, JobResult
+from stratamodels.db.models import ApiCall, Job, JobFile, JobResult
 
 FIELDS = [c.name for c in Job.__table__.columns]
 FINISHED = ("done", "failed", "cancelled", "expired")
@@ -215,6 +215,141 @@ class Store:
                 dict(app=a, kind=k, role=r, jobs=int(n), failed=int(f or 0), gpu_s=round(float(g or 0.0), 1))
                 for a, k, r, n, f, g in s.execute(q)
             ]
+
+    @locked
+    def add_api_call(self, **kw):
+        """One row of the cloud API ledger (spend.record); returns it as a dict."""
+        with Session(self.engine) as s:
+            r = ApiCall(**kw)
+            s.add(r)
+            s.commit()
+            return {c.name: getattr(r, c.name) for c in ApiCall.__table__.columns}
+
+    @locked
+    def api_spent(self, provider, since):
+        """(USD, calls) a provider's key spent since `since`."""
+        q = sa.select(sa.func.coalesce(sa.func.sum(ApiCall.cost_usd), 0.0), sa.func.count()).where(
+            ApiCall.provider == provider, ApiCall.at >= since
+        )
+        with Session(self.engine) as s:
+            usd, n = s.execute(q).one()
+            return float(usd or 0.0), int(n)
+
+    @locked
+    def api_breakdown(self, since):
+        """Per provider, model and app since `since`: calls, failures, tokens and USD."""
+        q = (
+            sa.select(
+                ApiCall.provider,
+                ApiCall.model,
+                ApiCall.app,
+                sa.func.count(),
+                sa.func.sum(sa.case((ApiCall.ok.is_(False), 1), else_=0)),
+                sa.func.sum(ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write),
+                sa.func.sum(ApiCall.tokens_out),
+                sa.func.sum(ApiCall.cost_usd),
+            )
+            .where(ApiCall.at >= since)
+            .group_by(ApiCall.provider, ApiCall.model, ApiCall.app)
+            .order_by(ApiCall.provider, ApiCall.model, ApiCall.app)
+        )
+        with Session(self.engine) as s:
+            return [
+                dict(
+                    provider=p,
+                    model=m,
+                    app=a,
+                    calls=int(n),
+                    failed=int(f or 0),
+                    tokens_in=int(ti or 0),
+                    tokens_out=int(to or 0),
+                    cost_usd=float(c or 0.0),
+                )
+                for p, m, a, n, f, ti, to, c in s.execute(q)
+            ]
+
+    @locked
+    def api_log(self, provider=None, model=None, app=None, ok=None, since=None, before=None, limit=50):
+        """Ledger rows newest first, filtered, without the request and response bodies (`api_call` has them); cursor `before` = the last id."""
+        q = sa.select(*[c for c in ApiCall.__table__.columns if c.name not in ("request", "response")]).order_by(
+            ApiCall.id.desc()
+        )
+        for col, v in ((ApiCall.provider, provider), (ApiCall.model, model), (ApiCall.app, app), (ApiCall.ok, ok)):
+            if v is not None:
+                q = q.where(col == v)
+        if since is not None:
+            q = q.where(ApiCall.at >= since)
+        if before is not None:
+            q = q.where(ApiCall.id < before)
+        with Session(self.engine) as s:
+            return [dict(r._mapping) for r in s.execute(q.limit(max(1, min(int(limit), 500))))]
+
+    @locked
+    def api_per_task(self, since=0.0):
+        """Per (role, model key): jobs that called a cloud API since `since`, their mean USD and tokens (a job's calls summed first, so a
+        Gemini job that fell from the free key to the paid one counts once), and how many of those jobs failed."""
+        per_job = (
+            sa.select(
+                ApiCall.job_id.label("job_id"),
+                sa.func.max(ApiCall.model_key).label("model_key"),
+                sa.func.sum(ApiCall.cost_usd).label("usd"),
+                sa.func.sum(ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write).label("tin"),
+                sa.func.sum(ApiCall.tokens_out).label("tout"),
+            )
+            .where(ApiCall.at >= since, ApiCall.job_id.is_not(None))
+            .group_by(ApiCall.job_id)
+            .subquery()
+        )
+        q = (
+            sa.select(
+                Job.role,
+                per_job.c.model_key,
+                sa.func.count(),
+                sa.func.avg(per_job.c.usd),
+                sa.func.avg(per_job.c.tin),
+                sa.func.avg(per_job.c.tout),
+                sa.func.sum(sa.case((Job.status == "failed", 1), else_=0)),
+            )
+            .join(Job, Job.id == per_job.c.job_id)
+            .group_by(Job.role, per_job.c.model_key)
+        )
+        with Session(self.engine) as s:
+            return {
+                (r, m): dict(
+                    n=int(n),
+                    usd=float(u or 0.0),
+                    tokens_in=float(ti or 0.0),
+                    tokens_out=float(to or 0.0),
+                    failed=int(f or 0),
+                )
+                for r, m, n, u, ti, to, f in s.execute(q)
+            }
+
+    @locked
+    def api_call(self, call_id):
+        """One ledger row with what was sent and what came back, or None."""
+        with Session(self.engine) as s:
+            r = s.get(ApiCall, call_id)
+            return None if r is None else {c.name: getattr(r, c.name) for c in ApiCall.__table__.columns}
+
+    @locked
+    def api_points(self, since):
+        """(at, provider, model, app, cost_usd, tokens, ok) of every call since `since`, oldest first: what the charts bucket."""
+        q = (
+            sa.select(
+                ApiCall.at,
+                ApiCall.provider,
+                ApiCall.model,
+                ApiCall.app,
+                ApiCall.cost_usd,
+                ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write + ApiCall.tokens_out,
+                ApiCall.ok,
+            )
+            .where(ApiCall.at >= since)
+            .order_by(ApiCall.at)
+        )
+        with Session(self.engine) as s:
+            return [tuple(r) for r in s.execute(q)]
 
     @locked
     def model_stats(self):

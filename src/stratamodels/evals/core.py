@@ -978,7 +978,7 @@ class SchedulerExecutor:
         self.s, self.app = scheduler, app
 
     def submit(self, role, params, model, options):
-        return self.s.submit(role, params, self.app, "batch", model, options or None)["id"]
+        return self.s.submit(role, params, self.app, "low", model, options or None)["id"]
 
     def wait(self, job_id):
         while True:
@@ -994,7 +994,7 @@ class ClientExecutor:
         self.sm, self.app = client, app
 
     def submit(self, role, params, model, options):
-        return self.sm.submit(role, params, self.app, "batch", model, options or None)["id"]
+        return self.sm.submit(role, params, self.app, "low", model, options or None)["id"]
 
     def wait(self, job_id):
         return self.sm.wait_job(job_id)

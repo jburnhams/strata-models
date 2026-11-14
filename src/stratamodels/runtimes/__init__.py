@@ -18,6 +18,9 @@ RUNTIMES = {
     "llama-server": "stratamodels.runtimes.llama",
     "recorded": "stratamodels.runtimes.recorded",
     "tesseract": "stratamodels.runtimes.tesseract",
+    "claude-api": "stratamodels.runtimes.claude",
+    "gemini-api": "stratamodels.runtimes.gemini",
+    "nvidia-nim": "stratamodels.runtimes.nim",
 }
 NEEDS = {
     "fake": (),
@@ -29,6 +32,9 @@ NEEDS = {
     "llama-server": ("huggingface_hub",),
     "recorded": (),
     "tesseract": (),
+    "claude-api": ("anthropic",),
+    "gemini-api": (),
+    "nvidia-nim": (),
 }  # venv-worker: its libraries are in the model's own venv (checked when it loads)
 
 
@@ -64,8 +70,14 @@ def available():
 
     if not os.path.isfile(llama.binary(settings.models_dir())):
         out["llama-server"] = out["llama-server"] + ["the llama-server binary (llama.cpp)"]
+    from stratamodels import keys
     from stratamodels.runtimes import tesseract
 
+    for rt, provider in (("claude-api", "claude"), ("nvidia-nim", "nim")):
+        if not keys.have(provider):
+            out[rt] = out[rt] + [f"the key {keys.NAMES[provider]} ({keys.path()})"]
+    if not (keys.have("gemini") or keys.have("gemini-free")):
+        out["gemini-api"] = out["gemini-api"] + [f"the key GEMINI_FREE_API_KEY or GEMINI_API_KEY ({keys.path()})"]
     if not tesseract.binary():
         out["tesseract"] = out["tesseract"] + ["the tesseract command (Tesseract 5)"]
     return out

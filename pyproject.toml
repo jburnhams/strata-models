@@ -20,6 +20,7 @@ dependencies = [
     "strata-python",     # shared server code: oslib, settings, web serving, CLI commands, test plugin, strata-check
     "tzdata; sys_platform == 'win32'",
     "huggingface-hub>=2.4.0",
+    "anthropic>=2.8.0",
 ]
 
 [project.scripts]
@@ -70,7 +71,7 @@ migrations = "migrations"
 [tool.pytest.ini_options]
 pythonpath = ["tests/utils"]
 strata_env_prefix = "STRATAMODELS"        # strata-python plugin: STRATAMODELS_HOME and _DATA point into a tmp dir for every test
-strata_tuning_vars = ["STRATAMODELS_MODELS", "STRATAMODELS_VRAM_RESERVE_GB", "STRATAMODELS_DATABASE_URL", "OMARCHY_DB_URL", "STRATA_MODELS_URL"]    # removed from the environment for every test
+strata_tuning_vars = ["STRATAMODELS_MODELS", "STRATAMODELS_VRAM_RESERVE_GB", "STRATAMODELS_DATABASE_URL", "OMARCHY_DB_URL", "STRATA_MODELS_URL", "STRATAMODELS_SECRETS", "ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "GEMINI_FREE_API_KEY", "STRATAMODELS_CLAUDE_BUDGET_USD", "STRATAMODELS_CLAUDE_ROLLOVER", "STRATAMODELS_GEMINI_BUDGET_USD", "STRATAMODELS_GEMINI_ROLLOVER"]    # removed from the environment for every test
 testpaths = ["tests/unit"]
 addopts = "-ra --timeout=300 --strict-markers --strict-config"
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]       # TestClient noise from the installed starlette; remove when the dependency moves on

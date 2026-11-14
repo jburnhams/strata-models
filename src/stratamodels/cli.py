@@ -383,7 +383,7 @@ def main(argv=None):
     e.set_defaults(fn=cmd_eval)
     s = sub.add_parser(
         "set",
-        help='show or change a setting (data_dir, models_dir, vram_reserve_gb, gpu_jobs, cpu_jobs, whole_card_gb); value "default" resets it',
+        help='show or change a setting (data_dir, models_dir, vram_reserve_gb, gpu_jobs, cpu_jobs, whole_card_gb, claude_budget_usd, claude_rollover, gemini_budget_usd, gemini_rollover); value "default" resets it',
     )
     s.add_argument("key")
     s.add_argument("value", nargs="?")
