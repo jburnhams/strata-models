@@ -157,6 +157,10 @@ def test_fit_recovers_the_size_and_width_of_a_known_setting(tmp_path, ttf, model
     assert ln["hscale"] == pytest.approx(1.1, abs=0.08)
     assert r["ink_f1"] > 0.9
     assert [w["style"] for w in ln["words"]] and r["style"] == "roman"
+    w0 = ln["words"][0]
+    assert {"x", "baseline_y", "size_px", "size_pt", "hscale", "tracking_em", "weight_delta"} <= set(w0)
+    assert abs(w0["x"] - lines[0]["words"][0]["box"][0]) <= 2  # its own placement: at most a pixel or two from its ink
+    assert w0["size_px"] == ln["size_px"] and w0["hscale"] == ln["hscale"]
     assert os.path.isfile(r["path"]) and Image.open(r["path"]).size == (700, 160)
 
 

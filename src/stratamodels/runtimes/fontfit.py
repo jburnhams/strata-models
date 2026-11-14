@@ -25,9 +25,11 @@ params:
   out         where to write the rendering (PNG, the picture's size: black type on white), else <data>/generated/fonts/
 Answer: {face, class, style, size_pt, ink_f1, precision, recall, path (the rendering), fonts: {id: {family, class, like, files: {style: ttf}}},
 faces: [{face, class, ink_f1}] (ranked), blocks: [{box, face, class, ink_f1, lines: [{text, box, baseline_y, size_px, size_pt, hscale,
-tracking_em, weight_delta, style, words: [{text, box, style}]}]}], proposed, mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's
-pixels, as Tesseract's. A renderer sets each word with `size_pt` (or size_px at the scan's dpi), stretches it by `hscale`, adds `tracking_em`
-times the size after every glyph and puts its baseline at `baseline_y` and its left ink edge at the word box's left; weight_delta > 0 means the
+tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta}]}]}],
+proposed, mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
+summary; a renderer sets each word with the word's own: `size_pt` (or size_px at the scan's dpi), stretched by `hscale`, `tracking_em` times
+the size added after every glyph, its baseline at `baseline_y` and its left ink edge at `x` (that is the rendering's geometry exactly, so a
+rebuild reproduces what was scored); weight_delta > 0 means the
 print is heavier than the font (ink spread), which a PDF can approximate with a stroke of weight_delta * size / 20."""
 
 import json
@@ -542,8 +544,8 @@ def word_styles(scan, ln, face, lfit, margin=0.04):
             if st != lfit["style"]:
                 f -= MARGIN.get(st, margin)
             if best is None or f > best[0]:
-                best = (f, st, pp)
-        out.append((best[1], best[2]))
+                best = (f, st, pp, wd.get("_d", (0.0, 0.0)))  # each trial moves the word: keep the winner's own shift
+        out.append((best[1], best[2], best[3]))
     return out
 
 
@@ -638,8 +640,7 @@ def _final(scan, face, fit):
     for ln, lf in zip(scan.lines, fit["lines"]):
         ws = word_styles(scan, ln, face, lf)
         wl = []
-        for wd, (st, p) in zip(ln["words"], ws):
-            d = wd.get("_d", (0.0, 0.0))
+        for st, p, d in ws:
             wl.append(dict(style=st, p=(p[0] / scan.k, p[1], p[2], p[3]), d=d))
         lines.append(dict(style=lf["style"], size=lf["p"][0] / scan.k, base=ln["baseline"], words=wl))
     return lines
@@ -734,7 +735,23 @@ def run(handle, params):
         p0 = lf["words"][0]["p"] if lf["words"] else (size, 1.0, 0.0, 0.5)
         ws = []
         for wd, wf in zip(ln["words"], lf["words"]):
-            ws.append(dict(text=wd["text"], box=wd["box"], style=wf["style"]))
+            sz, hs, trk, thr = wf["p"]
+            ws.append(
+                dict(
+                    text=wd["text"],
+                    box=wd["box"],
+                    style=wf["style"],
+                    x=round(
+                        float(wd["ink"][0] + wf["d"][0]), 1
+                    ),  # where the word's left ink edge goes, after its own shift
+                    baseline_y=round(float(lf["base"] + wf["d"][1]), 1),
+                    size_px=round(float(sz), 2),
+                    size_pt=round(float(sz) * 72.0 / dpi, 2),
+                    hscale=round(float(hs), 3),
+                    tracking_em=round(float(trk), 3),
+                    weight_delta=round(0.5 - float(thr), 2),
+                )
+            )
             styles.append((wf["style"], wd["ink"][2]))
         out_lines.append(
             dict(
