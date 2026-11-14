@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Model judges for OCR, scored against the hand-typed text (branch `claude/project-thread-0n1ijc`)**
+Jonathan asked whether qwen or Gemini could judge how good each OCR setting is. On the ten typed pages a judge can be checked against the character error rate, and one that agrees well can then rank settings on the pages nobody has typed (the rest of both books).
+
+- `evals/judges.py`: `reference = false` keeps the item's reference from a judge (for a video pair, the tape's crops too: review) (in the judge's key only when hidden, so older judges keep their verdicts); `pairs = "baseline"` judges each candidate against the baseline only (12 pairs a page in ocr-pages, not 78); in an eval decided by a scored metric, each judge's verdicts are also scored against that metric (`metric` in the analysis: the output that scored better on the item is the right answer).
+- `evals/report.py`: the Model judges section gives that agreement.
+- `evals/specs/ocr-pages.toml`: judges qwen, gemma (local, judge-vision) and gemini-flash (agy, 40 pairs a run), reference hidden, baseline pairs.
+- `tests/unit/test_eval_judges.py`: the hidden reference, baseline pairs and agreement with the metric. `docs/evals.md`: the options and the OCR judges.
+
 **An OCR eval on hard book pages, and page cleaning before OCR (branch `claude/project-thread-0n1ijc`)**
 Jonathan asked for evals of strata-scan's trickier pages to see what helps, and to look at cleanup like diary-study's, before and after OCR. Ten hard pages from the two Punch and Judy books, typed out by hand, measure Tesseract with each cleaning step and page mode, a vision-language model reading the page, and one correcting Tesseract's text.
 

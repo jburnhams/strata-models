@@ -73,6 +73,22 @@ def judges_section(judges, base):
             f" {j['with_people']} | {_share(j['agree'])} | {_share(j['decided'])} | {'n/a' if k is None or k != k else f'{k:.2f}'} | {_share(j['consistent'])} |"
         )
     L.append("")
+    scored = [(n, j) for n, j in judges.items() if j.get("metric") and j["metric"].get("n")]
+    if scored:
+        mn = scored[0][1]["metric"]["name"]
+        L += [
+            f"Against `{mn}`: on each pair a judge judged, the right answer is the candidate whose output scored better on that item (a tie when"
+            " equal), so this is how far a judge can be trusted on items that have no reference.",
+            "",
+            "| Judge | Pairs | Agreement | Same winner | Kappa |",
+            "|---|---|---|---|---|",
+        ]
+        for n, j in scored:
+            g, k = j["metric"], j["metric"].get("kappa")
+            L.append(
+                f"| `{n}` | {g['n']} | {_share(g['agree'])} | {_share(g['decided'])} | {'n/a' if k is None or k != k else f'{k:.2f}'} |"
+            )
+        L.append("")
     for n, j in judges.items():
         comps = [(c, v) for c, v in (j.get("comparisons") or {}).items() if v.get("n")]
         if comps:

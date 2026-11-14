@@ -23,6 +23,8 @@ A spec names its judges in `[[judges]]`:
     model = "gemini-3.8-flash-low"
     effort = "low"
     pairs = "judged"                  # judged (default): only pairs people judged, the ones agreement is measured on | all: every pair the Judge tab offers
+                                      # | baseline: every candidate against the baseline (a scored eval with many candidates: n-1 pairs an item, not n(n-1)/2)
+    reference = false                 # hide the item's reference from the judge (default shown): to measure a judge for items that have none
     limit = 20                        # at most this many pairs per run: a dear judge gets few calls, like a sampled candidate
     orders = 2                        # ask twice with X and Y swapped (default); a judge that changes its mind with the order gives a tie
     auto = true                       # the service also judges each pair a person judges, right after they do
@@ -32,7 +34,10 @@ A verdict is an eval_judgments row like a person's, with `judge` set (the hash o
 effort, params, criteria, orders, the prompt's version) and `detail` holding each order's answer and reason. A changed judge config is a new
 judge: its old verdicts stop counting, as a person's do when an output changes. People's judgments alone decide `judged` experiments and order the
 Judge tab; judges' verdicts only go into the agreement analysis (`judges` in the analysis: share agreeing with people, Cohen's kappa, position
-consistency, and what each judge alone would conclude about each candidate against the baseline).
+consistency, and what each judge alone would conclude about each candidate against the baseline). In an eval decided by a scored metric
+(`cer`, say) the analysis also gives each judge's agreement with the metric: on each pair it judged, the candidate whose output scored better
+on that item is the right answer (a tie when equal). That is how a judge is trusted for items with no reference: hide the reference
+(`reference = false`), and the judge reads the page as it would on a page nobody has typed.
 
 Run them with `./strata-models eval judge NAME [--judge J] [--limit N]` (local judges need the service: their jobs go through its queue; cloud
 judges call the official CLI from that process, which must be signed in) or POST /api/evals/{name}/judges/{judge}/run. A judge that is also a
@@ -58,6 +63,7 @@ JUDGE_KEYS = {
     "cli",
     "effort",
     "params",
+    "reference",
     "criteria",
     "pairs",
     "limit",
@@ -122,8 +128,8 @@ def parse_judge(d):
     if cli and cli not in ("codex", "agy"):
         raise ValueError(f"judge {d['name']!r}: cli is codex or agy")
     pairs = str(d.get("pairs", "judged"))
-    if pairs not in ("judged", "all"):
-        raise ValueError(f"judge {d['name']!r}: pairs is judged or all")
+    if pairs not in ("judged", "all", "baseline"):
+        raise ValueError(f"judge {d['name']!r}: pairs is judged, all or baseline")
     orders = int(d.get("orders", 2))
     if orders not in (1, 2):
         raise ValueError(f"judge {d['name']!r}: orders is 1 or 2")
@@ -140,6 +146,7 @@ def parse_judge(d):
         params=dict(d.get("params") or {}),
         criteria=str(d.get("criteria") or CRITERIA),
         pairs=pairs,
+        reference=bool(d.get("reference", True)),
         limit=limit,
         orders=orders,
         auto=bool(d.get("auto", False)),
@@ -166,6 +173,10 @@ def judge_key(j, model=None):
     """Everything that decides a judge's verdicts (not how many it is given, or when). `model`: the model it resolves to, so a new choice for a
     kind's role is a new judge, and the old one's verdicts stay its own."""
     keep = {k: j[k] for k in ("kind", "role", "cli", "effort", "params", "criteria", "orders")}
+    if not j.get(
+        "reference", True
+    ):  # only when hidden, so every judge made before the option keeps its key and its verdicts
+        keep["reference"] = False
     return C._h(C._canon(dict(keep, model=model or j["model"], v=PROMPT_VERSION)), 16)
 
 
@@ -228,15 +239,16 @@ def shown(output):
     return json.dumps({k: v for k, v in o.items() if k not in HIDDEN}, ensure_ascii=False, indent=1)
 
 
-def _video_stills(item, x, y):
+def _video_stills(item, x, y, reference=True):
     """For a pair of videos (video-enhance), what a vision judge can see: per region both outputs have, the tape's crop (the item's reference)
     and X's and Y's at the same moments, as (caption, [pictures]) in that order; with no regions, X's and Y's whole-frame stills. Empty unless
-    both outputs are videos."""
+    both outputs are videos. reference=False (a judge with `reference = false`) leaves the tape's crops out: X's and Y's only."""
     from stratamodels.evals import similarity as SIM
 
     if not (SIM.video_path(x) and SIM.video_path(y)):
         return []
-    ref = {c.get("id"): c for c in ((item.get("reference") or {}).get("crops") or []) if isinstance(c, dict)}
+    crops = (item.get("reference") or {}).get("crops") if reference else None
+    ref = {c.get("id"): c for c in (crops or []) if isinstance(c, dict)}
     cy = {c.get("id"): c for c in (y.get("crops") or []) if isinstance(c, dict)}
     out = []
     for c in x.get("crops") or []:
@@ -270,9 +282,9 @@ def prompt(spec, j, item, x, y, cut=None):
         parts.append(f"The input picture{'s are' if len(imgs) > 1 else ' is'} attached first ({len(imgs)}).")
     if inp:
         parts.append("Input:\n" + json.dumps(inp, ensure_ascii=False, indent=1))
-    vid = _video_stills(item, C.without_pipeline(x), C.without_pipeline(y)) if vision else []
+    vid = _video_stills(item, C.without_pipeline(x), C.without_pipeline(y), j.get("reference", True)) if vision else []
     if (
-        item.get("reference") and not vid
+        item.get("reference") and not vid and j.get("reference", True)
     ):  # a video item's reference is the tape itself, shown as pictures below, not a right answer
         parts.append(
             "Reference (what a correct answer says):\n" + json.dumps(item["reference"], ensure_ascii=False, indent=1)
@@ -422,7 +434,7 @@ def todo(spec, engine, j, only=None):
             here = [n for n in names if ok(i, n)]
             for k, a in enumerate(here):
                 for b in here[k + 1 :]:
-                    if spec.primary == "judged" and spec.baseline not in (a, b):
+                    if (spec.primary == "judged" or j["pairs"] == "baseline") and spec.baseline not in (a, b):
                         continue  # as the Judge tab: head to head with the baseline only
                     oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
                     if SIM.similarity(oa, ob, spec.similarity or None) < 0.9999:  # identical answers teach nothing
@@ -574,6 +586,40 @@ def agreement(people, verdicts):
     )
 
 
+def _metric_truth(spec, engine, rows):
+    """The primary metric's answer on each judged pair, as a person's would be: [(pair id, a, b, winner, 0)], the candidate whose output
+    scored better on that item (a tie when equal). Pairs with a failed or unscored side are left out."""
+    from stratamodels.evals import metrics as M
+
+    m = M.METRICS.get(spec.primary)
+    if m is None or m.score is None:
+        return []
+    ds, outs, _ = C.outputs_for(spec, engine)
+    index = {it["id"]: i for i, it in enumerate(ds.items)}
+
+    def value(n, i):
+        o = outs.get(n, [None] * len(ds.items))[i]
+        if o is None or o[1]:
+            return None
+        v = m.score(ds.items[i], o[0], o[1])
+        if isinstance(v, tuple):
+            return v[0] / v[1] if v[1] else None
+        return None if v is None else float(v)
+
+    out, seen = [], set()
+    for r in rows:
+        pid = _pair_id(r.item_id, r.a_key, r.b_key)
+        if r.judge is None or pid in seen or r.item_id not in index:
+            continue
+        seen.add(pid)
+        va, vb = value(r.a, index[r.item_id]), value(r.b, index[r.item_id])
+        if va is None or vb is None:
+            continue
+        lo = (va < vb) if m.better == "lower" else (va > vb)
+        out.append((pid, r.a, r.b, "tie" if abs(va - vb) < 1e-12 else r.a if lo else r.b, 0.0))
+    return out
+
+
 def summary(spec, engine, current, names, base):
     """The `judges` part of the analysis: per judge in the spec, its verdicts on current outputs, agreement with people, position consistency,
     and what it alone would conclude about each candidate against the baseline (core.judged_vs on its verdicts)."""
@@ -582,6 +628,7 @@ def summary(spec, engine, current, names, base):
     pwin = {}
     for pid, _a, _b, w, _at in sorted(people, key=lambda r: r[4]):
         pwin[pid] = w
+    truth = _metric_truth(spec, engine, rows) if spec.primary != "judged" else []
     out = {}
     for j in spec.judges:
         model = resolve(engine, j)
@@ -614,6 +661,12 @@ def summary(spec, engine, current, names, base):
             tally=ag["tally"],
             consistent=_share(sum(1 for c in cons if c), len(cons)),
             comparisons={n: C.judged_vs(trip, n, base) for n in names if n != base},
+            metric=dict(
+                agreement(truth, [(_pair_id(r.item_id, r.a_key, r.b_key), r.a, r.b, r.winner, r.at) for r in mine]),
+                name=spec.primary,
+            )
+            if truth
+            else None,
             disagreements=disagree[:10],
         )
     return out

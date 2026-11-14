@@ -81,7 +81,7 @@ def test_judge_defaults_kinds_and_errors():
         (dict(name="a", kind="smell"), "text, vision or audio"),
         (dict(name="a", kind="audio", cli="codex", model="gpt"), "cannot hear"),
         (dict(name="a", cli="gemini", model="m"), "codex or agy"),
-        (dict(name="a", pairs="some"), "judged or all"),
+        (dict(name="a", pairs="some"), "judged, all or baseline"),
         (dict(name="a", orders=3), "1 or 2"),
         (dict(name="a", limit=0), "limit"),
         (dict(name="a", limit=True), "limit"),
@@ -110,6 +110,8 @@ def test_judge_key_follows_what_decides_a_verdict():
     assert J.judge_key(dict(j, criteria="shorter is better")) != k and J.judge_key(dict(j, orders=1)) != k
     v = J.parse_judge(dict(name="v"))
     assert J.judge_key(v, "qwen") != J.judge_key(v, "gemma")  # a new model for the kind's role is a new judge
+    # showing the reference is the default and keeps every older judge's key; hiding it is a new judge
+    assert J.judge_key(dict(j, reference=True)) == k and J.judge_key(dict(j, reference=False)) != k
 
 
 # ---- what a judge sees -------------------------------------------------------------------------------------------------------------------
@@ -122,6 +124,23 @@ def test_shown_hides_what_names_the_model():
         == '{\n "path": "/x.wav",\n "duration_s": 2\n}'
     )
     assert J.shown("plain") == '"plain"'
+
+
+def test_a_judge_can_be_kept_from_the_reference():
+    spec = C.parse_spec(
+        dict(name="x", question="q", role="r", dataset="d", metrics=["cer"], candidates=[dict(name="a", model="m")])
+    )
+    item = dict(id="p", input=dict(image="/in/page.png"), reference=dict(text="Punch and Judy"))
+    _, shown_ref, _ = J.prompt(spec, J.parse_judge(dict(name="v")), item, dict(text="Punch"), dict(text="Judy"))
+    _, hidden, imgs = J.prompt(
+        spec, J.parse_judge(dict(name="v", reference=False)), item, dict(text="Punch"), dict(text="Judy")
+    )
+    assert (
+        "Punch and Judy" in shown_ref
+        and "Reference" not in hidden
+        and "Punch and Judy" not in hidden
+        and imgs == ["/in/page.png"]
+    )
 
 
 def test_prompt_attaches_pictures_for_vision_only():
@@ -320,6 +339,24 @@ def test_every_pair_mode_skips_identical_outputs_and_keeps_to_its_limit(ran, sch
     assert J.todo(ran, engine, ran.judges[0])[3] == []  # every pair with the baseline is judged
 
 
+def test_baseline_pairs_and_agreement_with_the_metric(ran, scheduler):
+    """pairs = baseline judges each candidate against the baseline only; with no people at all, the judge is still measured against the
+    spec's scored primary metric (better keeps "fox", which base drops, so the fox-favouring judge sides with the metric)."""
+    engine = scheduler.store.engine
+    ran.judges = [judge_spec(pairs="baseline", reference=False)]
+    _, _, _, pairs = J.todo(ran, engine, ran.judges[0])
+    assert pairs and all(ran.baseline in (a, b) for _, a, b in pairs)
+    assert J.run_judge(ran, engine, "j", ask_queue(scheduler))["judged"] == len(pairs)
+    res = C.analyse(ran, engine)
+    g = res["judges"]["j"]["metric"]
+    assert res["judges"]["j"]["with_people"] == 0 and g["name"] == ran.primary and g["n"] == len(pairs)
+    assert g["decided"]["value"] == 1.0
+    text = R.render(res)
+    assert f"Against `{ran.primary}`" in text and f"| `j` | {len(pairs)} |" in text
+    ran.primary = "judged"  # a judged eval has no metric to measure a judge by
+    assert J._metric_truth(ran, engine, J._rows(engine, ran.name)) == []
+
+
 def test_a_failed_judging_job_or_bad_answer_is_left_for_the_next_run(ran, scheduler):
     engine = scheduler.store.engine
     person(engine, ran, "better", "base", "better", 2)
@@ -428,6 +465,8 @@ def test_a_vision_judge_sees_videos_as_region_stills_beside_the_tape():
     )
     assert "Region Text, moment 1: picture 4 is X, picture 5 is Y." in text  # no tape crop for this region
     assert "Reference" not in text and "secret" not in text and "/m/c.mp4" not in text
+    hidden = J.prompt(spec, dict(j, reference=False), item, x, y)  # the tape is the reference: hidden with it
+    assert "/m/c.face.3s.png" not in hidden[2] and "the tape" not in hidden[1] and len(hidden[2]) == 4
     bare = J.prompt(
         spec,
         j,
