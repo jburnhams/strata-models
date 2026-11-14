@@ -1,10 +1,12 @@
 """Command line: `doctor` checks the environment and the GPU, `serve` starts the service, `status` and `jobs` read a running one; `registry`,
-`role`, `prefer`, `seed`, `set` and `eval` read and change the service's tables (schema stratamodels of the shared database)."""
+`role`, `prefer`, `seed`, `set` and `eval` read and change the service's tables (schema stratamodels of the shared database); `catalogue` lists
+every backend and cloud model routing knows, `route ROLE` asks the running service where a job for ROLE should go."""
 
 import argparse
 import importlib
 import json
 import sys
+import urllib.error
 import urllib.request
 
 from stratamodels import __version__, gpu, runtimes, settings
@@ -279,6 +281,69 @@ def cmd_set(args):
     return 0
 
 
+def cmd_catalogue(args):
+    from stratamodels import routing
+
+    try:
+        c = routing.Catalogue.load()
+    except routing.CatalogueError as e:
+        sys.exit(str(e))
+    if args.json:
+        print(json.dumps(c.to_json(), indent=1))
+        return 0
+    for b in sorted(c.backends.values(), key=lambda b: (b.order, b.key)):
+        print(f"{b.key} ({b.kind}, order {b.order}, use {b.use or '-'}): {b.name}")
+        for o in c.offers.values():
+            if o.backend != b.key:
+                continue
+            cost = (
+                f"${o.price['in']:g}/${o.price['out']:g} per Mtok"
+                if o.price
+                else f"{o.quota['per_call']:.1%} of {o.quota['bucket']} a call"
+                if o.quota
+                else "unpriced"
+            )
+            print(f"    {o.key:30} tier {o.tier if o.tier is not None else '-'}  {cost:34} {', '.join(o.roles)}")
+    return 0
+
+
+def cmd_route(args):
+    q = f"/api/route/{args.role}?goal={args.goal}&private={str(args.private).lower()}&allowance={str(not args.no_allowance).lower()}"
+    if args.min_tier is not None:
+        q += f"&min_tier={args.min_tier}"
+    try:
+        d = _get(args, q)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"{e.code}: {json.load(e).get('detail')}")
+    if args.json:
+        print(json.dumps(d, indent=1))
+        return 0
+    print(f"{d['role']} ({d['goal']}{', private' if d['private'] else ''}): {d['why']}")
+    if d.get("would_pick"):
+        print(f"  if it could be called here: {d['would_why']}")
+    for o in d["options"]:
+        c = o["cost"]
+        cost = (
+            f"{c['run_s']:.1f} s on the {c['lane'].upper()}"
+            if o["kind"] == "local" and c.get("run_s") is not None
+            else f"{c['lane'].upper()}, not run yet"
+            if o["kind"] == "local"
+            else f"{c['per_call']:.1%} of {c.get('bucket')}"
+            if c.get("per_call") is not None
+            else f"${c['usd_per_call']:.4f}"
+            if c.get("usd_per_call") is not None
+            else "unpriced"
+        )
+        left = o.get("allowance") or {}
+        mark = "*" if o["key"] == d["pick"] else " " if o["eligible"] else "-"
+        print(
+            f" {mark} {o['key']:32} {o['backend']:12} tier {o['tier'] if o['tier'] is not None else '-'}  eval {o['evals']['verdict'] or '-':8} {cost:28}"
+            + (f" {left['left']:.0%} left" if left.get("left") is not None else "")
+            + (f"  ({'; '.join(o['reasons'])})" if o["reasons"] else "")
+        )
+    return 0
+
+
 def cmd_serve(args):
     from stratamodels.server import app as server_app
 
@@ -352,6 +417,22 @@ def main(argv=None):
                 action="append",
                 help="model:KEY or role:KEY: drop its edits here and follow models.toml again",
             )
+    c = sub.add_parser("catalogue", help="every backend and cloud model routing knows: roles, tier, cost")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_catalogue)
+    c = sub.add_parser(
+        "route", help="where a job for ROLE should go, local or cloud, ranked (asks the running service)"
+    )
+    c.add_argument("role")
+    c.add_argument("--goal", choices=["cheapest", "best"], default="cheapest")
+    c.add_argument("--private", action="store_true", help="the inputs must not leave this machine")
+    c.add_argument("--min-tier", type=int, help="at least this tier (default: the role's current model's)")
+    c.add_argument(
+        "--no-allowance", action="store_true", help="do not read what is left of each allowance (it runs agy and codex)"
+    )
+    c.add_argument("--url", default="http://127.0.0.1:8366")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_route)
     v = sub.add_parser("serve", help="start the service")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8366)

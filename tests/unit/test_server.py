@@ -301,3 +301,29 @@ def test_spend_budgets_series_and_request_log(client, scheduler, monkeypatch):
     assert (one["request"], one["response"], one["job_id"]) == ({"prompt": "hi"}, "ok", 9)
     assert client.get("/api/spend/calls/999").status_code == 404
     spend.bind(None)
+
+
+def test_catalogue_route_and_allowances(client):
+    from stratamodels import routing
+
+    cat = client.get("/api/catalogue").json()
+    assert "agy" in {b["key"] for b in cat["backends"]} and any(o["key"] == "claude-opus-5-5" for o in cat["offers"])
+    r = client.get("/api/route/echo", params=dict(allowance="false")).json()
+    assert r["pick"] == "small" and r["goal"] == "cheapest" and {o["key"] for o in r["options"]} == {"small", "big"}
+    assert all(o["cost"]["lane"] == "gpu" for o in r["options"])
+    r = client.get("/api/route/echo", params=dict(goal="best", private="true", min_tier=1)).json()
+    assert r["private"] and r["min_tier"] == 1 and r["pick"] == "small"
+    assert client.get("/api/route/nope").status_code == 404
+    bad = client.get("/api/route/echo", params=dict(goal="fast"))
+    assert bad.status_code == 400 and "goal is one of" in bad.json()["detail"]
+
+    class Fixed(routing.Allowances):
+        def left(self, backend, model=None):
+            return dict(left=0.5, detail=f"{backend} {model}")
+
+    client.app.state.allowances = Fixed(client.app.state.catalogue)
+    a = client.get("/api/allowances").json()
+    assert "local-gpu" not in a and a["agy"]["gemini-3.8-flash-low"] == dict(
+        left=0.5, detail="agy gemini-3.8-flash-low"
+    )
+    assert a["claude-api"]["detail"] == "claude-api claude-haiku-5-5" and a["gemini-free"]["left"] == 0.5

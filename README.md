@@ -8,6 +8,7 @@ One service on the machine with the GPU (omarchy, RTX 3060 12 GB) that every app
 - **GPU leases.** An app that runs its own CUDA code (strata-stills' develop) asks for a lease: the worker frees the memory, runs nothing else until the lease is given back, and expires it if the app stops sending heartbeats.
 - **The whole card for big models.** A model or lease that needs more than `whole_card_gb` (10 GB), or more than the budget could ever give, does not share: it waits until the card is empty, every idle model is freed, the VRAM reserve is ignored and nothing else on the GPU starts until it ends (cloud and CPU jobs carry on). A way to try models too big to budget for, at their own risk; only a lease bigger than the card is refused.
 - **Cloud APIs, on a budget.** Claude (`claude-api`), Google AI Studio (`gemini-api`: the free-tier key first, the paid key after) and NVIDIA NIM (`nvidia-nim`) serve the same params as the local vision-language models, so they stand in evals and jobs beside them. The keys live outside the repository in `~/.config/strata-models/secrets.env` (chmod 600, see [`keys.py`](src/stratamodels/keys.py)). No vendor shows a key's remaining credit to the key, so every call is a row of the ledger (`api_calls`: tokens, cost at the model's `price`, the request and the answer) and each paid key has a budget and a monthly rollover date (`strata-models set claude_budget_usd 100`, `set claude_rollover 2026-12-08`): a call whose worst case does not fit what is left is refused before it is sent ([`spend.py`](src/stratamodels/spend.py)). The Cloud page shows each key's budget, spend and calls per day, and every request.
+- **Cloud or local.** [`catalogue.toml`](src/stratamodels/catalogue.toml) maps every cloud backend (the agy and codex subscriptions, the Claude, NVIDIA NIM and Gemini keys) and this machine's GPU and CPU to roles, power (tier) and cost (GPU seconds, quota a call, dollars); `strata-models route ROLE` ranks them with the eval verdicts and what is left of each allowance: see [docs/routing.md](docs/routing.md).
 - **A web app** (strata-react): what the GPU is doing now and where its memory is, every model and role, every job with its params, result and error, and GPU time per app.
 
 ## Use it from an app
@@ -59,4 +60,4 @@ pytest tests/gpu -s                  # the real runtimes on the GPU (STRATAMODEL
 cd web && npm run test:coverage:gate
 ```
 
-Docs: [docs/overview.md](docs/overview.md) (design), [docs/progress.md](docs/progress.md) (findings), [AGENTS.md](AGENTS.md) (conventions).
+Docs: [docs/overview.md](docs/overview.md) (design), [docs/routing.md](docs/routing.md) (cloud or local), [docs/progress.md](docs/progress.md) (findings), [AGENTS.md](AGENTS.md) (conventions).

@@ -431,6 +431,16 @@ def _cloud(scheduler):
     scheduler.registry.models["cloud"] = Model(key="cloud", runtime="fake", name="", roles=("echo",), vram_gb=0.0)
 
 
+def test_low_waits_in_the_cpu_lane_too(scheduler):
+    _cloud(scheduler)
+    low = scheduler.submit("echo", {}, "evals", priority="low", model="cloud")
+    n = scheduler.submit("echo", {}, "app", model="cloud")
+    t = scheduler.dispatch()
+    assert (t["job"]["id"], t["lane"]) == (n["id"], "cpu")
+    scheduler.execute(t)
+    assert scheduler.dispatch()["job"]["id"] == low["id"]
+
+
 def test_a_cloud_job_runs_beside_a_gpu_job_and_through_an_exclusive_lease(scheduler):
     _cloud(scheduler)
     g = scheduler.submit("echo", {}, "a")
