@@ -121,7 +121,7 @@ strata-scan prints with) as a PDF with real text, plus its raster at the scan's 
 eval differs in what fills the description (Tesseract's boxes, a layout model, a vision model's JSON, `font-match`'s fitted faces). The
 baseline is the plain overlay: `ocr` given instead of `page`, one block per Tesseract block, each line one roman span in Times.
 The reference is the cleaned page as a description (`reference.page`, boxes in scan pixels). Layout is scored by `block_f1` and
-`figure_f1` (parts matched at IoU 0.5, greedy, each once: a merged or split block matches nothing), `role_acc` (right role among the
+`figure_f1` (parts matched at IoU 0.5, greedy, each once; a block split into two or more pieces, or blocks merged into one, match nothing whatever the IoU), `role_acc` (right role among the
 blocks found) and `order_tau` (Kendall's tau of the reading order of the blocks found); text by `cer_exact` on the text read back from the
 PDF. Separate evals per stage (layout, text, style, figures, whole page): see the tracking issue jburnhams/strata-models#67.
 

@@ -78,3 +78,13 @@ def test_summarise_runs_over_pages():
     s = M.summarise("block_f1", [ITEM, ITEM], [(dict(page=REF), None), (None, "boom")])
     assert s["value"] == 0.5
     assert s["n"] == 2
+
+
+@pytest.mark.parametrize("cut", [50, 60, 75])
+def test_a_split_or_merged_block_matches_nothing_even_at_iou_one_half_or_more(cut):
+    whole = [block([0, 0, 100, 100])]
+    halves = [block([0, 0, 100, cut]), block([0, cut, 100, 100 - cut])]
+    assert M.match_boxes(whole, halves) == []  # split: the larger piece has IoU cut/100 with the block
+    assert M.match_boxes(halves, whole) == []  # merged
+    speck = [block([0, 0, 100, 98]), block([10, 98, 5, 2])]  # a sliver beside the block is not a split
+    assert M.match_boxes(whole, speck) == [(0, 0)]

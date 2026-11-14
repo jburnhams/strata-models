@@ -575,11 +575,39 @@ def _xyxy(box):
     return [x, y, x + w, y + h]
 
 
+def _area(b):
+    return (b[2] - b[0]) * (b[3] - b[1])
+
+
+def _pieces(whole, parts, min_share=0.1):
+    """Indices of the `parts` that lie mostly inside `whole` (over half of each inside) and are not slivers of it (at least `min_share` of
+    its area): two or more such parts are `whole` split, or, read the other way, merged into it."""
+    w = _xyxy(whole["box"])
+    out = []
+    for k, p in enumerate(parts):
+        b = _xyxy(p["box"])
+        a = _area(b)
+        inter = max(0.0, min(w[2], b[2]) - max(w[0], b[0])) * max(0.0, min(w[3], b[3]) - max(w[1], b[1]))
+        if a > 0 and inter / a > 0.5 and a >= min_share * _area(w):
+            out.append(k)
+    return out
+
+
 def match_boxes(ref, got, min_iou=0.5):
     """Pairs (i, j) of reference and output parts (each a dict with an [x, y, w, h] `box`) that are the same part: greedily by best IoU first,
-    each used once, at least `min_iou` (a block the reader split in two matches neither half, which is the error it is)."""
+    each used once, at least `min_iou`. A reference part the output split (two or more output parts mostly inside it) and an output part that
+    merged reference parts match nothing, whatever their IoU: an even split has IoU 0.5 with each half, an uneven one more, and either would
+    otherwise be scored as a found block when it is the segmentation error these metrics measure."""
+    split = {i for i, r in enumerate(ref) if len(_pieces(r, got)) > 1}
+    merged = {j for j, g in enumerate(got) if len(_pieces(g, ref)) > 1}
     scored = sorted(
-        ((iou(_xyxy(r["box"]), _xyxy(g["box"])), i, j) for i, r in enumerate(ref) for j, g in enumerate(got)),
+        (
+            (iou(_xyxy(r["box"]), _xyxy(g["box"])), i, j)
+            for i, r in enumerate(ref)
+            if i not in split
+            for j, g in enumerate(got)
+            if j not in merged
+        ),
         reverse=True,
     )
     used_r, used_g, out = set(), set(), []

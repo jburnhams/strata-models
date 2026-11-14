@@ -8,7 +8,7 @@ params (one of `page` or `ocr`):
               figures), or a path to one
   ocr         an `ocr` role answer (Tesseract: lines with boxes and their block number), turned into one body block per Tesseract block, each
               line one roman span in the standard face, sized from its box: today's text overlay set as visible text (the baseline)
-  image       the page picture: its size and dpi when `ocr` is given (an ocr answer's width/height are the picture's; the dpi is read here)
+  image       the page picture: its dpi when `ocr` is given (the boxes stay in the ocr answer's pixels; an upscaled read scales the dpi)
   dpi         the scan's resolution when the picture does not say
   fonts       {face id: TTF/OTF path}; `font_dir` a folder whose fonts are named by file stem (`OldStandardTT-Regular`)
   small_caps_faces   face ids that are small-caps cuts (drawn as they are, not synthesised)
@@ -114,6 +114,14 @@ def page_of(params: Mapping[str, Any]) -> Page:
         o = cast("Mapping[str, Any]", ocr)
         if params.get("image"):
             w, h, dpi = _picture(params.get("image"), params.get("dpi"))
+            ow = float(o.get("width") or 0)
+            if ow and ow != w:
+                # Tesseract's boxes are in the picture it read, which `clean = "upscale"` doubled: keep its pixels and scale the dpi
+                # with them, so the page is the picture's size in inches and every box stays on it
+                oh = float(o.get("height") or 0)
+                if not oh or abs(ow / w - oh / h) > 0.01:
+                    raise RunError(f"the ocr answer is {ow:g}x{oh:g} but the picture is {w}x{h}: not the same page")
+                dpi, (w, h) = dpi * ow / w, (ow, oh)
         else:
             w, h = o.get("width"), o.get("height")
             dpi = float(params.get("dpi") or 0)

@@ -141,3 +141,13 @@ def test_unload_drops_the_handle():
     h = handle()
     pagebuild.unload(h)
     assert h == {}
+
+
+def test_an_upscaled_ocr_answer_keeps_its_pixels_and_scales_the_dpi(tmp_path):
+    # clean = "upscale" doubles the picture Tesseract reads: its boxes are in those pixels, so the page is drawn in them at twice the dpi
+    pic = tmp_path / "scan.png"
+    Image.new("L", (300, 200), 255).save(pic, dpi=(75, 75))
+    page = pagebuild.page_of(dict(ocr=OCR, image=str(pic)))
+    assert (page.width, page.height, page.dpi) == (600, 400, 150)
+    with pytest.raises(RunError, match="not the same page"):
+        pagebuild.page_of(dict(ocr=dict(OCR, height=600), image=str(pic)))
