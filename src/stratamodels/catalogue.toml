@@ -348,4 +348,4 @@ roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr", "transc
 tier = 4
 images = true
 audio = true
-note = "Price from the registry (options.price) once the gemini-api models are registered; unpriced until then."
+note = "A gemini-api model with keys [gemini-free, gemini] is routed as the free offer: it falls to this paid key itself on 429/503 (the result's provider says which paid). This offer stands for a model with keys = [gemini] only."

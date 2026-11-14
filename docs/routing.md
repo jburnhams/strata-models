@@ -19,7 +19,10 @@ curl http://omarchy:8366/api/allowances         # what is left on agy, codex and
 | registry (`models.toml`) | local models and their VRAM; a cloud model once it has a runtime here (matched to its offer by backend and `options.model`; `options.price` wins over the catalogue's) |
 | job history (`model_stats`) | a local model's mean run seconds per call |
 | eval summaries (`eval_summaries`) | per role and model: better (adopted over the baseline), worse (rejected, worse on the primary metric), same, or baseline. A recorded cloud model's verdict counts for its offer, and for the same model on another backend (`family`) |
+| `stratamodels.spend.per_task()` | what an API job really cost per role and model (the ledger, PR #57): replaces the tokens-times-price estimate once a model has jobs |
 | `evals.cloud.USAGE` / `stratamodels.spend.summary()` | what is left: agy and codex from their own CLIs (no model call), the API keys from their spend tracking |
+
+A `gemini-api` model spends as its first key (`options.keys`, default the free key then the paid one, falling over inside the call), so it ranks as the free offer; `keys = ["gemini"]` (Argon) ranks as the paid one.
 
 Costs stay in their own units: GPU seconds, a share of a subscription window, requests (NIM), dollars. `usd_equiv` puts all of them in dollars (electricity; the plan's price spread over its calls) only to read side by side.
 

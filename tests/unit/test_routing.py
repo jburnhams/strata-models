@@ -547,3 +547,66 @@ def test_another_configuration_of_the_baselines_model_or_a_load_variant_is_not_i
     s["experiment"]["candidates"][-3]["options"] = {"quant": "int8"}  # int8: gemma loaded another way
     found = routing.evidence_from([s])
     assert [f["verdict"] for f in found[("vl", "qwen")]] == ["baseline"] and ("vl", "gemma") not in found
+
+
+def test_a_gemini_model_spends_as_its_first_key_and_measured_costs_beat_the_estimate():
+    c = Catalogue.load()
+    r = Registry.from_dict(
+        dict(
+            roles={},
+            models={
+                "flash-api": dict(
+                    runtime="gemini-api", roles=["text"], vram_gb=0, options=dict(model="gemini-3.8-flash")
+                ),
+                "argon-api": dict(
+                    runtime="gemini-api",
+                    roles=["text"],
+                    vram_gb=0,
+                    options=dict(model="gemini-4-argon", keys=["gemini"]),
+                ),
+                "haiku-api": dict(
+                    runtime="claude-api", roles=["text"], vram_gb=0, options=dict(model="claude-haiku-5-5")
+                ),
+            },
+        )
+    )
+    measured = {("text", "haiku-api"): dict(n=12, usd=0.0031, tokens_in=900, tokens_out=200, failed=0)}
+    o = {x["key"]: x for x in routing.options(c, r, "text", missing={}, measured=measured)}
+    assert o["flash-api"]["backend"] == "gemini-free" and o["argon-api"]["backend"] == "gemini-api"
+    assert (
+        "gemini-free-3.8-flash" not in o and "gemini-api-3.8-flash" in o
+    )  # the free offer is the registered model; the paid one stays listed
+    assert o["haiku-api"]["cost"]["usd_per_call"] == 0.0031 and o["haiku-api"]["cost"]["measured"]["n"] == 12
+    assert "measured" not in o["flash-api"]["cost"]
+
+
+def test_a_free_key_has_no_budget_to_run_out_of(clock):
+    a = Allowances(
+        cat(),
+        usage={},
+        spend=lambda: [dict(provider="nim", budgeted=False, budget=None, left=None, unit="usd")],
+        clock=clock,
+    )
+    assert a.left("nim") == dict(left=None, free=True, detail="nim: free, rate limited")
+
+
+def test_per_task_reads_the_spend_ledger_when_there_is_one(monkeypatch):
+    import sys
+    import types
+
+    mod = types.ModuleType("stratamodels.spend")
+    mod.per_task = lambda: {("text", "m"): dict(n=1, usd=0.01)}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "stratamodels.spend", mod)
+    import stratamodels
+
+    monkeypatch.setattr(stratamodels, "spend", mod, raising=False)
+    assert routing.per_task() == {("text", "m"): dict(n=1, usd=0.01)}
+
+    def broken():
+        raise RuntimeError("no table")
+
+    mod.per_task = broken  # type: ignore[attr-defined]
+    assert routing.per_task() == {}
+    monkeypatch.setitem(sys.modules, "stratamodels.spend", None)
+    monkeypatch.delattr(stratamodels, "spend")
+    assert routing.per_task() == {}

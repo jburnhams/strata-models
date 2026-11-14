@@ -315,6 +315,8 @@ class Allowances:
                 row = next((r for r in fn() if r.get("provider") == provider), None)
                 if row is None:
                     return dict(left=None, detail=f"no budget set for {provider}")
+                if row.get("budgeted") is False:  # a free key: rate limited, no money to run out of
+                    return dict(left=None, free=True, detail=f"{provider}: free, rate limited")
                 budget, left = row.get("budget"), row.get("left")
                 frac = None if not budget or left is None else max(0.0, float(left) / float(budget))
                 unit = row.get("unit") or "usd"
@@ -332,9 +334,13 @@ class Allowances:
 
 # ---- the options for a role -------------------------------------------------------------------------------------------------------------
 def _backend_of(cat, m):
-    """A registry model's backend: an API runtime is its own backend (claude-api, nvidia-nim, gemini-api), or the one its options name
-    (`backend`, e.g. the free Gemini key on the gemini-api runtime); everything else runs here, on the GPU or, with no VRAM, the CPU."""
-    b = (m.options or {}).get("backend") or m.runtime
+    """A registry model's backend: the one its options name (`backend`), else the first of its keys (`keys`: the gemini-api runtime tries
+    the free key, then the paid one, in the same call: it spends as the free one), else its runtime (claude-api, nvidia-nim, gemini-api);
+    everything else runs here, on the GPU or, with no VRAM, the CPU."""
+    opts = m.options or {}
+    keys = opts.get("keys") or (["gemini-free", "gemini"] if m.runtime == "gemini-api" else [])
+    first = {"gemini": "gemini-api"}.get(keys[0], keys[0]) if keys else None
+    b = opts.get("backend") or (first if first in cat.backends else None) or m.runtime
     if b in cat.backends and cat.backends[b].kind != "local":
         return b
     return "local-gpu" if m.vram_gb > 0 else "local-cpu"
@@ -346,10 +352,11 @@ def _usd(price, tokens):
     return (float(price["in"]) * tokens["in"] + float(price["out"]) * tokens["out"]) / 1e6
 
 
-def options(cat, reg, role, stats=None, found=None, missing=None, card_gb=None):
+def options(cat, reg, role, stats=None, found=None, missing=None, card_gb=None, measured=None):
     """Every way to serve `role`, unranked: dicts with key, backend, kind, model, tier, family, callable (and why not), evals, cost.
-    `card_gb`: what the GPU can give a model (the card less the reserve); a local model that needs more cannot be called."""
-    stats, found, missing = stats or {}, found or {}, missing or {}
+    `card_gb`: what the GPU can give a model (the card less the reserve); a local model that needs more cannot be called.
+    `measured`: {(role, model key): {n, usd, ...}} (stratamodels.spend.per_task): what a job really cost, over the catalogue's estimate."""
+    stats, found, missing, measured = stats or {}, found or {}, missing or {}, measured or {}
     out = []
     matched = set()
     current = reg.roles[role].model if role in reg.roles else None
@@ -398,6 +405,9 @@ def options(cat, reg, role, stats=None, found=None, missing=None, card_gb=None):
         )
         price = (m.options or {}).get("price") or (offer.price if offer else None)
         o["cost"] = _cost(cat, b, role, price, offer.quota if offer else None, st, m.vram_gb)
+        got = measured.get((role, m.key)) or {}
+        if b.kind == "api" and got.get("n") and got.get("usd") is not None:
+            o["cost"].update(usd_per_call=float(got["usd"]), usd_equiv=float(got["usd"]), measured=dict(got))
         out.append(o)
     for offer in cat.offers.values():
         if role not in offer.roles or offer.key in matched:
@@ -610,4 +620,19 @@ def plan(cat, reg, role, store=None, engine=None, allowances=None, missing=None,
         raise ValueError(f"no role {role!r}")
     stats = store.model_stats() if store is not None else {}
     found = evidence(engine) if engine is not None else {}
-    return route(cat, options(cat, reg, role, stats, found, missing, card_gb), role, allowances=allowances, **policy)
+    measured = per_task() if engine is not None else {}
+    return route(
+        cat, options(cat, reg, role, stats, found, missing, card_gb, measured), role, allowances=allowances, **policy
+    )
+
+
+def per_task():
+    """What API jobs really cost per role and model (stratamodels.spend.per_task), or nothing before the spend tracking is deployed."""
+    try:
+        from stratamodels import spend
+    except ImportError:
+        return {}
+    try:
+        return spend.per_task()
+    except Exception:  # a ledger that cannot be read leaves the estimates in place
+        return {}
