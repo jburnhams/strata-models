@@ -70,6 +70,29 @@ model = "video-flashvsr-plus-base"
 params = { engine_size = [1536, 1152] }
 note = "FlashVSR+ Base: the quality preset"
 
+# Made from other candidates' outputs (`from`, no rerun of the upscalers): FlashVSR+ Turbo invents detail (worst on the handwriting), so
+# these keep its look while pulling it back to the tape. CPU, about a minute a clip.
+[[candidates]]
+name = "turbo+backproject"
+model = "video-refine"
+from = ["flashvsr-plus-turbo"]
+params = { refine = { method = "backproject", iterations = 1, strength = 0.5 } }
+note = "Turbo, corrected once at half strength by its difference from the tape when shrunk back (full strength reverts to lanczos)"
+
+[[candidates]]
+name = "turbo-blend-x2"
+model = "video-refine"
+from = ["flashvsr-plus-turbo", "realesrgan-x2plus"]
+params = { refine = { method = "blend", weight = 0.6 } }
+note = "60 % Turbo, 40 % Real-ESRGAN x2"
+
+[[candidates]]
+name = "turbo-fallback-x2"
+model = "video-refine"
+from = ["flashvsr-plus-turbo", "realesrgan-x2plus"]
+params = { refine = { method = "fallback", low = 0.03, high = 0.08, window = 7 } }
+note = "Turbo, except where it contradicts the tape locally (text, edges): Real-ESRGAN x2 there"
+
 # Model judges (evals.judges): verdicts on the pairs people judge, kept beside theirs and never counted as theirs, to measure how far each
 # agrees before relying on one. A video pair is shown as stills: per region, the tape's crop, X's and Y's at the same moment.
 [[judges]]

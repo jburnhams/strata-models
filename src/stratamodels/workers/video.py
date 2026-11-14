@@ -17,6 +17,8 @@ Engines (models.toml options.engine):
   seedvr2    SeedVR2 (ByteDance, Apache-2.0), a one-step video diffusion restorer, through the standalone CLI of
              numz/ComfyUI-SeedVR2_VideoUpscaler: options.repo (default <models>/src/seedvr2), options.args (CLI flags, e.g.
              {dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", blocks_to_swap = 16, batch_size = 5}).
+  refine     CPU, no model: other candidates' finished outputs (params `sources`, filled in by an eval candidate's `from`) kept faithful to
+             the tape: back-projection, a blend of two, or a local fallback where an upscale contradicts the tape (refine_step)
   flashvsr   FlashVSR+ (OpenImagingLab, Apache-2.0), streaming one-step video diffusion SR, through `python -m inference.run_stream`:
              options.repo (default <models>/src/flashvsr-plus), options.args ({mode = "turbo"} ...). Its output size must be a multiple of
              128 on each side (`engine_size`, default 1536 x 1152 for 4:3).
@@ -646,6 +648,10 @@ def load(model, models_dir):
         m = load_spandrel(o.get("file") or model.get("name"), models_dir, bool(o.get("half", True)))
         E.update(m)
         return dict(engine=eng, scale=m["scale"], architecture=m["architecture"], half=m["half"], device=m["device"])
+    if (
+        eng == "refine"
+    ):  # CPU (numpy, Pillow): works on other engines' finished outputs (params `sources`), nothing on the card
+        return dict(engine=eng)
     if eng in ("seedvr2", "flashvsr"):
         repo = o.get("repo") or os.path.join(models_dir, "src", "seedvr2" if eng == "seedvr2" else "flashvsr-plus")
         if not os.path.isdir(repo):
@@ -654,7 +660,7 @@ def load(model, models_dir):
             )
         E["repo"] = repo
         return dict(engine=eng, repo=repo)
-    raise RuntimeError(f"unknown engine {eng!r} (ffmpeg, spandrel, seedvr2, flashvsr)")
+    raise RuntimeError(f"unknown engine {eng!r} (ffmpeg, spandrel, seedvr2, flashvsr, refine)")
 
 
 def load_spandrel(f, models_dir, half=True, cpu=False):
@@ -796,6 +802,162 @@ def enhance_spandrel(p, src, out, popen=subprocess.Popen, cleanup=None):
     return pipe_frames(p, src, models, lambda w, h: finish_args(raw_input(w, h, fps), p, out, fps, audio), popen=popen)
 
 
+# ---- refine: keep an upscale faithful to the tape ---------------------------------------------------------------------------------------
+REFINE = ("backproject", "blend", "fallback")
+
+
+def _resize(a, w, h):
+    """An H x W x C float image resized with Pillow's bicubic (antialiased when shrinking), channel by channel."""
+    import numpy as np
+    from PIL import Image
+
+    return np.stack(
+        [np.asarray(Image.fromarray(a[..., c], "F").resize((w, h), Image.BICUBIC)) for c in range(a.shape[2])], axis=2
+    )
+
+
+def _box(a, k):
+    """Mean over a k x k window (edges clamped), for a 2-D array."""
+    import numpy as np
+
+    r = k // 2
+    p = np.pad(a, r, mode="edge")
+    c = np.cumsum(np.cumsum(p, 0), 1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    return (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
+
+
+def refine_step(method, lr, hrs, r):
+    """One frame. lr: the tape prepared (h x w x 3, 0..1 floats); hrs: the source outputs at the result's size (H x W x 3 each).
+    backproject  the first source, corrected `iterations` times by the difference between the tape and it shrunk back to the tape's size
+                 (bicubic), times `strength`: detail that agrees with the tape stays, what contradicts it is pulled back
+    blend        weight x the first source + (1 - weight) x the second
+    fallback     the first source, except where it shrunk back differs locally from the tape (mean colour difference over a `window`,
+                 between `low` and `high`): there the second source (or the tape enlarged) takes over"""
+    import numpy as np
+
+    H, W = hrs[0].shape[:2]
+    h, w = lr.shape[:2]
+    hr = hrs[0]
+    if method == "backproject":
+        for _ in range(int(r.get("iterations", 1))):
+            hr = hr + float(r.get("strength", 0.5)) * _resize(lr - _resize(hr, w, h), W, H)
+    elif method == "blend":
+        a = float(r.get("weight", 0.6))
+        hr = a * hr + (1 - a) * hrs[1]
+    else:
+        k = int(r.get("window", 7)) | 1
+        e = _box(np.abs(_resize(hr, w, h) - lr).mean(axis=2), k)
+        lo, hi = float(r.get("low", 0.03)), float(r.get("high", 0.08))
+        m = _resize(np.clip((e - lo) / max(hi - lo, 1e-6), 0, 1)[..., None].astype(np.float32), W, H)
+        faithful = hrs[1] if len(hrs) > 1 else _resize(lr, W, H)
+        hr = m * faithful + (1 - m) * hr
+    return np.clip(hr, 0, 1)
+
+
+def refine(p, src, out, fps, audio, popen=subprocess.Popen):
+    """The refine engine: the tape prepared and the `sources` (other candidates' finished outputs) decoded frame by frame, put through
+    `refine_step` (params refine = {method, ...}) and finished like any engine's frames. Returns 0 (no GPU)."""
+    import numpy as np
+
+    r = p.get("refine") or {}
+    method = r.get("method")
+    srcs = p.get("sources") or []
+    if method not in REFINE:
+        raise ParamError(f"refine method is {', '.join(REFINE)}, not {method!r}")
+    if not srcs or not all(isinstance(x, str) and os.path.isfile(x) for x in srcs):
+        raise ParamError(f"refine needs the source outputs (sources): {srcs!r}")
+    if method == "blend" and len(srcs) < 2:
+        raise ParamError("blend needs two sources")
+    W, H = _pair(p["size"], "size")
+    pw, ph = _pair(p["prep_size"], "prep_size")
+    tape = popen(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-i",
+            p["path"],
+            "-an",
+            "-vf",
+            prep_filter({**p, "cleanup": None}, src),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    ups = [
+        popen(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-i",
+                x,
+                "-an",
+                "-vf",
+                f"scale={W}:{H}:flags=lanczos",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-",
+            ],
+            stdout=subprocess.PIPE,
+        )
+        for x in srcs
+    ]
+    enc = popen(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", *finish_args(raw_input(W, H, fps), p, out, fps, audio)],
+        stdin=subprocess.PIPE,
+    )
+
+    def frame(buf, h, w):
+        return np.frombuffer(buf, np.uint8).reshape(h, w, 3).astype(np.float32) / 255.0
+
+    decoders = [tape, *ups]
+    n, done, ended = 0, False, []
+    try:
+        while True:
+            lb = tape.stdout.read(pw * ph * 3)
+            hb = [u.stdout.read(W * H * 3) for u in ups]
+            ended = [
+                i for i, (b, size) in enumerate([(lb, pw * ph * 3)] + [(b, W * H * 3) for b in hb]) if len(b) < size
+            ]
+            if ended:
+                break
+            y = refine_step(method, frame(lb, ph, pw), [frame(b, H, W) for b in hb], r)
+            enc.stdin.write(np.round(y * 255).astype(np.uint8).tobytes())
+            n += 1
+        done = True
+    finally:
+        if not done:
+            for proc in (*decoders, enc):
+                with contextlib.suppress(OSError):
+                    proc.kill()
+        with contextlib.suppress(OSError):
+            enc.stdin.close()
+        for i, proc in enumerate(
+            decoders
+        ):  # one still going (a longer stream than the one that ended) is cut, not waited for
+            if i not in ended:
+                with contextlib.suppress(OSError):
+                    proc.kill()
+        codes = [proc.wait() for proc in (*decoders, enc)]
+    # a decoder that stopped early must have stopped cleanly: one that failed part-way would otherwise pass for a short clip
+    bad = [("the tape" if i == 0 else f"source {i}") for i in ended if codes[i] != 0]
+    if bad or codes[-1] != 0 or n == 0:
+        raise RuntimeError(
+            f"ffmpeg failed ({', '.join(bad) + ' decoding, ' if bad else ''}encode exit {codes[-1]}, {n} frames)"
+        )
+    return 0.0
+
+
 def prepare_file(p, src, work, run=subprocess.run, cleanup=None, popen=subprocess.Popen):
     """The prepared clip as a file, for engines with a CLI of their own: lossless x264 (every reader opens it), the source's audio left out.
     With a cleanup model the frames go through it on the way. Returns (path, peak VRAM in MB)."""
@@ -921,6 +1083,8 @@ def _run(p, src, crop, tape, tape_src, stem, out, fps, audio, t0, vs_work, run_,
             vf = prep_filter(p, src) + (f",{extra}" if extra else "")
             ffmpeg(finish_args(["-i", p["path"]], p, out, fps, audio, prefilter=vf), run=run_)
             peak = 0.0
+    elif eng == "refine":
+        peak = refine(p, src, out, fps, audio, popen=popen)
     elif eng == "spandrel":
         peak = enhance_spandrel(p, src, out, popen=popen, cleanup=cm)
     else:

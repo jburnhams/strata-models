@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Refining an upscale toward the tape: candidates made from other candidates' outputs (branch `claude/video-refine`)**
+FlashVSR+ Turbo won every judged pair against lanczos but invents detail (Jonathan: "bad on the handwriting"), and its fidelity to the tape is the lowest of the candidates.
+
+- `evals/core.py`: a candidate's `from = [...]` names other candidates; its job params get their output paths as `sources`. It runs after them, waits while one is missing or failed (`waiting` in the result), and its result key includes theirs.
+- `workers/video.py`: engine `refine` (numpy and Pillow, CPU): `backproject` (correct by the difference between the tape and the result shrunk back, `iterations` x `strength`), `blend` (weight of the first source over the second), `fallback` (the second source where the first contradicts the tape locally). Measured on the title card: Turbo SSIM 0.938, one pass at half strength 0.970, full strength 0.990 (and back to lanczos's softness, with the tape's noise), a 60/40 blend with Real-ESRGAN x2 0.957.
+- `models.toml`: `video-refine` (vram 0). `video-enhance-vhs`: candidates turbo+backproject, turbo-blend-x2, turbo-fallback-x2.
+- Review fixes: the refine engine fails the job when the tape or a source decoder stopped with an error (a decoder that errors part-way otherwise looked like a short clip); `forget(candidate=X)` also forgets the outputs of candidates made from X (a rerun gives X a new output under the same key, and its refinements would have stayed cached).
+
 **font-match: the first trial of the shortlists, and two fixes it found (branch `claude/project-thread-01gj43`)**
 Trial on omarchy (scripts/evals/font_match_trial.py, 36 real and 29 synthetic blocks, 2026-11-14). Real blocks: class right 19 % trying every face, 56 % with qwen's shortlist then the fit, 69 % gemma, 78 % Gemini Flash; ink_f1 0.85 / 0.82 / 0.82 / 0.83 (naive 0.58). Synthetic (face in the catalogue): every face wins, exact face 76 % (top 3 83 %) against Flash's 45 %, gemma 28 %, qwen 31 %. A shortlist decides the class; the fit adds about 0.1 ink_f1 and the size. Seconds a block: every face 19, gemma 6.5, qwen 8, Flash 22 (about $0.006 a call if charged).
 - `fetch` wrote every download to `<face>.ttf.part`, so parallel fits fetching the same face collided (52 failed fits at 6 jobs): each writer now has its own temporary name.

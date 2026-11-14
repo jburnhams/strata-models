@@ -272,9 +272,14 @@ class Candidate:
     items: int | str | list[str] | None = (
         None  # a sample: the dataset's first N items, the items of another dataset, or a list of item ids (see "Samples" in the module docstring)
     )
+    sources: list = dataclasses.field(
+        default_factory=list
+    )  # `from`: candidates whose outputs this one is made from (their paths are its job's `sources`), see "Made from other candidates"
 
     def to_json(self):
         d = dataclasses.asdict(self)
+        if not self.sources:
+            d.pop("sources")
         if not self.stages:
             d.pop("stages")
         if self.items is None:
@@ -401,9 +406,17 @@ def parse_spec(d, source=""):
                 note=str(c.get("note", "")),
                 stages=[parse_stage(x) for x in c.get("stages") or []],
                 items=_sample_size(c.get("items")),
+                sources=[str(x) for x in (c.get("from") or [])],
             )
             for c in d["candidates"]
         ]
+        names = {c.name for c in cands}
+        for c in cands:
+            bad = [n for n in c.sources if n not in names or n == c.name]
+            if bad:
+                raise ValueError(f"candidate {c.name}: from names no other candidate: {bad}")
+            if any(next(x for x in cands if x.name == n).sources for n in c.sources):
+                raise ValueError(f"candidate {c.name}: made from a candidate that is itself made from others")
         s = Spec(
             name=str(d["name"]),
             question=str(d["question"]),
@@ -598,6 +611,8 @@ def result_key(spec, cand, item):
     )
     if cand.stages:
         d["stages"] = cand.stages
+    if cand.sources:  # made from other candidates' outputs: a new output of any of them makes this one anew
+        d["from"] = [result_key(spec, spec.candidate(n), item) for n in cand.sources]
     return _h(_canon(d), 32)
 
 
@@ -835,38 +850,67 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
         )
         failed += len(broken)
     todo = [t for t in todo if t not in broken]
-    for i in range(0, len(todo), batch):
-        chunk = todo[i : i + batch]
-        sent = [
-            ({**expand_params(c.params), **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k)
-            for c, it, k in chunk
-        ]
-        # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
-        # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
-        ids = [
-            (
-                recover
-                and (
-                    done_job(engine, spec.role, c.model, params, c.options)
-                    or pending_job(engine, spec.role, c.model, params, c.options)
+
+    def go(todo):
+        nonlocal failed, recovered
+        for i in range(0, len(todo), batch):
+            chunk = todo[i : i + batch]
+            sent = [
+                (
+                    with_sources(
+                        spec,
+                        engine,
+                        c,
+                        it,
+                        {**expand_params(c.params), **staged[k][0]} if k in staged else job_params(spec, c, it),
+                    ),
+                    c,
+                    it,
+                    k,
                 )
-            )
-            or executor.submit(spec.role, params, c.model, c.options)
-            for params, c, it, k in sent
-        ]  # recover: a finished job's output is taken; a queued or running one (left by a run a restart cut short) is waited on, not queued again
-        recovered += sum(isinstance(j, dict) for j in ids)
-        for (_params, c, it, k), jid in zip(sent, ids, strict=True):
-            j = (
-                jid if isinstance(jid, dict) else executor.wait(jid)
-            )  # wait outside the lock: the worker needs the store meanwhile
-            failed += j["status"] != "done"
-            save(
-                engine, [_result_row(spec, ds, c, it, k, j, staged)]
-            )  # each as it comes: a restart loses only the job running then
-        log(f"  {min(i + batch, len(todo))} of {len(todo)} run")
+                for c, it, k in chunk
+            ]
+            # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
+            # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
+            ids = [
+                (
+                    recover
+                    and (
+                        done_job(engine, spec.role, c.model, params, c.options)
+                        or pending_job(engine, spec.role, c.model, params, c.options)
+                    )
+                )
+                or executor.submit(spec.role, params, c.model, c.options)
+                for params, c, it, k in sent
+            ]  # recover: a finished job's output is taken; a queued or running one (left by a run a restart cut short) is waited on, not queued again
+            recovered += sum(isinstance(j, dict) for j in ids)
+            for (_params, c, it, k), jid in zip(sent, ids, strict=True):
+                j = (
+                    jid if isinstance(jid, dict) else executor.wait(jid)
+                )  # wait outside the lock: the worker needs the store meanwhile
+                failed += j["status"] != "done"
+                save(
+                    engine, [_result_row(spec, ds, c, it, k, j, staged)]
+                )  # each as it comes: a restart loses only the job running then
+            log(f"  {min(i + batch, len(todo))} of {len(todo)} run")
+
+    # candidates made from others' outputs run after them, once those are saved; one whose sources are missing or failed waits for a later run
+    made = [t for t in todo if t[0].sources]
+    go([t for t in todo if not t[0].sources])
+    ready = [t for t in made if sources_of(spec, engine, t[0], t[1]) is not None]
+    waiting = len(made) - len(ready)
+    if waiting:
+        log(f"  {waiting} wait for the outputs they are made from")
+    go(ready)
     if recovered:
         log(f"  {recovered} taken from jobs that had already finished")
-    out = dict(ran=ran - recovered, cached=total - ran, failed=failed, **({"recovered": recovered} if recover else {}))
+    out = dict(
+        ran=ran - recovered - waiting,
+        cached=total - ran,
+        failed=failed,
+        **({"recovered": recovered} if recover else {}),
+        **({"waiting": waiting} if waiting else {}),
+    )
     if spec.score:
         out["scored"] = score_outputs(
             spec, engine, executor, {result_key(spec, c, it): it for c in cands for it in items}, log, batch
@@ -969,6 +1013,26 @@ def scored_view(spec, output):
     if not spec.score or not isinstance(output, dict):
         return output
     return {**output, "scored": readings(output).get(score_key(spec))}
+
+
+def sources_of(spec, engine, cand, item):
+    """The output paths of the candidates `cand` is made from, for this item, in its `from` order; None while any is missing or failed."""
+    keys = [result_key(spec, spec.candidate(n), item) for n in cand.sources]
+    with session(engine) as s:
+        rows = {r.key: r for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(keys)))}
+    paths = []
+    for k in keys:
+        r = rows.get(k)
+        p = (r.output or {}).get("path") if r is not None and r.error is None and isinstance(r.output, dict) else None
+        if not isinstance(p, str):
+            return None
+        paths.append(p)
+    return paths
+
+
+def with_sources(spec, engine, cand, item, params):
+    """A made-from candidate's job params: its own, with the source outputs' paths as `sources`."""
+    return {**params, "sources": sources_of(spec, engine, cand, item)} if cand.sources else params
 
 
 def _result_row(spec, ds, c, it, k, j, staged):
@@ -1076,10 +1140,14 @@ def save(engine, rows):
 
 
 def forget(spec, engine, candidate=None, stages=False):
-    """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights).
+    """Drop the cached outputs of an experiment (one candidate, and those made from it, or all) so they run again (after a change the key does
+    not see, e.g. new weights).
     `stages`: a pipeline's stage outputs too (they are shared with other candidates that make the same first steps, so kept by default)."""
     ds = load_dataset(spec.dataset, engine=engine)
-    keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
+    # a candidate made from the forgotten one goes too: its output was made from the old one, and its key (built from the source's key,
+    # which a rerun keeps) would otherwise keep it cached
+    names = {c.name for c in spec.candidates if candidate in (None, c.name) or candidate in c.sources}
+    keys = [result_key(spec, c, it) for c in spec.candidates if c.name in names for it in ds.items]
     if stages:
         keys += [
             k
