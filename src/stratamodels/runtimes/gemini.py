@@ -129,7 +129,7 @@ def run(handle, params, post=cloud.post):
         if blocked:
             raise RunError(f"Gemini declined this request ({finish})")
         return dict(
-            cloud.answer(job, text),
+            cloud.answer(job, text, finish),
             tokens_in=u["tokens_in"] + u["cache_read"],
             tokens_out=u["tokens_out"],
             cost_usd=round(usd, 6),

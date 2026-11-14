@@ -288,11 +288,14 @@ def run(handle, params, probe=gpu.query, post=None):
         model=handle["key"],
         finish=r["choices"][0].get("finish_reason"),
     )
-    if schema:
+    if schema:  # an answer that is not the JSON asked for fails the job, so no caller (or eval) takes it for an answer
         try:
             out["json"] = json.loads(text)
         except ValueError:
-            out["json"] = None
+            why = "it ran out of tokens" if out["finish"] == "length" else "it is not valid JSON"
+            raise RunError(
+                f"no JSON answer: {why} (finish {out['finish']}, {out['tokens_out']} tokens out, {len(text)} characters of text)"
+            )
     return out
 
 

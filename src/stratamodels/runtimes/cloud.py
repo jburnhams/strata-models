@@ -174,14 +174,15 @@ def logged(job):
     )
 
 
-def answer(job, text):
-    """{text, json?}: the JSON parsed when a schema was asked for."""
+def answer(job, text, finish=None):
+    """{text, json?}: the JSON parsed when a schema was asked for. An answer that does not parse fails the job (RunError), so no caller (or
+    eval) takes it for an answer; the call is already in the spend ledger by then."""
     out = dict(text=text)
     if job["schema"]:
         try:
             out["json"] = json.loads(text)
         except ValueError:
-            pass
+            raise RunError(f"no JSON answer (finish {finish}, {len(text)} characters of text): {text[:200]!r}")
     return out
 
 
