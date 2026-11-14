@@ -1173,3 +1173,33 @@ def test_the_vapoursynth_stage_runs_desmear_in_numpy_on_real_frames():
     exec(body, ns)  # noqa: S102  (our own generated code, the same text the VapourSynth script runs: defines _desmear)
     out = ns["_desmear"](0, Frame())
     assert out.a.dtype == np.uint8 and abs(int(out.a.mean()) - 128) <= 1
+
+
+def _smear_kernels():
+    import pathlib
+    import tomllib
+
+    spec = tomllib.loads((pathlib.Path(__file__).parents[2] / "evals" / "specs" / "vhs-smear.toml").read_text())
+    return [
+        c["params"]["cleanup"]["vs"]["desmear"]
+        for c in spec["candidates"]
+        if "desmear" in c.get("params", {}).get("cleanup", {}).get("vs", {})
+    ]
+
+
+@pytest.mark.parametrize("d", _smear_kernels())
+def test_desmear_rows_leaves_a_flat_frame_as_it_was(d):
+    import numpy as np
+
+    y = np.full((4, 720), 200.0)
+    out = V.desmear_rows(y, d["taps"], d["h"], lam=d["lam"], sigma=d["sigma"])
+    assert np.abs(out - 200).max() < 0.5  # the regularisation does not dim it
+
+
+@pytest.mark.parametrize("d", _smear_kernels())
+def test_desmear_rows_does_not_wrap_the_row_end_into_its_start(d):
+    import numpy as np
+
+    y = np.where(np.arange(720) < 620, 128.0, 16.0)[None, :].repeat(2, axis=0)
+    out = V.desmear_rows(y, d["taps"], d["h"], lam=d["lam"], sigma=d["sigma"])
+    assert np.abs(out[:, :500] - 128).max() < 0.5  # flat far from the step, the left end included

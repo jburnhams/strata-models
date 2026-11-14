@@ -273,7 +273,10 @@ def desmear_rows(y, taps, h, lam=0.02, sigma=1.0, trail=None):
     import numpy as np
 
     _rows, w = y.shape
-    n = 1 << int(np.ceil(np.log2(w + 2 * max(abs(t) for t in taps) + 8)))
+    # both ends padded by edge replication (the FFT is circular: a row whose ends differ would otherwise ring from its far end into its
+    # start), by more than the filter's reach (the inverse of a smear decays over a few dozen pixels)
+    edge = 64 + 2 * max(abs(t) for t in taps)
+    n = 1 << int(np.ceil(np.log2(w + 2 * edge)))
 
     def spectrum(k, t):
         a = np.zeros(n)
@@ -285,8 +288,10 @@ def desmear_rows(y, taps, h, lam=0.02, sigma=1.0, trail=None):
     gt = list(range(-4 * max(1, int(np.ceil(sigma))), 4 * max(1, int(np.ceil(sigma))) + 1))
     g = np.exp(-0.5 * (np.array(gt) / max(sigma, 1e-3)) ** 2)
     G = spectrum(g / g.sum(), gt)
-    pad = np.pad(y.astype(np.float64), ((0, 0), (0, n - w)), mode="edge")
-    out = np.fft.irfft(np.fft.rfft(pad, axis=1) * (G * np.conj(H) / (np.abs(H) ** 2 + lam)), n=n, axis=1)[:, :w]
+    T = G * np.conj(H) / (np.abs(H) ** 2 + lam)
+    T = T / T[0].real  # unit gain at zero frequency: lam would otherwise dim flat areas by 1 / (1 + lam)
+    pad = np.pad(y.astype(np.float64), ((0, 0), (edge, n - w - edge)), mode="edge")
+    out = np.fft.irfft(np.fft.rfft(pad, axis=1) * T, n=n, axis=1)[:, edge : edge + w]
     if trail:
         a, tau, dark = float(trail.get("a", 0.016)), float(trail.get("tau", 60)), float(trail.get("dark", 40))
         paper = np.percentile(out, 70, axis=1, keepdims=True)
