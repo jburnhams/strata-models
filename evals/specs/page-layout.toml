@@ -14,7 +14,10 @@ guards = { failed = 1.0 }
 # Tesseract has no roles (every block is body) and finds no figures, so role_acc and figure_f1 measure what a reader adds over it; block_f1
 # and order_tau compare the segmentation itself. page_ink_f1 is context here: a vision model gives no line boxes, so its lines are spread
 # evenly over each block and its ink lands worse than Tesseract's measured lines even with a better layout. The rebuild that strata-scan
-# wants combines them (a model's blocks and roles, Tesseract's lines), which is the next eval once a layout reader wins this one.
+# wants combines them (a model's blocks and roles, Tesseract's lines): the *-fix candidates below, as in ocr-pages, where a model correcting
+# Tesseract beat both. Tesseract's lines go to the model numbered (page-build list_lines), it regroups them and adds the figures
+# (page-layout-fix-v1), and page-build draws Tesseract's own lines in its blocks. psm 3 stays: psm 4 and flatten, best for OCR text, found
+# fewer blocks (2026-11-14 on these pages: block_f1 psm 3 77%, psm 4 67%, flatten 64%, flatten + psm 4 63%).
 
 [[candidates]]
 name = "tesseract"
@@ -70,3 +73,104 @@ params = { preset = "page-layout-v1", max_tokens = 8192 }
 input = "{image}"
 send = "image"
 into = "layout"
+
+[[candidates]]
+name = "sonnet-layout"
+model = "pagebuild"
+note = "Haiku found a quarter of the blocks (2026-11-14): does the larger Claude manage it? A few cents a page"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-v1", max_tokens = 8192 }
+input = "{image}"
+send = "image"
+into = "layout"
+
+# ---- After Tesseract: its lines regrouped into blocks by a vision model looking at the page --------------------------------------------
+
+[[candidates]]
+name = "qwen-fix"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "qwen3.5-9b-vl"
+params = { preset = "page-layout-fix-v1", max_tokens = 8192, temperature = 0.0 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates]]
+name = "flash-fix"
+model = "pagebuild"
+note = "flash-layout won with its own blocks (2026-11-14): do Tesseract's lines make it better still?"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemini-3.8-flash-api"
+params = { preset = "page-layout-fix-v1", max_tokens = 16384 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates]]
+name = "haiku-fix"
+model = "pagebuild"
+note = "numbers instead of boxes: does Haiku manage this where it missed three blocks in four alone?"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-layout-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates]]
+name = "sonnet-fix"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"

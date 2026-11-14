@@ -10,6 +10,11 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   layout      a vision model's reading of the page (preset page-layout-v1): blocks in reading order, each a box [x0, y0, x1, y1] in
               thousandths of the page's width and height, a role and its lines of text; figures as boxes and kinds. Each block's lines
               share its height evenly (the model gives no line boxes), so the drawing is rough; the layout metrics read the boxes
+  groups      with `ocr`: a vision model's regrouping of Tesseract's lines (preset page-layout-fix-v1, which is shown them numbered by
+              `list_lines`): blocks in reading order, each the numbers of its lines and a role, and figures as boxes in thousandths. The
+              lines keep Tesseract's measured boxes and text; a line in no block is left out (a stain, a stamp, the next page showing through)
+  list_lines  with `ocr`: draw nothing, answer {text: Tesseract's lines numbered for page-layout-fix-v1, one a line: number, Tesseract's
+              block, box [x0, y0, x1, y1] in thousandths, text; lines}
   image       the page picture: its size and dpi for `layout`, its dpi for `ocr` (the boxes stay in the ocr answer's pixels; an upscaled read
               scales the dpi)
   dpi         the scan's resolution when the picture does not say
@@ -22,6 +27,7 @@ Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs s
 
 import glob
 import hashlib
+import itertools
 import json
 import os
 import time
@@ -71,6 +77,107 @@ def from_ocr(ocr: Mapping[str, Any], dpi: float, width: float | None = None, hei
     blocks = [Block(box=_union([ln.box for ln in lines[b]]), lines=lines[b], order=i) for i, b in enumerate(order)]
     try:
         return Page(width=w, height=h, dpi=dpi, blocks=blocks)
+    except PageError as e:
+        raise RunError(f"ocr answer has no page size: {e}") from e
+
+
+GAP = 1.5  # a space between words wider than this many line heights splits a line: a running head and its folio, side-by-side columns
+
+
+def _pieces(ln: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """One Tesseract line, split where its words stand far apart. Tesseract reads a running head and the page number at the end of it as one
+    line, which no regrouping could then part (the commonest block it gets wrong on these pages); a justified line's spaces are well under a
+    line height, so only a real gap splits."""
+    words = [w for w in cast("list[Mapping[str, Any]]", ln.get("words") or []) if str(w.get("text") or "").strip()]
+    if len(words) < 2:
+        return [ln]
+    h = float(cast("Sequence[Any]", ln["box"])[3])
+    runs: list[list[Mapping[str, Any]]] = [[words[0]]]
+    for a, b in itertools.pairwise(words):
+        ab, bb = cast("Sequence[Any]", a["box"]), cast("Sequence[Any]", b["box"])
+        if float(bb[0]) - (float(ab[0]) + float(ab[2])) > GAP * h:
+            runs.append([])
+        runs[-1].append(b)
+    if len(runs) == 1:
+        return [ln]
+    return [
+        {
+            **ln,
+            "box": list(_union([cast("Sequence[float]", w["box"]) for w in r])),
+            "text": " ".join(str(w["text"]) for w in r),
+            "words": r,
+        }
+        for r in runs
+    ]
+
+
+def ocr_lines(ocr: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The lines of an ocr answer that hold text, in its order, each split at wide gaps between its words (`_pieces`): what `list_lines`
+    numbers from 1 and `groups` refers to by those numbers."""
+    return [
+        p
+        for ln in cast("list[Mapping[str, Any]]", ocr.get("lines") or [])
+        if str(ln.get("text") or "").strip()
+        for p in _pieces(ln)
+    ]
+
+
+def list_lines(ocr: Mapping[str, Any]) -> str:
+    w, h = float(ocr.get("width") or 0), float(ocr.get("height") or 0)
+    if not w or not h:
+        raise RunError("the ocr answer has no page size")
+    out: list[str] = []
+    for n, ln in enumerate(ocr_lines(ocr), 1):
+        x, y, bw, bh = (float(v) for v in cast("Sequence[Any]", ln["box"]))
+        box = ",".join(str(round(v)) for v in (x * 1000 / w, y * 1000 / h, (x + bw) * 1000 / w, (y + bh) * 1000 / h))
+        out.append(f"{n} b{int(ln.get('block') or 0)} [{box}] {str(ln['text']).strip()}")
+    return "\n".join(out)
+
+
+def from_groups(ocr: Mapping[str, Any], groups: Mapping[str, Any], dpi: float, w: float, h: float) -> Page:
+    """Tesseract's lines regrouped by a vision model: each block the lines it names (in Tesseract's order within the block, which reads them
+    top to bottom; a line named twice stays in its first block), its box their union, its role the model's; figures in thousandths of the
+    page. A block naming no line there is dropped, so a model that numbers wrongly loses blocks rather than inventing them."""
+    lines = ocr_lines(ocr)
+    taken: set[int] = set()
+    blocks: list[Block] = []
+    for i, g in enumerate(cast("list[Mapping[str, Any]]", groups.get("blocks") or [])):
+        nums: list[int] = []
+        for v in cast("list[Any]", g.get("lines") or []):
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= n <= len(lines) and n not in taken:
+                taken.add(n)
+                nums.append(n)
+        if not nums:
+            continue
+        mine = [
+            Line(box=cast("Any", tuple(float(v) for v in lines[n - 1]["box"])), spans=[Span(str(lines[n - 1]["text"]))])
+            for n in sorted(nums)
+        ]
+        try:
+            blocks.append(
+                Block(
+                    box=_union([ln.box for ln in mine]),
+                    lines=mine,
+                    role=str(g.get("role") or "body"),
+                    order=len(blocks),
+                )
+            )
+        except PageError as e:
+            raise RunError(f"bad groups (block {i}): {e}") from e
+    figures: list[Figure] = []
+    for i, f in enumerate(cast("list[Mapping[str, Any]]", groups.get("figures") or [])):
+        try:
+            figures.append(
+                Figure(box=_permille(f.get("box"), w, h, f"figure {i}"), kind=str(f.get("kind") or "figure"))
+            )
+        except PageError as e:
+            raise RunError(f"bad groups: {e}") from e
+    try:
+        return Page(width=w, height=h, dpi=dpi, blocks=blocks, figures=figures)
     except PageError as e:
         raise RunError(f"ocr answer has no page size: {e}") from e
 
@@ -182,12 +289,21 @@ def page_of(params: Mapping[str, Any]) -> Page:
             dpi = float(params.get("dpi") or 0)
             if not dpi:
                 raise RunError("give the page picture (image) or its dpi with an ocr answer")
+        groups = _json(params.get("groups"), "groups")
+        if isinstance(groups, Mapping):
+            return from_groups(o, cast("Mapping[str, Any]", groups), dpi, float(w or 0), float(h or 0))
         return from_ocr(o, dpi, w, h)
     raise RunError("give a page description (page), an ocr answer (ocr) or a layout (layout)")
 
 
 def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     t0 = time.monotonic()
+    if params.get("list_lines"):
+        ocr = _json(params.get("ocr"), "ocr answer")
+        if not isinstance(ocr, Mapping):
+            raise RunError("list_lines needs an ocr answer (ocr)")
+        text = list_lines(cast("Mapping[str, Any]", ocr))
+        return dict(text=text, lines=text.count("\n") + 1 if text else 0, model=handle.get("key"))
     page = page_of(params)
     fonts = _fonts(params)
     fit = params.get("fit", True) is not False
