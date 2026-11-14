@@ -465,6 +465,8 @@ def test_a_vision_judge_sees_videos_as_region_stills_beside_the_tape():
     )
     assert "Region Text, moment 1: picture 4 is X, picture 5 is Y." in text  # no tape crop for this region
     assert "Reference" not in text and "secret" not in text and "/m/c.mp4" not in text
+    hidden = J.prompt(spec, dict(j, reference=False), item, x, y)  # the tape is the reference: hidden with it
+    assert "/m/c.face.3s.png" not in hidden[2] and "the tape" not in hidden[1] and len(hidden[2]) == 4
     bare = J.prompt(
         spec,
         j,

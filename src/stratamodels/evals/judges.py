@@ -239,15 +239,16 @@ def shown(output):
     return json.dumps({k: v for k, v in o.items() if k not in HIDDEN}, ensure_ascii=False, indent=1)
 
 
-def _video_stills(item, x, y):
+def _video_stills(item, x, y, reference=True):
     """For a pair of videos (video-enhance), what a vision judge can see: per region both outputs have, the tape's crop (the item's reference)
     and X's and Y's at the same moments, as (caption, [pictures]) in that order; with no regions, X's and Y's whole-frame stills. Empty unless
-    both outputs are videos."""
+    both outputs are videos. reference=False (a judge with `reference = false`) leaves the tape's crops out: X's and Y's only."""
     from stratamodels.evals import similarity as SIM
 
     if not (SIM.video_path(x) and SIM.video_path(y)):
         return []
-    ref = {c.get("id"): c for c in ((item.get("reference") or {}).get("crops") or []) if isinstance(c, dict)}
+    crops = (item.get("reference") or {}).get("crops") if reference else None
+    ref = {c.get("id"): c for c in (crops or []) if isinstance(c, dict)}
     cy = {c.get("id"): c for c in (y.get("crops") or []) if isinstance(c, dict)}
     out = []
     for c in x.get("crops") or []:
@@ -281,7 +282,7 @@ def prompt(spec, j, item, x, y, cut=None):
         parts.append(f"The input picture{'s are' if len(imgs) > 1 else ' is'} attached first ({len(imgs)}).")
     if inp:
         parts.append("Input:\n" + json.dumps(inp, ensure_ascii=False, indent=1))
-    vid = _video_stills(item, C.without_pipeline(x), C.without_pipeline(y)) if vision else []
+    vid = _video_stills(item, C.without_pipeline(x), C.without_pipeline(y), j.get("reference", True)) if vision else []
     if (
         item.get("reference") and not vid and j.get("reference", True)
     ):  # a video item's reference is the tape itself, shown as pictures below, not a right answer
