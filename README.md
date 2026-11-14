@@ -32,7 +32,7 @@ Standard library only; see [client/README.md](client/README.md). Inputs are file
 ```bash
 uv sync --group gpu                  # .venv with the service, the test tools and the model runtimes (CPU-only machines: uv sync)
 ./strata-models doctor               # libraries, runtimes, GPU
-dbtool new-app stratamodels          # once: the schema in the shared database (migrations run at start)
+uv run strata-db new-app stratamodels  # once: the schema in the shared database (migrations run at start); the service needs STRATA_DB_LIVE=1 and STRATA_DB_DATABASE
 ./strata-models serve                # http://127.0.0.1:8366/ (--memory: keep jobs in memory, no database)
 ./strata-models status | jobs | registry
 ```

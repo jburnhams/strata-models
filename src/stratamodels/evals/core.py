@@ -561,8 +561,25 @@ def load_spec(name, engine=None):
 
 
 # ---- running ------------------------------------------------------------------------------------------------------------------------------
+def expand(v):
+    """A candidate's string params may name files under the service's data folder as "{data}/...", so a spec holds no machine's paths (the
+    runner's voice for the cloning TTS candidates, say). Expanded when the job is made, so the result key is the same as for the full path."""
+    if isinstance(v, str) and "{data}" in v:
+        return v.replace("{data}", settings.data_dir())
+    if isinstance(v, list):
+        return [expand(x) for x in v]
+    if isinstance(v, dict):
+        return {k: expand(x) for k, x in v.items()}
+    return v
+
+
+def expand_params(params: dict) -> dict:
+    """A candidate's params with "{data}" filled in (expand)."""
+    return {k: expand(v) for k, v in params.items()}
+
+
 def job_params(spec, cand, item):
-    return {**cand.params, **item["input"]}
+    return {**expand_params(cand.params), **item["input"]}
 
 
 def result_key(spec, cand, item):
@@ -742,7 +759,8 @@ def cached(engine, keys):
 def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=print, batch=32, recover=False):
     """Run what is missing: every (candidate, item) without a cached output goes to `executor` (submit(role, params, model, options) -> job id;
     wait(job id) -> job row). Each output is saved as its job finishes. `recover`: a job that already finished with exactly the same params is
-    taken from the jobs table instead of run again (the run that queued it was lost to a restart); off by default, so `forget` then `run`
+    taken from the jobs table instead of run again, and one still queued or running is waited on (the run that queued it was lost to a
+    restart); off by default, so `forget` then `run`
     makes new outputs. Returns dict(ran, cached, failed), and recovered when asked to."""
     ds = dataset or load_dataset(spec.dataset, engine=engine)
     items = ds.items[:limit] if limit else ds.items
@@ -783,15 +801,22 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     for i in range(0, len(todo), batch):
         chunk = todo[i : i + batch]
         sent = [
-            ({**c.params, **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k) for c, it, k in chunk
+            ({**expand_params(c.params), **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k)
+            for c, it, k in chunk
         ]
         # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
         # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
         ids = [
-            (recover and done_job(engine, spec.role, c.model, params, c.options))
+            (
+                recover
+                and (
+                    done_job(engine, spec.role, c.model, params, c.options)
+                    or pending_job(engine, spec.role, c.model, params, c.options)
+                )
+            )
             or executor.submit(spec.role, params, c.model, c.options)
             for params, c, it, k in sent
-        ]
+        ]  # recover: a finished job's output is taken; a queued or running one (left by a run a restart cut short) is waited on, not queued again
         recovered += sum(isinstance(j, dict) for j in ids)
         for (_params, c, it, k), jid in zip(sent, ids, strict=True):
             j = (
@@ -965,6 +990,31 @@ def done_job(engine, role, model, params, options=None):
         for job, res in rows:
             if _canon(job.params or {}) == want:
                 return dict(id=job.id, status="done", result=res.output, run_s=job.run_s, load_s=job.load_s)
+    return None
+
+
+def pending_job(engine, role, model, params, options=None):
+    """The id of a queued or running job of `role` on `model` (or a variant of it) whose params were exactly these, or None: after a restart
+    the queue keeps the jobs of a run that is gone, and a resumed run waits on them instead of queuing copies. (A job running when the service
+    stopped is marked failed at start, so only jobs that will still run are found.)"""
+    from stratamodels.db.models import Job
+    from stratamodels.scheduler import OPTIONS
+
+    want = _canon({**params, **({OPTIONS: dict(options)} if options else {})})
+    with session(engine) as s:
+        for job in s.scalars(
+            select(Job)
+            .where(
+                Job.kind == "run",
+                Job.status.in_(("queued", "running")),
+                Job.role == role,
+                or_(Job.model == model, Job.model.startswith(f"{model}~")),
+            )
+            .order_by(Job.id.asc())
+            .limit(500)
+        ):
+            if _canon(job.params or {}) == want:
+                return job.id
     return None
 
 

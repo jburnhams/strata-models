@@ -331,6 +331,37 @@ def test_cost_per_item():
     assert (c.shape, c.better) == ("mean", "lower")
 
 
+def test_description_fields_read_the_flat_fields_preset_too():
+    ref = dict(
+        caption="x",
+        setting=dict(indoor_outdoor="outdoor", time_of_day="day", weather="sunny"),
+        people=dict(count=2, children=1, main_subject_is_person=True),
+        lighting=dict(sources=[dict(type="daylight", share=1.0)], level="normal"),
+        exposure=dict(sharpness="sharp"),
+        colour=dict(skin_visible=True),
+        text_visible=["EELS"],
+    )
+    flat = dict(
+        indoor_outdoor="outdoor",
+        time_of_day="day",
+        weather="sunny",
+        people_count=2,
+        children=1,
+        main_subject_is_person=True,
+        main_light="daylight",
+        light_level="normal",
+        sharpness="sharp",
+        skin_visible=True,
+        text_visible=True,
+    )
+    item = dict(reference=dict(description=ref))
+    assert M.METRICS["desc_fields"].score(item, dict(json=flat), None) == 1.0
+    assert M.METRICS["desc_fields"].score(
+        item, dict(json=dict(flat, text_visible=False, children=0)), None
+    ) == pytest.approx(9 / 11)
+    assert M._has_text(dict(text_visible="x")) is None and M._children(dict(children=True)) is None
+
+
 # ---- fonts (role font-match) --------------------------------------------------------------------------------------------------------------
 def _font_item(tmp_path, reference):
     from PIL import Image, ImageDraw

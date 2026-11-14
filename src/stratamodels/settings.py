@@ -15,8 +15,9 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
                   budget is one pot that only goes down. (NVIDIA NIM is free and only rate-limited: no budget.)
 
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
-STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB. The database is chosen by omarchy-db:
-STRATAMODELS_DATABASE_URL, else OMARCHY_DB_URL, else schema `stratamodels` of the shared `omarchy` database over the local socket."""
+STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB. The database is chosen by strata_python.db:
+STRATA_DB_URL, else STRATAMODELS_DATABASE_URL, else schema `stratamodels` of the shared database named in STRATA_DB_DATABASE over the local
+socket (a real Postgres only with STRATA_DB_LIVE=1, set in the service unit)."""
 
 import json
 import os

@@ -473,6 +473,32 @@ def test_video_enhance_on_the_gpu(key, tmp_path):
     assert out["peak_vram_mb"] < 11.5 * 1024  # fits the 12 GB card with room for the service
 
 
+def test_page_build_draws_a_page_through_the_registered_role(tmp_path):
+    # CPU lane (vram_gb 0), so it runs without measure()'s GPU readings: the registered role end to end, load, run twice, unload
+    model = Registry.load().resolve("page-build")
+    assert model.vram_gb == 0
+    rt = runtimes.get(model.runtime)
+    h = rt.load(model, MODELS)
+    page = dict(
+        width=1200,
+        height=800,
+        dpi=150,
+        blocks=[
+            dict(
+                box=[100, 100, 1000, 60],
+                role="heading",
+                lines=[dict(box=[100, 100, 1000, 60], spans=[dict(text="PUNCH AND JUDY")])],
+            )
+        ],
+    )
+    out = rt.run(h, dict(page=page, out=str(tmp_path / "p.pdf")))
+    again = rt.run(h, dict(page=page, out=str(tmp_path / "q.pdf")))
+    rt.unload(h)
+    assert out["text"].strip() == "PUNCH AND JUDY"
+    assert open(out["pdf"], "rb").read() == open(again["pdf"], "rb").read()  # the same description draws the same bytes
+    assert out["png"] and os.path.isfile(out["png"])
+
+
 def test_font_match_fits_the_real_catalogue(tmp_path):
     """The real catalogue path: faces fetched from Google Fonts into the models folder, a block set in one of them, and the fit naming it.
     CPU only (vram 0), but here because it downloads."""

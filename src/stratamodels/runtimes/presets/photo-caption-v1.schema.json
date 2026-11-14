@@ -1,0 +1,45 @@
+{
+ "type": "object",
+ "properties": {
+  "caption": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "tags": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "minItems": 5,
+   "maxItems": 25
+  },
+  "text_visible": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 20
+  },
+  "place_type": {
+   "type": "string"
+  },
+  "place_guess": {
+   "type": "string"
+  },
+  "event": {
+   "type": "string"
+  }
+ },
+ "required": [
+  "caption",
+  "description",
+  "tags",
+  "text_visible",
+  "place_type",
+  "place_guess",
+  "event"
+ ],
+ "additionalProperties": false
+}

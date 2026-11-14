@@ -62,7 +62,9 @@ def test_parse_prompt_preset_images_and_refusals(tmp_path):
 def test_answer_parses_json_only_with_a_schema():
     assert cloud.answer(dict(schema=None), '{"a": 1}') == {"text": '{"a": 1}'}
     assert cloud.answer(dict(schema={"type": "object"}), '{"a": 1}') == {"text": '{"a": 1}', "json": {"a": 1}}
-    assert cloud.answer(dict(schema={"type": "object"}), "not json") == {"text": "not json"}
+    with pytest.raises(RunError, match="no JSON answer .finish max_tokens"):
+        cloud.answer(dict(schema={"type": "object"}), '{"a": ', "max_tokens")
+    assert cloud.answer(dict(schema=None), "plain") == {"text": "plain"}
 
 
 def test_post_success_http_error_and_unreachable(monkeypatch, tmp_path):
@@ -260,10 +262,10 @@ def test_gemini_free_first_then_paid(ledger, tmp_path, monkeypatch):  # noqa: F8
     key_file(tmp_path, monkeypatch, GEMINI_FREE_API_KEY="free-0123456789", GEMINI_API_KEY="paid-0123456789")
     settings.save(dict(gemini_budget_usd=1.0))
     h = gemini.load(model("flash", model="gemini-3.8-flash", price=G), "/m")
-    post = Post(reply(cached=40))
+    post = Post(reply('{"ok": 1}', cached=40))
     out = gemini.run(h, dict(prompt="hi", system="s", effort="low", schema={"type": "object"}), post=post)
     assert (out["text"], out["provider"], out["cost_usd"], out["tokens_in"], out["tokens_out"]) == (
-        "ok",
+        '{"ok": 1}',
         "gemini-free",
         0.0,
         100,

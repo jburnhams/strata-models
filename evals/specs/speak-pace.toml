@@ -34,19 +34,19 @@ note = "Kokoro says it again at the speed that lands on 160"
 [[candidates]]
 name = "chatterbox-runner"
 model = "chatterbox"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
+params = { voice = "{data}/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
 note = "unpaced, as in speak-narration"
 
 [[candidates]]
 name = "chatterbox-runner-160"
 model = "chatterbox"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5, wpm = 160, tries = 3 }
+params = { voice = "{data}/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5, wpm = 160, tries = 3 }
 note = "3 takes, the nearest to 160 kept, then stretched"
 
 [[candidates]]
 name = "chatterbox-turbo-runner-160"
 model = "chatterbox-turbo"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", wpm = 160, tries = 3 }
+params = { voice = "{data}/evals/voices/runner.wav", wpm = 160, tries = 3 }
 
 [[candidates]]
 name = "qwen3-design-narrator-160"
@@ -56,4 +56,4 @@ params = { instruct = "A British man in his forties, warm and calm, telling his 
 [[candidates]]
 name = "qwen3-clone-runner-160"
 model = "qwen3-tts-clone"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", voice_text_file = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.txt", wpm = 160, tries = 2 }
+params = { voice = "{data}/evals/voices/runner.wav", voice_text_file = "{data}/evals/voices/runner.txt", wpm = 160, tries = 2 }
