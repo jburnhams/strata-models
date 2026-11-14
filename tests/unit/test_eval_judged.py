@@ -251,3 +251,27 @@ def test_score_takes_params_from_the_item(tts, scheduler):
                     candidates=[dict(name="a", model="m")],
                 )
             )
+
+
+def test_data_placeholder_in_params_is_the_data_folder(tts):
+    import os
+
+    data = os.environ["STRATAMODELS_DATA"]
+    c = C.Candidate(
+        name="v",
+        model="small",
+        params=dict(voice="{data}/evals/voices/r.wav", more=["{data}/a", 3], deep=dict(f="{data}/b")),
+    )
+    it = dict(id="n0", input=dict(speak="hi"))
+    p = C.job_params(tts, c, it)
+    assert (
+        p["voice"] == os.path.join(data, "evals", "voices", "r.wav").replace(os.sep, "/")
+        or p["voice"] == data + "/evals/voices/r.wav"
+    )
+    assert p["more"] == [data + "/a", 3] and p["deep"] == dict(f=data + "/b") and p["speak"] == "hi"
+    full = C.Candidate(
+        name="v",
+        model="small",
+        params=dict(voice=data + "/evals/voices/r.wav", more=[data + "/a", 3], deep=dict(f=data + "/b")),
+    )
+    assert C.result_key(tts, c, it) == C.result_key(tts, full, it)  # outputs made with the full path stay cached
