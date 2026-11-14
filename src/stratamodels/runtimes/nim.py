@@ -106,7 +106,7 @@ def run(handle, params, post=cloud.post, sleep=time.sleep):
         response=text,
     )
     return dict(
-        cloud.answer(job, text),
+        cloud.answer(job, text, ch.get("finish_reason")),
         tokens_in=tin,
         tokens_out=tout,
         cost_usd=0.0,
