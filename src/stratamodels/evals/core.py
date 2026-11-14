@@ -58,7 +58,7 @@ import os
 import time
 import tomllib
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from stratamodels import settings
 from stratamodels.db.models import EvalCandidate, EvalDataset, EvalExperiment, EvalItem, EvalJudgment, EvalResult
@@ -953,7 +953,12 @@ def done_job(engine, role, model, params, options=None):
         rows = s.execute(
             select(Job, JobResult)
             .join(JobResult, JobResult.job_id == Job.id)
-            .where(Job.kind == "run", Job.status == "done", Job.role == role, Job.model == model)
+            .where(
+                Job.kind == "run",
+                Job.status == "done",
+                Job.role == role,
+                or_(Job.model == model, Job.model.startswith(f"{model}~")),
+            )  # a candidate with load options ran on a variant, `model~<hash>`; the params check below (options included) picks the right one
             .order_by(Job.id.desc())
             .limit(500)
         ).all()

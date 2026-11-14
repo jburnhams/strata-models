@@ -549,5 +549,12 @@ def test_recover_takes_outputs_from_jobs_that_already_finished(setup, scheduler,
             C.done_job(engine, s.role, opt.model, C.job_params(s, opt, C.load_dataset(s.dataset).items[0]), opt.options)
             is None
         )
+        C.run(
+            s, engine, C.SchedulerExecutor(scheduler), candidates=["same"], limit=3, log=lambda m: None
+        )  # load options: ran on `small~<hash>`
+        C.forget(s, engine, candidate="same")
+        assert C.run(
+            s, engine, C.SchedulerExecutor(scheduler), candidates=["same"], limit=3, log=lambda m: None, recover=True
+        ) == dict(ran=0, cached=0, failed=0, recovered=3)  # found on the variant, not rerun
     finally:
         stop.set()
