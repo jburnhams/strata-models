@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-13
 
+**SeedVR2 decodes in 512 px tiles (branch `claude/seedvr2-decode-tiles`)**
+The first SeedVR2 3B run on the RTX 3060 (one clip, 2026-11-13) finished its DiT pass (80 batches of 5 frames, ~6.5 min) and ran out of memory at the first VAE decode batch: 1024 px tiles took allocation from 8.8 to 10.7 GiB. `models.toml`: VAE encode and decode tiles 512 px with 64 px overlap.
+
 **An `ocr` role on Tesseract, for strata-scan (branch `claude/project-thread-0n1ijc`)**
 Jonathan is turning strata-scan into an app for scanned books (rotate, crop, text and pictures out) and asked for the model work to live here. A page needs its lines and words with boxes, which Tesseract gives on the CPU, so the role uses the CPU lane and never waits for the GPU; a vision-language reader is the eval to run against it later.
 

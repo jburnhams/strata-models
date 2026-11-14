@@ -712,7 +712,7 @@ vram_gb = 10.0                               # with block swap; batch_size 5 (4n
 licence = "Apache-2.0"
 source = "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler"
 used_by = []
-options = { worker = "video", venv = "seedvr2", engine = "seedvr2", timeout_s = 10800, args = { dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", batch_size = 5, blocks_to_swap = 16, dit_offload_device = "cpu", vae_encode_tiled = true, vae_decode_tiled = true, color_correction = "lab" } }
+options = { worker = "video", venv = "seedvr2", engine = "seedvr2", timeout_s = 10800, args = { dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", batch_size = 5, blocks_to_swap = 16, dit_offload_device = "cpu", vae_encode_tiled = true, vae_decode_tiled = true, vae_encode_tile_size = 512, vae_encode_tile_overlap = 64, vae_decode_tile_size = 512, vae_decode_tile_overlap = 64, color_correction = "lab" } }   # 1024 px decode tiles ran out of the 12 GB card (8.8 -> 10.7 GiB)
 
 [models.video-flashvsr-plus-turbo]
 runtime = "venv-worker"
