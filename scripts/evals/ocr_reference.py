@@ -40,7 +40,7 @@ LIMIT = 10 * 1024 * 1024  # the Claude API's largest image, counted as base64
 def fit(path, long_edge=2576):
     """A copy of the page small enough to send: under the API's 10 MB (base64) and no longer than `long_edge` on its long side (the API scales
     bigger pictures down anyway, so nothing it would read is lost). A page that already fits is sent as it is."""
-    if os.path.getsize(path) * 4 / 3 < LIMIT * 0.95:
+    if not os.path.exists(path) or os.path.getsize(path) * 4 / 3 < LIMIT * 0.95:
         return path
     from PIL import Image
 
@@ -97,7 +97,11 @@ def main(argv=None):
                 break
             # role vision-language: the cloud runtime reads the same params under either role, and every cloud model serves it
             r = sm.run(
-                "vision-language", dict(PARAMS, image=fit(pages[item][0])), app="evals", priority="normal", model=a.model
+                "vision-language",
+                dict(PARAMS, image=fit(pages[item][0])),
+                app="evals",
+                priority="normal",
+                model=a.model,
             )
             text = (r.get("text") or "").strip()
             spent += r.get("cost_usd") or 0.0
