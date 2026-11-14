@@ -112,7 +112,19 @@ def capped(cmd, memory_max_gb, env=None, which=None, platform=None):
     if not platform.startswith("linux") or not run or not runtime or not os.path.exists(os.path.join(runtime, "bus")):
         return cmd
     gb = float(memory_max_gb)
-    return [run, "--user", "--scope", "--quiet", "--collect", "-p", f"MemoryMax={gb:g}G", "-p", "MemorySwapMax=0", "--", *cmd]
+    return [
+        run,
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "-p",
+        f"MemoryMax={gb:g}G",
+        "-p",
+        "MemorySwapMax=0",
+        "--",
+        *cmd,
+    ]
 
 
 def load(model, models_dir, popen=subprocess.Popen):
