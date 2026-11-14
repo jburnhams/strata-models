@@ -161,9 +161,9 @@ def needs_vs(p):
 
 def vs_script(p, path):
     """A VapourSynth script (text) for the stage: the clip through bestsource with its field order set, deinterlaced (qtgmc: vsjetpack's
-    QTempGaussMC; bwdif: the bwdif plugin, double rate) and denoised by cleanup.vs = {degrain = {tr, thsad, blksize}, planes?}
-    (vsjetpack's mc_degrain: SMDegrain's motion-compensated temporal average, on vs.planes, else the cleanup's `planes`). The output is
-    progressive at the field rate."""
+    QTempGaussMC; bwdif: the bwdif plugin, double rate), then cleanup.vs: desmear (desmear_rows, the line's smear), dehalo (vsjetpack's
+    dehalo_alpha or fine_dehalo) and degrain = {tr, thsad, blksize} (vsjetpack's mc_degrain: SMDegrain's motion-compensated temporal
+    average), in that order, on vs.planes, else the cleanup's `planes`. The output is progressive at the field rate."""
     tff = p["field_order"] == "tff"
     di = p["deinterlace"]
     lines = ["import vapoursynth as vs", "from vapoursynth import core", f"c = core.bs.VideoSource(source={path!r})"]
@@ -178,26 +178,126 @@ def vs_script(p, path):
     c = p.get("cleanup") or {}
     v = c.get("vs")
     if v:
-        if not isinstance(v, dict) or set(v) - {"degrain", "planes"}:
-            raise ParamError(f"cleanup vs is {{degrain = {{tr, thsad, blksize}}, planes?}}, not {v!r}")
-        d = v["degrain"] or {}
-        if (
-            not isinstance(d, dict)
-            or set(d) - {"tr", "thsad", "blksize"}
-            or not all(isinstance(x, int) and x > 0 for x in d.values())
-        ):
-            raise ParamError(f"degrain takes whole numbers tr, thsad, blksize, not {d!r}")
-        # vs.planes, when given, is the degrain's own (a pipeline: SMDegrain on luma, then the ffmpeg filters on chroma); else the cleanup's
+        if not isinstance(v, dict) or set(v) - {*VS_STEPS, "planes"}:
+            raise ParamError(f"cleanup vs takes {', '.join(VS_STEPS)} and planes, not {v!r}")
+        # vs.planes, when given, is the VapourSynth steps' own (a pipeline: SMDegrain on luma, then the ffmpeg filters on chroma); else the cleanup's
         named = v.get("planes", c.get("planes", "all"))
         planes = VS_PLANES.get(named, "bad") if isinstance(named, str) else "bad"
         if planes == "bad":
             raise ParamError(f"cleanup planes is all, luma or chroma, not {named!r}")
-        lines += [
-            "from vsdenoise import mc_degrain",
-            f"c = mc_degrain(c, tr={d.get('tr', 2)}, thsad={d.get('thsad', 300)}, blksize={d.get('blksize', 16)}, planes={planes!r})",
-        ]
+        if "desmear" in v:  # first: the smear is in the signal as it came off the tape, before anything else filters it
+            lines += _desmear_lines(v["desmear"])
+        if "dehalo" in v:
+            lines += _dehalo_lines(v["dehalo"])
+        if "degrain" in v:
+            d = v["degrain"] or {}
+            if (
+                not isinstance(d, dict)
+                or set(d) - {"tr", "thsad", "blksize"}
+                or not all(isinstance(x, int) and x > 0 for x in d.values())
+            ):
+                raise ParamError(f"degrain takes whole numbers tr, thsad, blksize, not {d!r}")
+            lines += [
+                "from vsdenoise import mc_degrain",
+                f"c = mc_degrain(c, tr={d.get('tr', 2)}, thsad={d.get('thsad', 300)}, blksize={d.get('blksize', 16)}, planes={planes!r})",
+            ]
     lines.append("c.set_output()")
     return "\n".join(lines) + "\n"
+
+
+VS_STEPS = ("desmear", "dehalo", "degrain")
+
+
+def _dehalo_lines(d):
+    """vsjetpack's dehalo on luma: kind alpha (dehalo_alpha) or fine (fine_dehalo, which spares edges' own detail); brightstr and darkstr
+    say how much of the bright and dark halos to remove (a VHS smear is bright: darkstr 0)."""
+    if (
+        not isinstance(d, dict)
+        or set(d) - {"kind", "brightstr", "darkstr", "sigma"}
+        or d.get("kind", "alpha") not in ("alpha", "fine")
+    ):
+        raise ParamError(f"dehalo is {{kind = alpha | fine, brightstr, darkstr, sigma}}, not {d!r}")
+    fn = "dehalo_alpha" if d.get("kind", "alpha") == "alpha" else "fine_dehalo"
+    args = f"brightstr={float(d.get('brightstr', 1.0))}, darkstr={float(d.get('darkstr', 0.0))}"
+    if "sigma" in d:
+        args += f", blur=Prefilter.GAUSS(sigma={float(d['sigma'])})"
+    return [f"from vsdehalo import {fn}", "from vsdenoise import Prefilter", f"c = {fn}(c, {args}, planes=0)"]
+
+
+def _desmear_lines(d):
+    """The horizontal smear of a VHS line removed on luma, frame by frame in numpy (desmear_rows), in the VapourSynth stage."""
+    if not isinstance(d, dict) or set(d) - {"taps", "h", "lam", "sigma", "trail"}:
+        raise ParamError(f"desmear is {{taps, h, lam, sigma, trail}}, not {d!r}")
+    taps, h = d.get("taps"), d.get("h")
+    if not (
+        isinstance(taps, list)
+        and isinstance(h, list)
+        and len(taps) == len(h)
+        and taps
+        and all(isinstance(t, int) for t in taps)
+    ):
+        raise ParamError(
+            "desmear needs the line's impulse response: taps (whole pixel offsets) and h (one weight each)"
+        )
+    t = d.get("trail")
+    if t is not None and (not isinstance(t, dict) or set(t) - {"a", "tau", "dark"}):
+        raise ParamError(f"desmear trail is {{a, tau, dark}}, not {t!r}")
+    kw = dict(
+        taps=taps, h=[float(x) for x in h], lam=float(d.get("lam", 0.02)), sigma=float(d.get("sigma", 1.0)), trail=t
+    )
+    return [
+        "import sys, numpy as np",
+        f"sys.path.insert(0, {WORKER_DIR!r})",
+        "from video import desmear_rows",
+        "def _desmear(n, f):",
+        "    out = f.copy()",
+        "    a = np.asarray(out[0])",
+        "    top = (1 << out.format.bits_per_sample) - 1",
+        f"    a[:] = np.clip(np.rint(desmear_rows(a.astype(np.float32) * (255.0 / top), **{kw!r}) * (top / 255.0)), 0, top)",
+        "    return out",
+        "c = core.std.ModifyFrame(c, c, _desmear)",
+    ]
+
+
+WORKER_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def desmear_rows(y, taps, h, lam=0.02, sigma=1.0, trail=None):
+    """Luma rows (2-D, 0..255) with a VHS line's smear taken out, along each row (the smear runs along the line, left to right):
+    de-ring  a Wiener filter that maps the line's measured impulse response `h` (at pixel offsets `taps`, fitted from a sharp edge) to a
+             plain Gaussian blur of `sigma`: the overshoot after edges goes, the blur stays (deblurring too would bring the noise up),
+             `lam` regularises where the response is weak
+    trail    {a, tau, dark}: the long faint trail after dark strokes, modelled as `a` x the darkness of what came before on the line (only
+             pixels more than `dark` below the row's paper level, its 70th percentile), smeared rightwards with an exponential of
+             `tau` pixels, and subtracted"""
+    import numpy as np
+
+    _rows, w = y.shape
+    n = 1 << int(np.ceil(np.log2(w + 2 * max(abs(t) for t in taps) + 8)))
+
+    def spectrum(k, t):
+        a = np.zeros(n)
+        for kk, v in zip(t, k, strict=True):
+            a[kk % n] += v
+        return np.fft.rfft(a)
+
+    H = spectrum(h, taps)
+    gt = list(range(-4 * max(1, int(np.ceil(sigma))), 4 * max(1, int(np.ceil(sigma))) + 1))
+    g = np.exp(-0.5 * (np.array(gt) / max(sigma, 1e-3)) ** 2)
+    G = spectrum(g / g.sum(), gt)
+    pad = np.pad(y.astype(np.float64), ((0, 0), (0, n - w)), mode="edge")
+    out = np.fft.irfft(np.fft.rfft(pad, axis=1) * (G * np.conj(H) / (np.abs(H) ** 2 + lam)), n=n, axis=1)[:, :w]
+    if trail:
+        a, tau, dark = float(trail.get("a", 0.016)), float(trail.get("tau", 60)), float(trail.get("dark", 40))
+        paper = np.percentile(out, 70, axis=1, keepdims=True)
+        ink = np.clip(paper - out, 0, None) * (out < paper - dark)
+        k = np.exp(-np.arange(1, int(6 * tau) + 1) / tau)  # the trail starts a pixel after the ink
+        m = 1 << int(np.ceil(np.log2(w + k.size + 1)))
+        kk = np.zeros(m)
+        kk[1 : k.size + 1] = k
+        acc = np.fft.irfft(np.fft.rfft(np.pad(ink, ((0, 0), (0, m - w))), axis=1) * np.fft.rfft(kk), n=m, axis=1)[:, :w]
+        out = out - a * acc
+    return out
 
 
 def vspipe_of(models_dir, options):

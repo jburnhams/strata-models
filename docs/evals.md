@@ -101,7 +101,8 @@ also writes the source enlarged the same way, as the item's reference, so the Ju
 chips switch all three to the face, the text or the stripes, where an upscaler's gains and inventions show; the whole frame is one chip away.
 Every engine gets the same deinterlaced, cropped, square-pixel clip and the same finish, so a pair differs only in the enhancement.
 Cleanup evals (`vhs-chroma-shift`, `vhs-chroma-cleanup`, `vhs-grain`) hold the upscale fixed (lanczos) and vary only the worker's `cleanup`
-stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate.
+stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate. `vhs-smear` does the same for the
+tape's horizontal trail after high-contrast edges (`cleanup.vs.desmear`, kernel from `scripts/evals/smear_kernel.py`).
 
 ## OCR: which cleanup and which reader on hard book pages
 `ocr-pages` (`evals/specs/ocr-pages.toml`, built by `scripts/evals/ocr_pages.py` from strata-scan or a folder of PNGs) is ten hard pages of
