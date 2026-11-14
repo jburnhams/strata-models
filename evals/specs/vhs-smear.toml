@@ -1,0 +1,57 @@
+name = "vhs-smear"
+question = "Which cleanup removes the tape's horizontal smear after high-contrast edges (a bright trail to the right of dark marks) before any upscaler?"
+role = "video-enhance"
+dataset = "vhs-clips-8"
+metrics = ["judged", "latency_s", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings are context
+judge = true                 # judged on the regions: handwriting and other dark-on-light edges first, then faces (a de-ring must not sharpen skin)
+similarity = "video"
+
+# The smear is one-sided and the same on every line: an overshoot about 2 px after each dark-to-light edge, then a faint trail. The line's
+# impulse response was fitted from a high-contrast clip with scripts/evals/smear_kernel.py (least squares, tail smoothed, cut to +-12 px).
+# de-ring maps it to a plain Gaussian blur (Wiener, lam): the overshoot goes, the blur stays, so noise is not raised. A detrail step (an
+# exponential model of the long trail) was tried and dropped: it drew dark lines along rows. vsjetpack's dehalo_alpha is the usual dehalo;
+# fine_dehalo needs the edgemasks plugin, not installed. Every candidate: bwdif, the cleanup, the same lanczos to 1440 x 1080.
+[decision]
+primary = "judged"
+baseline = "none"
+min_effect = 0.1
+guards = { latency_s = 5.0, failed = 1.0 }
+
+[[candidates]]
+name = "none"
+model = "video-lanczos"
+note = "as captured"
+
+[[candidates]]
+name = "dering-soft"
+model = "video-lanczos"
+params = { cleanup = { vs = { desmear = { taps = [-4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], h = [-0.0266, -0.0176, 0.1161, 0.346, 0.5057, 0.3977, 0.1381, -0.0688, -0.1442, -0.0969, -0.0355, -0.0283, -0.0296, -0.0179, -0.0094, -0.0132, -0.0154], lam = 0.02, sigma = 1.0 } }, planes = "luma" } }
+note = "de-ring to a Gaussian of 1 px: the overshoot almost gone (+27 -> +4 levels on the title card), strokes a little lighter, less noise"
+
+[[candidates]]
+name = "dering-sharp"
+model = "video-lanczos"
+params = { cleanup = { vs = { desmear = { taps = [-4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], h = [-0.0266, -0.0176, 0.1161, 0.346, 0.5057, 0.3977, 0.1381, -0.0688, -0.1442, -0.0969, -0.0355, -0.0283, -0.0296, -0.0179, -0.0094, -0.0132, -0.0154], lam = 0.02, sigma = 0.5 } }, planes = "luma" } }
+note = "de-ring to a Gaussian of 0.5 px: less of the overshoot gone (+27 -> +9), strokes keep more contrast, noise as the tape"
+
+[[candidates]]
+name = "dehalo-alpha"
+model = "video-lanczos"
+params = { cleanup = { vs = { dehalo = { kind = "alpha", brightstr = 1.0, darkstr = 0.0 } }, planes = "luma" } }
+note = "vsjetpack dehalo_alpha, bright halos only: made for halos of a few pixels"
+
+# Model judges: verdicts beside people's, never counted as theirs.
+[[judges]]
+name = "qwen-vision"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two cleaned versions X and Y. Prefer the one without a bright smear or streak to the right of dark marks (letters, outlines), while keeping the marks as dark and crisp and adding no new lines, rings or noise."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a VHS home video: the tape (when shown), then two cleaned versions X and Y. Prefer the one without a bright smear or streak to the right of dark marks (letters, outlines), while keeping the marks as dark and crisp and adding no new lines, rings or noise."
+limit = 20
+auto = true

@@ -787,12 +787,12 @@ def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
     ("kw", "match"),
     [
         (dict(deinterlace="yadif", cleanup=dict(vs=dict(degrain={}))), "use bwdif, qtgmc or none"),
-        (dict(cleanup=dict(vs="smdegrain")), "cleanup vs is"),
+        (dict(cleanup=dict(vs="smdegrain")), "cleanup vs takes"),
         (dict(cleanup=dict(vs=dict(degrain=dict(tr=0)))), "whole numbers"),
         (dict(cleanup=dict(vs=dict(degrain=dict(radius=2)))), "whole numbers"),
         (dict(cleanup=dict(vs=dict(degrain={}), planes="red")), "planes is all, luma or chroma"),
         (dict(cleanup=dict(vs=dict(degrain={}, planes="red"))), "planes is all, luma or chroma"),
-        (dict(cleanup=dict(vs=dict(degrain={}, strength=2))), "cleanup vs is"),
+        (dict(cleanup=dict(vs=dict(degrain={}, strength=2))), "cleanup vs takes"),
     ],
 )
 def test_vs_script_refuses_bad_stages(kw, match):
@@ -1081,3 +1081,125 @@ def test_refine_fails_when_a_decoder_fails_part_way(tmp_path, clip, ffmpeg_on_pa
     assert (
         r["engine"] == "refine"
     )  # a source longer than the tape is cut, and that is fine (the kill's exit status is not an error)
+
+
+def test_desmear_rows_takes_the_overshoot_after_edges_out_and_keeps_the_rest():
+    import numpy as np
+
+    taps = list(range(-2, 9))
+    ring = np.array(
+        [0.1, 0.25, 0.4, 0.25, 0.1, -0.08, -0.12, -0.08, -0.04, -0.02, -0.01]
+    )  # a blur with a one-sided negative lobe: overshoot after edges
+    h = (ring / ring.sum()).tolist()
+    ideal = np.full((4, 200), 200.0)
+    ideal[:, 60:66] = 40.0  # a dark stroke on a light ground
+    smeared = np.stack([np.convolve(r, ring / ring.sum(), mode="full")[2 : 2 + 200] for r in ideal])
+    over = lambda a: float(a[:, 70:80].max() - 200)
+    fixed = V.desmear_rows(smeared, taps, h, lam=0.001, sigma=1.0)
+    assert over(smeared) > 10 and abs(over(fixed)) < over(smeared) / 4
+    assert abs(float(fixed[:, 120:180].mean()) - 200) < 1  # the flat ground is left as it was
+    assert float(fixed[:, 60:66].min()) < 100  # the stroke is still dark
+    trail = V.desmear_rows(smeared, taps, h, lam=0.001, sigma=1.0, trail=dict(a=0.01, tau=10, dark=40))
+    assert float(trail[:, 70:90].mean()) < float(fixed[:, 70:90].mean())  # the trail term darkens what follows dark ink
+    assert np.allclose(trail[:, :55], fixed[:, :55], atol=1e-6)  # one-sided: nothing before the ink moves
+
+
+def test_vs_script_desmear_and_dehalo_run_after_the_deinterlace_and_before_degrain():
+    k = dict(taps=[-1, 0, 1, 2], h=[0.2, 0.5, 0.4, -0.1])
+    q = V.vs_script(
+        P(
+            cleanup=dict(
+                vs=dict(degrain=dict(tr=2), dehalo=dict(kind="alpha"), desmear=dict(k, lam=0.01, sigma=0.5)),
+                planes="luma",
+            )
+        ),
+        "/t/c.mkv",
+    )
+    lines = q.splitlines()
+    i_bw, i_ds, i_dh, i_dg = (
+        next(i for i, line in enumerate(lines) if s in line)
+        for s in ("core.bwdif", "ModifyFrame", "dehalo_alpha(c", "mc_degrain(c")
+    )
+    assert i_bw < i_ds < i_dh < i_dg
+    assert (
+        f"sys.path.insert(0, {V.WORKER_DIR!r})" in q
+        and "from video import desmear_rows" in q
+        and "'lam': 0.01" in q
+        and "'sigma': 0.5" in q
+    )
+    assert "from vsdenoise import Prefilter" in q and "brightstr=1.0, darkstr=0.0" in q and "planes=0" in q
+    fine = V.vs_script(P(cleanup=dict(vs=dict(dehalo=dict(kind="fine", sigma=1.2)))), "/t/c.mkv")
+    assert "fine_dehalo(c, brightstr=1.0, darkstr=0.0, blur=Prefilter.GAUSS(sigma=1.2), planes=0)" in fine
+
+
+@pytest.mark.parametrize(
+    ("vs", "match"),
+    [
+        (dict(sharpen={}), "cleanup vs takes"),
+        (dict(dehalo=dict(kind="strong")), "dehalo is"),
+        (dict(dehalo=dict(radius=2)), "dehalo is"),
+        (dict(desmear=dict(taps=[0, 1], h=[1.0])), "impulse response"),
+        (dict(desmear=dict(taps=[0.5], h=[1.0])), "impulse response"),
+        (dict(desmear=dict(taps=[0], h=[1.0], shape="box")), "desmear is"),
+        (dict(desmear=dict(taps=[0], h=[1.0], trail=dict(a=1, k=2))), "trail is"),
+    ],
+)
+def test_vs_script_refuses_bad_smear_steps(vs, match):
+    with pytest.raises(protocol.ParamError, match=match):
+        V.vs_script(P(cleanup=dict(vs=vs)), "/t/c.mkv")
+
+
+def test_the_vapoursynth_stage_runs_desmear_in_numpy_on_real_frames():
+    # the generated ModifyFrame code is plain Python over numpy: run its body on an array as VapourSynth would hand it over
+    import numpy as np
+
+    lines = V._desmear_lines(dict(taps=[0, 1], h=[0.8, 0.2], lam=0.01, sigma=1.0))
+    body = "\n".join(lines[3:9])
+    frame = np.full((2, 40), 128, np.uint8)
+
+    class Frame:
+        format = types.SimpleNamespace(bits_per_sample=8)
+
+        def __init__(self):
+            self.a = frame.copy()
+
+        def copy(self):
+            return self
+
+        def __getitem__(self, i):
+            return self.a
+
+    ns = dict(np=np, desmear_rows=V.desmear_rows)
+    exec(body, ns)  # noqa: S102  (our own generated code, the same text the VapourSynth script runs: defines _desmear)
+    out = ns["_desmear"](0, Frame())
+    assert out.a.dtype == np.uint8 and abs(int(out.a.mean()) - 128) <= 1
+
+
+def _smear_kernels():
+    import pathlib
+    import tomllib
+
+    spec = tomllib.loads((pathlib.Path(__file__).parents[2] / "evals" / "specs" / "vhs-smear.toml").read_text())
+    return [
+        c["params"]["cleanup"]["vs"]["desmear"]
+        for c in spec["candidates"]
+        if "desmear" in c.get("params", {}).get("cleanup", {}).get("vs", {})
+    ]
+
+
+@pytest.mark.parametrize("d", _smear_kernels())
+def test_desmear_rows_leaves_a_flat_frame_as_it_was(d):
+    import numpy as np
+
+    y = np.full((4, 720), 200.0)
+    out = V.desmear_rows(y, d["taps"], d["h"], lam=d["lam"], sigma=d["sigma"])
+    assert np.abs(out - 200).max() < 0.5  # the regularisation does not dim it
+
+
+@pytest.mark.parametrize("d", _smear_kernels())
+def test_desmear_rows_does_not_wrap_the_row_end_into_its_start(d):
+    import numpy as np
+
+    y = np.where(np.arange(720) < 620, 128.0, 16.0)[None, :].repeat(2, axis=0)
+    out = V.desmear_rows(y, d["taps"], d["h"], lam=d["lam"], sigma=d["sigma"])
+    assert np.abs(out[:, :500] - 128).max() < 0.5  # flat far from the step, the left end included
