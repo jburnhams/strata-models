@@ -80,6 +80,16 @@ def test_stages_are_parsed_and_checked(pipe):
         C.stage_params(dict(input="{nope}", params={}, send="prompt"), dict(prompt="x"))
     with pytest.raises(C.EvalError, match="stage input"):
         C.stage_params(dict(input="{", params={}, send="prompt"), dict(prompt="x"))
+    # also: fields passed as they are beside the one sent (a vision model given Tesseract's lines and the page), only kept when given
+    st = C.parse_stage(dict(role="vision-language", input="{context}", send="context", also=["image"], into="groups"))
+    assert C.stage_params(st, dict(context="1 b1 [0,0,9,9] x", image="/p.png", ocr="o.json")) == dict(
+        context="1 b1 [0,0,9,9] x", image="/p.png"
+    )
+    assert "also" not in C.parse_stage(dict(role="r"))
+    with pytest.raises(C.EvalError, match="does not have"):
+        C.stage_params(st, dict(context="x"))
+    with pytest.raises(C.EvalError, match="list of input field names"):
+        C.parse_spec(dict(base, candidates=[dict(name="a", model="m", stages=[dict(role="r", also="image")])]))
 
 
 def test_a_stageless_candidate_keeps_its_key(pipe):
