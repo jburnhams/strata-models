@@ -114,7 +114,7 @@ def run(handle, params):
         cat = getattr(getattr(r, "stop_details", None), "category", None)
         raise RunError(f"Claude declined this request (refusal{', ' + cat if cat else ''})")
     return dict(
-        cloud.answer(job, text),
+        cloud.answer(job, text, r.stop_reason),
         tokens_in=u["tokens_in"] + u["cache_read"] + u["cache_write"],
         tokens_out=u["tokens_out"],
         cost_usd=round(usd, 6),
