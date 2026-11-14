@@ -25,12 +25,14 @@ params:
   out         where to write the rendering (PNG, the picture's size: black type on white), else <data>/generated/fonts/
 Answer: {face, class, style, size_pt, ink_f1, precision, recall, path (the rendering), fonts: {id: {family, class, like, files: {style: ttf}}},
 faces: [{face, class, ink_f1}] (ranked), blocks: [{box, face, class, ink_f1, lines: [{text, box, baseline_y, size_px, size_pt, hscale,
-tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta}]}]}],
+tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta, stroke_em}]}]}],
 proposed, mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
 summary; a renderer sets each word with the word's own: `size_pt` (or size_px at the scan's dpi), stretched by `hscale`, `tracking_em` times
 the size added after every glyph, its baseline at `baseline_y` and its left ink edge at `x` (that is the rendering's geometry exactly, so a
 rebuild reproduces what was scored); weight_delta > 0 means the
-print is heavier than the font (ink spread), which a PDF can approximate with a stroke of weight_delta * size / 20."""
+print is heavier than the font (ink spread; it is the fit's own unit, 0.5 less the coverage threshold), and `stroke_em` is the same as a
+stroke round the glyphs in ems of the size, what a renderer draws: measured on the word as rendered (the ink the lower threshold added, over
+the outline's length, both sides), 0 when the print is lighter, since a stroke cannot thin."""
 
 import json
 import os
@@ -75,6 +77,9 @@ NEAR = {
     ]
 }
 STYLES = ("roman", "italic", "bold", "bold-italic", "small-caps")
+STROKE_PER_WEIGHT = (
+    20.0  # weight_delta per em of stroke: a coverage threshold 0.1 lower thickens a stem by about a 200th of the size
+)
 WORK_XH = 26.0  # the fit runs with the x-height scaled to about this many pixels: enough for serifs, fast enough for every face
 UA = "Mozilla/4.0"  # Google Fonts' CSS API answers an old browser with TrueType files, which FreeType and PDFs take
 
@@ -549,6 +554,21 @@ def word_styles(scan, ln, face, lfit, margin=0.04):
     return out
 
 
+def stroke_em(face, style, text, size, hscale, tracking, thr):
+    """The stroke (ems of the size, centred on the outline) that thickens the word as much as the threshold `thr` does: the anti-aliased
+    edge is about a pixel wide, so this depends on the size in pixels, and is measured, not converted. 0 for thr >= 0.5."""
+    if thr >= 0.5:
+        return 0.0
+    a = face.word(style, text, size, hscale, tracking, 0.5)[0]
+    b = face.word(style, text, size, hscale, tracking, thr)[0]
+    if a.shape != b.shape:
+        return 0.0
+    edge = int((a[:, 1:] != a[:, :-1]).sum() + (a[1:, :] != a[:-1, :]).sum())
+    if not edge:
+        return 0.0
+    return round(2.0 * float(b.sum() - a.sum()) / edge / float(size), 5)
+
+
 # ---- the whole job ------------------------------------------------------------------------------------------------------------------------
 def parse_candidates(value):
     """Face ids from a list or any text (a vision model's answer): ids and family names in the order they appear; a class named and no face:
@@ -750,6 +770,7 @@ def run(handle, params):
                     hscale=round(float(hs), 3),
                     tracking_em=round(float(trk), 3),
                     weight_delta=round(0.5 - float(thr), 2),
+                    stroke_em=stroke_em(best, wf["style"], wd["text"], sz, hs, trk, thr),
                 )
             )
             styles.append((wf["style"], wd["ink"][2]))

@@ -161,7 +161,16 @@ def test_fit_recovers_the_size_and_width_of_a_known_setting(tmp_path, ttf, model
     assert {"x", "baseline_y", "size_px", "size_pt", "hscale", "tracking_em", "weight_delta"} <= set(w0)
     assert abs(w0["x"] - lines[0]["words"][0]["box"][0]) <= 2  # its own placement: at most a pixel or two from its ink
     assert w0["size_px"] == ln["size_px"] and w0["hscale"] == ln["hscale"]
+    assert w0["stroke_em"] >= 0.0 and (w0["stroke_em"] > 0) == (w0["weight_delta"] > 0)
     assert os.path.isfile(r["path"]) and Image.open(r["path"]).size == (700, 160)
+
+
+def test_stroke_em_is_measured_from_the_threshold(ttf):
+    face = F.Face("tinos", {"roman": ttf})
+    assert F.stroke_em(face, "roman", "Hamburg", 60.0, 1.0, 0.0, 0.5) == 0.0
+    light = F.stroke_em(face, "roman", "Hamburg", 60.0, 1.0, 0.0, 0.4)
+    heavy = F.stroke_em(face, "roman", "Hamburg", 60.0, 1.0, 0.0, 0.2)
+    assert 0 < light < heavy < 0.02  # a fraction of a pixel per side at 60 px
 
 
 def test_naive_and_measure_modes_and_the_ranking(tmp_path, ttf, models):
