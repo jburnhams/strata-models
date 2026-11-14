@@ -60,7 +60,7 @@ def run(handle, params):
     if job["effort"] or handle["effort"]:
         oc["effort"] = job["effort"] or handle["effort"]
     if job["schema"]:
-        oc["format"] = {"type": "json_schema", "schema": job["schema"]}
+        oc["format"] = {"type": "json_schema", "schema": cloud.portable(job["schema"])}
     log = dict(cloud.logged(job), effort=oc.get("effort"))
     try:
         n_in = client.messages.count_tokens(**req).input_tokens

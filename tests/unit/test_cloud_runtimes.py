@@ -406,3 +406,36 @@ def test_a_picture_over_the_limit_is_shrunk_and_a_small_one_sent_as_it_is(tmp_pa
     Image.merge("RGB", [Image.effect_noise((400, 300), 100)] * 3).save(colour)
     mime, b64 = cloud.encode(str(colour))
     assert mime == "image/jpeg" and Image.open(io.BytesIO(base64.b64decode(b64))).mode == "RGB"
+
+
+def test_schemas_sent_to_a_vendor_lose_their_bounds_but_keep_their_shape():
+    import json
+
+    from stratamodels.runtimes import cloud, llama
+
+    s = dict(
+        type="object",
+        properties=dict(
+            n=dict(type="integer", minimum=0, maximum=3),
+            minimum=dict(type="string", pattern="^a", maxLength=4),  # a field named like a keyword stays
+            tags=dict(type="array", items=dict(type="string", format="x"), minItems=3, maxItems=8),
+            one=dict(type="array", items=dict(type="string"), minItems=1),
+        ),
+        required=["n", "minimum"],
+        additionalProperties=False,
+    )
+    assert cloud.portable(s) == dict(
+        type="object",
+        properties=dict(
+            n=dict(type="integer"),
+            minimum=dict(type="string"),
+            tags=dict(type="array", items=dict(type="string")),
+            one=dict(type="array", items=dict(type="string"), minItems=1),
+        ),
+        required=["n", "minimum"],
+        additionalProperties=False,
+    )
+    photo = json.dumps(
+        cloud.portable(llama.preset("photo-describe-v1")[1])
+    )  # the schema the cloud describe-photos candidates failed on
+    assert '"minimum"' not in photo and '"maxItems"' not in photo and '"additionalProperties": false' in photo

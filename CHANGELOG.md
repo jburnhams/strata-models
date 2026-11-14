@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Cloud runtimes send a schema without its value bounds (branch `claude/project-thread-gl1u9l`)**
+The describe-photos stand-outs failed on every Claude model (400: "For 'integer' type, property 'minimum' is not supported") and on Gemini (400: "Request contains an invalid argument"): photo-describe-v1's schema bounds its integers and arrays, which llama.cpp's grammar takes and the vendors' structured outputs do not. `cloud.portable` drops `minimum`, `maximum`, `exclusive*`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `$schema` and a `minItems` above 1 before Claude, Gemini or NIM sees the schema; the shape (types, properties, required, enum, items, additionalProperties) stays enforced, and the bounds are in the preset's prompt as before.
+
 **Better OCR scoring, and a harder OCR eval scored against Opus (branch `claude/project-thread-gl1u9l`)**
 The ocr-pages eval put qwen-read at 0.16 % CER, yet Jonathan saw unclear and plainly wrong text on most pages: `cer` ignores case and punctuation (small capitals typed as PUNCH, a stop read as a comma cost nothing) and the ten typed pages are not the worst ones. His plan: score the OCR better first, take the worst pages by kind of error as the test, and have a few strong-model calls (Opus) read them as the reference.
 
