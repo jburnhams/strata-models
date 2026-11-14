@@ -125,6 +125,11 @@ The reference is the cleaned page as a description (`reference.page`, boxes in s
 blocks found) and `order_tau` (Kendall's tau of the reading order of the blocks found); text by `cer_exact` on the text read back from the
 PDF. Separate evals per stage (layout, text, style, figures, whole page): see the tracking issue jburnhams/strata-models#67.
 
+## Files in candidate params
+A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS
+candidates, for one), so a spec in this public repository names no machine's paths. `{data}` is filled in when each job is made, so the
+result key, and with it every cached output, is the same as with the full path.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

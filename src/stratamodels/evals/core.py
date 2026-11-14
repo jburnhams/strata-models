@@ -561,8 +561,25 @@ def load_spec(name, engine=None):
 
 
 # ---- running ------------------------------------------------------------------------------------------------------------------------------
+def expand(v):
+    """A candidate's string params may name files under the service's data folder as "{data}/...", so a spec holds no machine's paths (the
+    runner's voice for the cloning TTS candidates, say). Expanded when the job is made, so the result key is the same as for the full path."""
+    if isinstance(v, str) and "{data}" in v:
+        return v.replace("{data}", settings.data_dir())
+    if isinstance(v, list):
+        return [expand(x) for x in v]
+    if isinstance(v, dict):
+        return {k: expand(x) for k, x in v.items()}
+    return v
+
+
+def expand_params(params: dict) -> dict:
+    """A candidate's params with "{data}" filled in (expand)."""
+    return {k: expand(v) for k, v in params.items()}
+
+
 def job_params(spec, cand, item):
-    return {**cand.params, **item["input"]}
+    return {**expand_params(cand.params), **item["input"]}
 
 
 def result_key(spec, cand, item):
@@ -784,7 +801,8 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     for i in range(0, len(todo), batch):
         chunk = todo[i : i + batch]
         sent = [
-            ({**c.params, **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k) for c, it, k in chunk
+            ({**expand_params(c.params), **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k)
+            for c, it, k in chunk
         ]
         # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
         # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
