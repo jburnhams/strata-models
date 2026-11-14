@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**page-layout: Sonnet as a candidate (branch `claude/project-thread-dvu0cz`)**
+Haiku found 24 % of the labelled blocks (Flash 83 %, Tesseract 77 %); `sonnet-layout` asks whether the larger Claude reads page layouts well enough. Only it runs on the next `eval run page-layout` (the others are cached).
+
 **cost_usd counts a pipeline's cloud steps (branch `claude/project-thread-dvu0cz`)**
 The page-layout run on omarchy (2026-11-14) showed cost_usd 0 for every candidate, though Gemini Flash's and Haiku's layout steps cost $0.088 and $0.011: the metric read only the last job's output (page-build, local). Each step in a pipeline's trace now keeps its answer's `cost_usd` (or the mark of a subscription CLI or recording), `cost_usd` adds the steps to the last job, and `outputs_for` fills the cost of steps saved before this from their own cached rows, so the existing run's report is right without running anything again. `runtimes/fake.py`'s text model takes a `cost_usd` param for the test (`test_eval_pipeline.py`).
 

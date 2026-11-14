@@ -251,5 +251,5 @@ def test_the_layout_preset_carries_its_schema_and_the_spec_sends_it():
     with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-layout.toml"), "rb") as f:
         spec = tomllib.load(f)
     stages = [s for c in spec["candidates"] for s in c.get("stages", [])]
-    assert len(stages) == 4
+    assert len(stages) == 5
     assert all(s["params"].get("preset") == "page-layout-v1" and "prompt" not in s["params"] for s in stages)

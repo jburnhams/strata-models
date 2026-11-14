@@ -70,3 +70,16 @@ params = { preset = "page-layout-v1", max_tokens = 8192 }
 input = "{image}"
 send = "image"
 into = "layout"
+
+[[candidates]]
+name = "sonnet-layout"
+model = "pagebuild"
+note = "Haiku found a quarter of the blocks (2026-11-14): does the larger Claude manage it? A few cents a page"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-v1", max_tokens = 8192 }
+input = "{image}"
+send = "image"
+into = "layout"
