@@ -62,7 +62,7 @@ params = { mode = "fit" }
 [[candidates.stages]]
 role = "vision-language"
 model = "gemini-3.8-flash-api"   # the free key first
-params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400 }
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 4096 }   # Flash thinks first: at 400 every answer stopped at MAX_TOKENS after ~40 characters
 input = "{image}"
 send = "image"
 into = "candidates"
@@ -103,7 +103,7 @@ params = { mode = "measure" }
 [[candidates.stages]]
 role = "vision-language"
 model = "gemini-3.8-flash-api"
-params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400 }
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 4096 }
 input = "{image}"
 send = "image"
 into = "candidates"
