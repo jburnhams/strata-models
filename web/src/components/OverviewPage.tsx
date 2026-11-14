@@ -3,12 +3,12 @@
 // Polled every 2 s; a failed poll keeps the last readings with a note of their age, so a restarting service does not blank the page.
 import { CompositionBar, DataTable, DataView, EmptyState, LineChart, Metric, MetricStrip, PageHeader, Skeleton, StaleNotice, Status, format, useLoad, type Column } from 'strata-react'
 import { api, type GpuProcess, type Job, type Status as S } from '../api'
-import { describeJob, finding, gb, processName, seconds, vramParts } from '../logic'
+import { PRIORITY_OF, PRIORITY_WORD, describeJob, finding, gb, processName, seconds, vramParts } from '../logic'
 
 const queueColumns: Column<Job>[] = [
   { key: 'id', header: 'Job', numeric: true, cell: j => `#${j.id}` },
   { key: 'what', header: 'What', cell: j => describeJob(j) },
-  { key: 'priority', header: 'Priority', cell: j => <Status tone={j.priority === 'interactive' ? 'info' : 'neutral'}>{j.priority === 'interactive' ? 'Interactive' : 'Batch'}</Status> },
+  { key: 'priority', header: 'Priority', cell: j => { const p = PRIORITY_OF[j.priority]; return <Status tone={p === 'high' ? 'info' : 'neutral'}>{PRIORITY_WORD[p]}</Status> } },
   { key: 'waiting', header: 'Waiting', numeric: true, cell: j => seconds(Date.now() / 1000 - j.submitted_at) },
 ]
 

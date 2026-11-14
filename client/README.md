@@ -21,5 +21,6 @@ with sm.gpu_lease(
 ```
 
 - `run(role, params, app=...)` is the general form; `faces`, `transcribe`, `speak` and `ocr` are shortcuts. Failures raise `JobFailed`; no service raises `Unavailable`, so an app can fall back to loading the model itself.
+- Every call takes `priority=`: `"high"` for a job a person or an app is waiting on, `"normal"` (the default) for background work, `"low"` for work that can wait behind everything else (evals use it). A running job is never stopped for a higher one.
 - `gpu_lease` sends heartbeats from a thread while the block runs. With no service it yields `None` and the block runs anyway (pass `required=True` to raise instead), so an app keeps working where strata-models is not installed.
 - The service URL is `STRATA_MODELS_URL`, default `http://127.0.0.1:8366`.

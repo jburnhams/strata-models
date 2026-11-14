@@ -56,7 +56,7 @@ class JobIn(BaseModel):
     role: str
     params: dict = Field(default_factory=dict)
     app: str = "unknown"
-    priority: str = "batch"
+    priority: str = "normal"
     model: str | None = None
     options: dict | None = None
 
@@ -64,7 +64,7 @@ class JobIn(BaseModel):
 class RunIn(BaseModel):
     params: dict = Field(default_factory=dict)
     app: str = "unknown"
-    priority: str = "interactive"
+    priority: str = "high"
     model: str | None = None
     timeout: float = 300.0
 
@@ -74,7 +74,7 @@ class LeaseIn(BaseModel):
     vram_gb: float | None = None
     pid: int | None = None
     ttl_s: float = 120.0
-    priority: str = "batch"
+    priority: str = "normal"
     note: str | None = None
 
 

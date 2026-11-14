@@ -11,6 +11,9 @@ export function describeJob(j: Pick<Job, 'kind' | 'role' | 'app' | 'note'>) {
 }
 
 export const STATUS_TONE = { queued: 'neutral', running: 'info', done: 'success', failed: 'danger', cancelled: 'neutral', expired: 'warning' } as const
+/** A job's priority under today's names (rows from before 2026-11-14 say interactive or batch), and its word. */
+export const PRIORITY_OF = { high: 'high', interactive: 'high', normal: 'normal', batch: 'normal', low: 'low' } as const
+export const PRIORITY_WORD = { high: 'High', normal: 'Normal', low: 'Low' } as const
 export const STATUS_WORD = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed', cancelled: 'Withdrawn', expired: 'Expired' } as const
 
 /** A short readable name for another process on the card: the script, not the interpreter. */

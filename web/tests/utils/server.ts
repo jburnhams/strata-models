@@ -12,7 +12,7 @@ export const fixtures = {
     resident: [{ model: 'whisper-large-v3', runtime: 'faster-whisper', roles: ['transcribe'], vram_mb: 3720, load_s: 2.9, loaded_at: NOW - 600, last_used: NOW - 5, jobs: 12 }, { model: 'buffalo_l', runtime: 'insightface', roles: ['faces'], vram_mb: 580, load_s: 0.7, loaded_at: NOW - 900, last_used: NOW - 300, jobs: 300 }],
     current: job({ id: 41, role: 'transcribe', model: 'whisper-large-v3', app: 'strata-360', status: 'running', finished_at: null, run_s: null }),
     lease: null,
-    queued: [job({ id: 42, status: 'queued', started_at: null, finished_at: null }), job({ id: 43, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'queued', priority: 'interactive', started_at: null, finished_at: null })],
+    queued: [job({ id: 42, status: 'queued', priority: 'low', started_at: null, finished_at: null }), job({ id: 43, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'queued', priority: 'interactive', started_at: null, finished_at: null })],
     events: [{ at: NOW - 600, text: 'loaded whisper-large-v3 in 2.9 s (3.6 GB)' }],
   }),
   registry: (): Registry => ({

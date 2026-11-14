@@ -81,7 +81,7 @@ def test_run_waits_for_the_result_or_says_why_not(client, scheduler):
     t = worker(scheduler)
     r = client.post("/api/run/echo", json=dict(params=dict(y=2), app="s360"))
     t.join()
-    assert r.status_code == 200 and r.json()["result"]["echo"] == dict(y=2) and r.json()["priority"] == "interactive"
+    assert r.status_code == 200 and r.json()["result"]["echo"] == dict(y=2) and r.json()["priority"] == "high"
     t = worker(scheduler)
     r = client.post("/api/run/echo", json=dict(params=dict(fail="no such audio file"), app="s360"))
     t.join()

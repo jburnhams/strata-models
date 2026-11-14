@@ -41,7 +41,22 @@ import time
 from stratamodels import gpu, runtimes, spend
 from stratamodels.store import FINISHED
 
-PRIORITY = {"interactive": 0, "batch": 1}
+PRIORITY = {
+    "high": 0,
+    "normal": 1,
+    "low": 2,
+}  # a lower rank goes first; low (evals) waits while any high or normal job is queued
+ALIASES = {
+    "interactive": "high",
+    "batch": "normal",
+}  # the names before 2026-11-14, still accepted (and found on older rows)
+
+
+def rank(p):
+    """Where a job's priority puts it in the queue (an unknown name, from an older row, counts as normal)."""
+    return PRIORITY.get(ALIASES.get(p, p), 1)
+
+
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
 MB = 1024.0
 
@@ -115,8 +130,9 @@ class Scheduler:
 
     # ---- requests (any thread) -------------------------------------------------------------------------------------------------------
     def _priority(self, p):
+        p = ALIASES.get(p, p)
         if p not in PRIORITY:
-            raise QueueError(f"priority must be interactive or batch, not {p!r}")
+            raise QueueError(f"priority must be high, normal or low, not {p!r}")
         return p
 
     def _notify(self):
@@ -124,7 +140,7 @@ class Scheduler:
             self._dirty = True
             self.cv.notify_all()
 
-    def submit(self, role, params, app, priority="batch", model=None, options=None):
+    def submit(self, role, params, app, priority="normal", model=None, options=None):
         """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
         for an unknown role or a model that does not serve it."""
         app = str(app or "unknown")[:64]
@@ -143,7 +159,7 @@ class Scheduler:
         self._notify()
         return j
 
-    def lease(self, app, vram_gb=None, ttl_s=120.0, priority="batch", note=None, pid=None):
+    def lease(self, app, vram_gb=None, ttl_s=120.0, priority="normal", note=None, pid=None):
         """Queue a request for `vram_gb` of the GPU (None: all of it, exclusively); returns its row (status queued, then running once granted).
         `pid` is the app's process, whose memory on the card then counts against its reservation."""
         if vram_gb is not None and not 0 <= float(vram_gb) <= 1024:
@@ -500,8 +516,8 @@ class Scheduler:
     def _next(self, queued):
         if not queued:
             return None
-        top = min(PRIORITY.get(j["priority"], 1) for j in queued)
-        cands = [j for j in queued if PRIORITY.get(j["priority"], 1) == top]
+        top = min(rank(j["priority"]) for j in queued)
+        cands = [j for j in queued if rank(j["priority"]) == top]
         if self.clock() - cands[0]["submitted_at"] > self.max_skip_s:
             return cands[0]
         ahead = []  # a job for a loaded model may jump the queue, but never past a lease: an app is waiting on it
@@ -650,7 +666,7 @@ class Scheduler:
         with self.cv:
             busy = set(self.busy)
         cands = [q for q in queued if q["model"] not in busy]
-        return min(cands, key=lambda q: (PRIORITY.get(q["priority"], 1), q["id"]), default=None)
+        return min(cands, key=lambda q: (rank(q["priority"]), q["id"]), default=None)
 
     def _take(self, j, model, lane):
         """Mark `model` busy for job `j` (None: a load asked from the Models page) and return the ticket its thread runs."""
@@ -685,7 +701,7 @@ class Scheduler:
         c = self._pick_cpu(cpu_q)
         order = sorted(
             (x for x in (g, c) if x is not None),
-            key=lambda q: (PRIORITY.get(q["priority"], 1), q["submitted_at"], q["id"]),
+            key=lambda q: (rank(q["priority"]), q["submitted_at"], q["id"]),
         )
         for j in order:
             if j["kind"] == "lease":

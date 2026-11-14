@@ -8,7 +8,7 @@ export interface Budget { total_mb: number; used_mb: number; own_mb: number; oth
 export interface Resident { model: string; runtime: string; roles: string[]; vram_mb: number; load_s: number; loaded_at: number; last_used: number; jobs: number; busy?: boolean }
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'expired'
 export interface Job {
-  id: number; kind: 'run' | 'lease'; app: string; priority: 'interactive' | 'batch'; status: JobStatus; submitted_at: number
+  id: number; kind: 'run' | 'lease'; app: string; priority: 'high' | 'normal' | 'low' | 'interactive' | 'batch'; status: JobStatus; submitted_at: number
   role: string | null; model: string | null; note: string | null; params: Record<string, unknown> | null; result?: unknown; error: string | null
   vram_gb: number | null; ttl_s: number | null; started_at: number | null; finished_at: number | null; heartbeat_at: number | null; load_s: number | null; run_s: number | null; wait_s?: number
 }
@@ -163,9 +163,9 @@ export const imagesApi = {
     if (!r.ok) throw new Error((d as { detail?: string }).detail || `${r.status} ${r.statusText}`)
     return d as { path: string }
   },
-  /** Queue an interactive job, then wait for it (long polls); throws with the job's error when it fails. */
+  /** Queue a high-priority job, then wait for it (long polls); throws with the job's error when it fails. */
   generate: async (model: string | undefined, params: GenerateParams) => {
-    const j = await send<Job>('POST', '/api/jobs', { role: 'image-generate', params, app: 'strata-models web', priority: 'interactive', model: model || null })
+    const j = await send<Job>('POST', '/api/jobs', { role: 'image-generate', params, app: 'strata-models web', priority: 'high', model: model || null })
     for (;;) {
       const r = await get<Job>(`/api/jobs/${j.id}?wait=30`)
       if (r.status === 'done') return r

@@ -25,7 +25,9 @@ class Job(Base):
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
     kind: Mapped[str] = mapped_column(sa.String(16), index=True)  # run | lease
     app: Mapped[str] = mapped_column(sa.String(64), index=True)  # who asked: bright-horizons, strata-360, ...
-    priority: Mapped[str] = mapped_column(sa.String(16))  # interactive | batch
+    priority: Mapped[str] = mapped_column(
+        sa.String(16)
+    )  # high | normal | low (interactive or batch on rows from before 2026-11-14)
     status: Mapped[str] = mapped_column(
         sa.String(16), index=True
     )  # queued | running | done | failed | cancelled | expired

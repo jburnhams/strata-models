@@ -14,7 +14,7 @@ describe('Overview', () => {
     expect(within(programs).getByText('strata-models')).toBeInTheDocument()
     const waiting = screen.getByRole('grid', { name: 'Jobs waiting for the GPU' })
     expect(within(waiting).getByText('GPU lease for strata-stills (arena build)')).toBeInTheDocument()
-    expect(within(waiting).getByText('Interactive')).toBeInTheDocument()
+    expect(within(waiting).getByText('High')).toBeInTheDocument()
     expect(screen.getByText(/loaded whisper-large-v3/)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'The last hour' })).toBeInTheDocument()
   })

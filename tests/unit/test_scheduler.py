@@ -48,6 +48,20 @@ def test_interactive_goes_first_then_jobs_for_the_loaded_model(scheduler, clock)
     assert scheduler.step()["id"] == b2["id"]
 
 
+def test_low_waits_for_every_normal_and_high_job_and_the_old_names_still_work(scheduler, clock):
+    low = scheduler.submit("echo", {}, "evals", priority="low")
+    clock.t += 500  # however long it has waited: max_skip_s only reorders jobs of one priority
+    n = scheduler.submit("other", {}, "app", priority="batch")
+    h = scheduler.submit("other", {}, "app", priority="interactive")
+    assert (n["priority"], h["priority"]) == ("normal", "high")  # stored under the new names
+    assert [scheduler.step()["id"] for _ in range(3)] == [h["id"], n["id"], low["id"]]
+    old = scheduler.store.add(
+        kind="run", role="echo", model="small", app="a", priority="interactive"
+    )  # a row from before the rename
+    scheduler.submit("echo", {}, "b")
+    assert scheduler.step()["id"] == old["id"]
+
+
 def test_a_job_that_waited_too_long_is_not_skipped_for_the_loaded_model(scheduler, clock):
     scheduler.submit("echo", {}, "a")
     scheduler.step()

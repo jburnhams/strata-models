@@ -223,7 +223,7 @@ def test_executors_pass_through(scheduler):
     assert (
         ex.submit("r", {}, "m", {}) == 7
         and ex.wait(7)["status"] == "done"
-        and calls == [("r", "evals", "batch", "m", None)]
+        and calls == [("r", "evals", "low", "m", None)]
     )
     j = C.SchedulerExecutor(scheduler).submit("echo", dict(x=1), "small", None)
     scheduler.step()
