@@ -2,6 +2,11 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-14
+
+**FlashVSR+ gets its Triton attention kernel (branch `claude/flashvsr-triton`)**
+The first FlashVSR+ Turbo run (one clip, 2026-11-13) stopped before any frame: with neither Block-Sparse-Attention nor FlashVSR's own Triton kernel installed it falls back to PyTorch SDPA, which refuses a 1536 x 1152 clip ("would allocate too many mask entries"); the card had peaked at 4.2 GB. `scripts/setup_worker_venv.sh flashvsr-plus` now also installs flash-attn 2.7.4.post1 (the prebuilt wheel for cp310, torch 2.7, CUDA 12, C++11 ABI: no CUDA compile) and the repo's `operators/flashvsr_attn` (pure Triton), the backend FlashVSR+'s README recommends for consumer cards.
+
 ## 2026-11-13
 
 **An `ocr` role on Tesseract, for strata-scan (branch `claude/project-thread-0n1ijc`)**

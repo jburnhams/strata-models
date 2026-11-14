@@ -57,6 +57,11 @@ case $name in
     src=$models/src/flashvsr-plus; checkout https://github.com/OpenImagingLab/FlashVSR_Plus "$src" b548a2cc2c929d3d4676f2973abe27876ec4dee7
     VIRTUAL_ENV=$venv uv pip install --index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX "torch>=2.5,<2.8" spandrel -r "$src/requirements.txt"   # spandrel: a cleanup stage's 1x model
     VIRTUAL_ENV=$venv uv pip install --no-deps -e "$src"
+    # The attention kernel: without BSA or this one, FlashVSR+ falls back to PyTorch SDPA, which refuses a 1536 x 1152 clip ("would
+    # allocate too many mask entries"). Its own Triton kernel (the README's pick for consumer cards) needs flash-attn's utilities: the
+    # prebuilt wheel for this venv (cp310, torch 2.7, CUDA 12, C++11 ABI), so nothing is compiled; the kernel is pure Triton.
+    VIRTUAL_ENV=$venv uv pip install --no-deps "flash_attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
+    VIRTUAL_ENV=$venv uv pip install --no-deps --no-build-isolation -e "$src/operators/flashvsr_attn"
     for f in TCDecoder.ckpt turbo/dit.safetensors turbo/lq_proj_in.safetensors base/dit.safetensors base/lq_proj_in.safetensors; do   # into the repo's ckpts/, where the CLI looks
       fetch "https://huggingface.co/ruchangyao/FlashVSR_plus/resolve/main/$f" "$src/ckpts/$f"
     done
