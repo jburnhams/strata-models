@@ -4,6 +4,19 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**An OCR eval on hard book pages, and page cleaning before OCR (branch `claude/project-thread-0n1ijc`)**
+Jonathan asked for evals of strata-scan's trickier pages to see what helps, and to look at cleanup like diary-study's, before and after OCR. Ten hard pages from the two Punch and Judy books, typed out by hand, measure Tesseract with each cleaning step and page mode, a vision-language model reading the page, and one correcting Tesseract's text.
+
+- `runtimes/pageclean.py` (**new**, in pyright's strict list): seven named cleaning steps in Pillow and numpy (`flatten`, from diary-study's `remove_background_and_lighten_fold`; `contrast`, `sharpen`, `denoise`, `otsu`, `adaptive` (Sauvola), `upscale`).
+- `runtimes/tesseract.py`: param `clean` (a list or "flatten,sharpen") runs those steps first, keeping the picture's dpi (doubled by `upscale`), and the result names them; `image` is accepted for `path`, so an eval item's picture reaches Tesseract and a vision-language model alike. A multipage picture is refused before cleaning (review: cleaning kept only its first frame).
+- `models.toml`: `qwen3.5-9b-vl` and `gemma-4-12b-vl` also serve `ocr`, as eval candidates only (they give no boxes); `tesseract-eng` stays the role's model.
+- `runtimes/presets/ocr-read-v1.md`, `ocr-correct-v1.md` (**new**): transcribe a page as printed; correct an OCR text against the page.
+- `evals/specs/ocr-pages.toml` (**new**): 13 candidates (Tesseract with cleaning and psm; two vision-language readers; Tesseract then a corrector). `scripts/evals/ocr_pages.py` (**new**): builds the dataset from strata-scan or a folder of PNGs; `scripts/evals/ocr_pages/*.txt` (**new**): the ten references.
+- `tests/unit/test_pageclean.py` (**new**): each step on a synthetic shaded page. `tests/integration/test_tesseract_runtime.py`: `image` and `clean` on the real command.
+- `docs/evals.md`: the OCR eval. README, client docstring: `clean`.
+- `evals/metrics.py`: `transcript` (what `cer` and `wer` read) takes an output's `text` when it has no `segments`; an `ocr` page or a vision-language answer scored 100 % wrong before. `tests/unit/test_eval_metrics.py`: that case.
+- First numbers, the nine Tesseract candidates through a local service (CER, %): no cleaning 4.93, psm 4 3.48, flatten 3.60, denoise 3.83, adaptive 4.27, upscale 4.62, flatten+sharpen 2.87 (the report's pick: 2.06 points better, interval 0.28 to 6.93), flatten with psm 4 3.13, flatten+denoise with psm 4 3.04. Tried locally and left out: otsu 5.11, flatten then upscale 5.56. The vision-language candidates need the GPU.
+
 **FlashVSR+ gets its Triton attention kernel (branch `claude/flashvsr-triton`)**
 The first FlashVSR+ Turbo run (one clip, 2026-11-13) stopped before any frame: with neither Block-Sparse-Attention nor FlashVSR's own Triton kernel installed it falls back to PyTorch SDPA, which refuses a 1536 x 1152 clip ("would allocate too many mask entries"); the card had peaked at 4.2 GB. `scripts/setup_worker_venv.sh flashvsr-plus` now also installs flash-attn 2.7.4.post1 (the prebuilt wheel for cp310, torch 2.7, CUDA 12, C++11 ABI: no CUDA compile) and the repo's `operators/flashvsr_attn` (pure Triton), the backend FlashVSR+'s README recommends for consumer cards.
 

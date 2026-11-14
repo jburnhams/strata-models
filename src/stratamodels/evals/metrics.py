@@ -81,10 +81,15 @@ def edits(ref, hyp):
 
 
 def transcript(output):
-    """The text of a transcription output (segments joined)."""
+    """The text of a transcription output (segments joined), or of a reading with no segments (an `ocr` page, a vision-language model's
+    answer): its `text`."""
     if not output:
         return ""
-    return " ".join(s.get("text", "") for s in output.get("segments", [])) if isinstance(output, dict) else str(output)
+    if not isinstance(output, dict):
+        return str(output)
+    if "segments" not in output:
+        return str(output.get("text") or "")
+    return " ".join(s.get("text", "") for s in output["segments"])
 
 
 def _ref_text(item):

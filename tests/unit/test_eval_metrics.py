@@ -20,6 +20,10 @@ def test_text_normalisation_and_edit_distance():
         and M.transcript(None) == ""
     )
     assert M.transcript("plain") == "plain"
+    # an ocr page or a vision-language answer has text and no segments
+    assert (
+        M.transcript({"text": "Punch and Judy", "lines": []}) == "Punch and Judy" and M.transcript({"lines": []}) == ""
+    )
 
 
 def test_wer_cer_count_failures_as_all_errors():
