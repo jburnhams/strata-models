@@ -534,3 +534,63 @@ def test_media_serves_an_items_reference_previews_and_nothing_else(client, tmp_p
     assert client.get("/api/evals/fake-asr/media/zz", params=dict(file=str(preview))).status_code == 404
     face.unlink()
     assert client.get("/api/evals/fake-asr/media/v", params=dict(file=str(face))).status_code == 404  # named but gone
+
+
+ALL_PAIRS_SPEC = """name = "fake-asr-all-pairs"
+question = "Which of three fake transcribers, judged every pair against every other?"
+role = "echo"
+dataset = "speech"
+metrics = ["judged", "failed"]
+[decision]
+primary = "judged"
+baseline = "base"
+pairs = "{pairs}"
+[[candidates]]
+name = "base"
+model = "small"
+params = {{ drop = 4 }}
+[[candidates]]
+name = "mid"
+model = "small"
+params = {{ drop = 8 }}
+[[candidates]]
+name = "better"
+model = "big"
+params = {{ drop = 12 }}
+"""
+
+
+@pytest.mark.parametrize(("pairs", "offered"), [("baseline", 2), ("all", 3)])
+def test_a_judged_eval_offers_every_pair_when_asked(client, pairs, offered):
+    # pipelines that all beat the baseline are ranked against each other (Bradley-Terry): pairs = "all" offers mid against better too
+    import os
+
+    name = "fake-asr-all-pairs"
+    open(os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", f"{name}.toml"), "w").write(
+        ALL_PAIRS_SPEC.format(pairs=pairs)
+    )
+    client.post(f"/api/evals/{name}/run", params=dict(limit=1))
+    wait_run(client, name)
+    seen = set()
+    for _ in range(offered):
+        p = client.get(f"/api/evals/{name}/pair").json()
+        j = client.post(f"/api/evals/{name}/judgments", json=dict(token=p["pair"]["token"], winner="x")).json()
+        seen.add(frozenset((j["x"], j["y"])))
+    assert len(seen) == offered and (frozenset(("mid", "better")) in seen) == (pairs == "all")
+
+
+def test_pairs_must_be_baseline_or_all():
+    from stratamodels.evals import core as C
+
+    with pytest.raises(C.EvalError, match="pairs is baseline or all"):
+        C.parse_spec(
+            dict(
+                name="x",
+                question="q",
+                role="echo",
+                dataset="d",
+                metrics=["judged"],
+                decision=dict(primary="judged", pairs="some"),
+                candidates=[dict(name="a", model="m"), dict(name="b", model="m")],
+            )
+        )

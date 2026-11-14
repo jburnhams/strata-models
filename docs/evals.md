@@ -47,6 +47,9 @@ runtime.
   offers only pairs with the baseline, and a candidate is adopted when it wins enough of them (ties count half): the Wilson interval of its
   win share must be clear of 50 % and the share at least 50 % + `min_effect`. Until then the decision says roughly how many judged pairs would
   settle it. Judgments count only while both outputs are current (a changed model, params or dataset makes new outputs).
+  `[decision] pairs = "all"` offers every pair instead, for candidates that all beat one baseline and need ranking against each other
+  (whole pipelines, `video-pipeline-vhs`): the decision against the baseline still uses the pairs with it, and the write-up's
+  Bradley-Terry strengths rank the lot.
 - **`[score]`** names a second model that reads every output with a file (`role`, optional `model`, `params`): after a run, each output gets
   a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
   the words are scored against the text that was to be spoken, an intelligibility guard for text to speech. `with = {param = "item.field"}`

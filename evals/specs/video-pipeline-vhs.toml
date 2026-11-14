@@ -1,0 +1,75 @@
+name = "video-pipeline-vhs"
+question = "Which whole pipeline (deinterlace, denoise, upscale, refine) should restore digitised VHS: the winners of each stage's own eval, combined?"
+role = "video-enhance"
+dataset = "vhs-clips-8"
+metrics = ["judged", "latency_s", "peak_vram_gb", "failed", "fidelity_ssim", "fidelity_psnr", "flicker_ratio", "sharpness", "luma_noise", "chroma_noise"]   # judged decides; the readings (workers/video.py quality) are context beside it
+judge = true
+similarity = "video"
+
+# Each stage's eval picked its shortlist alone (deinterlace-vhs: QTGMC; vhs-grain: SMDegrain on luma; vhs-chroma-cleanup: light hqdn3d on
+# chroma; video-enhance-vhs: FlashVSR+ Turbo, Real-ESRGAN x2; turbo+backproject reins Turbo's invented detail in). Stages interact (a
+# denoise before a generative upscaler changes what it invents), so here they are judged as whole pipelines, every pair against every other
+# (pairs = "all": all of them beat plain lanczos, so a head to head with one baseline would not rank them; Bradley-Terry in the write-up does).
+# One worker job is a whole pipeline: QTGMC and SMDegrain in its VapourSynth stage, the chroma hqdn3d in ffmpeg after it, then the upscaler.
+# The refine candidates are made from (from) a pipeline's output, held to the tape through the same cleanup (against = "cleaned") so the
+# back-projection does not pull the grain back in. Next: the smear fix (its own eval) as a slot switched on and off in the leader, then one
+# setting at a time (back-projection strength, SMDegrain strength, chroma light or strong, Turbo or SeedVR2).
+[decision]
+primary = "judged"
+baseline = "p3-degrain-turbo"
+pairs = "all"
+min_effect = 0.1
+guards = { failed = 1.0 }
+
+[[candidates]]
+name = "p1-qtgmc-lanczos"
+model = "video-lanczos"
+params = { deinterlace = "qtgmc" }
+note = "the best classical pipeline: QTGMC, lanczos"
+
+[[candidates]]
+name = "p2-degrain-x2"
+model = "video-realesrgan-x2plus"
+params = { deinterlace = "qtgmc", cleanup = { vs = { degrain = { tr = 2, thsad = 300 }, planes = "luma" }, filters = "hqdn3d=3:3:4:4", planes = "chroma" } }
+note = "QTGMC, SMDegrain (luma), light hqdn3d (chroma), Real-ESRGAN x2: the faithful upscaler"
+
+[[candidates]]
+name = "p3-degrain-turbo"
+model = "video-flashvsr-plus-turbo"
+params = { deinterlace = "qtgmc", cleanup = { vs = { degrain = { tr = 2, thsad = 300 }, planes = "luma" }, filters = "hqdn3d=3:3:4:4", planes = "chroma" }, engine_size = [1536, 1152] }
+note = "QTGMC, SMDegrain (luma), light hqdn3d (chroma), FlashVSR+ Turbo"
+
+[[candidates]]
+name = "p4-degrain-turbo-bp"
+model = "video-refine"
+from = ["p3-degrain-turbo"]
+params = { deinterlace = "qtgmc", cleanup = { vs = { degrain = { tr = 2, thsad = 300 }, planes = "luma" }, filters = "hqdn3d=3:3:4:4", planes = "chroma" }, refine = { method = "backproject", iterations = 1, strength = 0.5, against = "cleaned" } }
+note = "P3, back-projected once at half strength against the cleaned tape"
+
+[[candidates]]
+name = "p5-turbo"
+model = "video-flashvsr-plus-turbo"
+params = { deinterlace = "qtgmc", cleanup = { filters = "hqdn3d=3:3:4:4", planes = "chroma" }, engine_size = [1536, 1152] }
+note = "QTGMC, light hqdn3d (chroma), FlashVSR+ Turbo: no grain step (does Turbo handle the grain itself?)"
+
+[[candidates]]
+name = "p5-turbo-bp"
+model = "video-refine"
+from = ["p5-turbo"]
+params = { deinterlace = "qtgmc", cleanup = { filters = "hqdn3d=3:3:4:4", planes = "chroma" }, refine = { method = "backproject", iterations = 1, strength = 0.5, against = "cleaned" } }
+note = "P5, back-projected once at half strength against the (chroma-)cleaned tape"
+
+[[judges]]
+name = "qwen-vision"
+kind = "vision"              # role judge-vision (qwen3.5-9b-vl)
+criteria = "The pictures are crops of the same moment of a digitised VHS home video, enlarged without smoothing: the tape itself (when shown), then two enhanced versions X and Y. Prefer the one with more real detail and fewer artefacts: sharper edges and text that match the tape, natural faces and skin (not waxy, painted or plastic), no invented texture or patterns that are not in the tape, no halos or ringing, colours true to the tape. Real detail a little soft beats crisp invented detail."
+auto = true
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                  # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+criteria = "The pictures are crops of the same moment of a digitised VHS home video, enlarged without smoothing: the tape itself (when shown), then two enhanced versions X and Y. Prefer the one with more real detail and fewer artefacts: sharper edges and text that match the tape, natural faces and skin (not waxy, painted or plastic), no invented texture or patterns that are not in the tape, no halos or ringing, colours true to the tape. Real detail a little soft beats crisp invented detail."
+limit = 20                   # pairs per run: run again for the rest
+auto = true

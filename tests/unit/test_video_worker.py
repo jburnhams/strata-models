@@ -764,6 +764,18 @@ def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
         P(field_order="bff", cleanup=dict(vs=dict(degrain=dict(tr=3, thsad=400)), planes="luma")), "/t/c.mkv"
     )
     assert "c = core.bwdif.Bwdif(c, field=2)" in d and "c = mc_degrain(c, tr=3, thsad=400, blksize=16, planes=0)" in d
+    both = V.vs_script(  # a pipeline: SMDegrain on luma in the stage, the ffmpeg filters on chroma after it
+        P(
+            deinterlace="qtgmc",
+            cleanup=dict(vs=dict(degrain={}, planes="luma"), filters="hqdn3d=3:3:4:4", planes="chroma"),
+        ),
+        "/t/c.mkv",
+    )
+    assert "planes=0)" in both and "QTempGaussMC" in both
+    assert "hqdn3d=3:3:4:4" in V.prep_filter(
+        {**P(deinterlace="none"), "cleanup": dict(filters="hqdn3d=3:3:4:4", planes="chroma")},
+        dict(width=720, height=576),
+    )
     n = V.vs_script(P(deinterlace="none", cleanup=dict(vs=dict(degrain={}), planes="chroma")), "/t/c.mkv")
     assert "SetFieldBased" not in n and "planes=[1, 2]" in n and "tr=2, thsad=300" in n
     assert (
@@ -779,6 +791,8 @@ def test_vs_script_deinterlaces_with_qtgmc_and_degrains_the_planes_asked():
         (dict(cleanup=dict(vs=dict(degrain=dict(tr=0)))), "whole numbers"),
         (dict(cleanup=dict(vs=dict(degrain=dict(radius=2)))), "whole numbers"),
         (dict(cleanup=dict(vs=dict(degrain={}), planes="red")), "planes is all, luma or chroma"),
+        (dict(cleanup=dict(vs=dict(degrain={}, planes="red"))), "planes is all, luma or chroma"),
+        (dict(cleanup=dict(vs=dict(degrain={}, strength=2))), "cleanup vs is"),
     ],
 )
 def test_vs_script_refuses_bad_stages(kw, match):
@@ -956,9 +970,49 @@ def test_refine_engine_puts_the_tape_and_the_sources_through_refine_step(monkeyp
     assert res["engine"] == "refine" and res["peak_vram_mb"] == 0.0
 
 
+def test_refine_against_the_cleaned_tape_keeps_the_cleanup_filters(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    # a pipeline's upscale (denoised first) back-projected against the raw tape would get the tape's noise back: `cleaned` keeps the cleanup
+    import numpy as np
+
+    a = tmp_path / "a.mp4"
+    a.write_bytes(b"x")
+    V.load(dict(key="video-refine", vram_gb=0, options=dict(engine="refine")), str(tmp_path))
+    lr = np.zeros((576, 768, 3), np.uint8).tobytes()
+    hr = np.full((1080, 1440, 3), 200, np.uint8).tobytes()
+
+    def tape_vf(against):
+        procs = []
+
+        def popen(cmd, stdout=None, stdin=None, **kw):
+            data = lr if any("crop=" in str(c) for c in cmd) else hr
+            p = types.SimpleNamespace(
+                cmd=cmd, stdout=Pipe(data), stdin=Pipe(), wait=lambda: 0, kill=lambda: None, pid=1
+            )
+            procs.append(p)
+            return p
+
+        monkeypatch.setattr(V, "refine_step", lambda method, lr_, hrs, r: hrs[0])
+        V.run(
+            dict(
+                path=clip,
+                crop=[14, 0, 692, 568],
+                out_dir=str(tmp_path / f"o-{against}"),
+                sources=[str(a)],
+                cleanup=dict(filters="hqdn3d=3:3:4:4", planes="chroma"),
+                refine=dict(method="backproject", **({"against": against} if against else {})),
+            ),
+            run_=FakeRun(),
+            popen=popen,
+        )
+        return procs[0].cmd[procs[0].cmd.index("-vf") + 1]
+
+    assert "hqdn3d" not in tape_vf(None) and "hqdn3d" not in tape_vf("tape") and "hqdn3d=3:3:4:4" in tape_vf("cleaned")
+
+
 @pytest.mark.parametrize(
     ("p", "match"),
     [
+        (dict(refine=dict(method="backproject", against="lanczos")), "refine against is tape or cleaned"),
         (dict(refine=dict(method="sharpen")), "refine method"),
         (dict(refine=dict(method="blend")), "needs the source outputs"),
         (dict(refine=dict(method="blend"), sources=["/none.mp4"]), "needs the source outputs"),
