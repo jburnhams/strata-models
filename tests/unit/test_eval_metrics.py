@@ -269,3 +269,11 @@ def test_audio_quality_metrics_read_the_score_pass():
         M.reading("text", "dnsmos", "ovrl") is None
         and M.reading(dict(scored=dict(result=dict(dnsmos=dict(ovrl=float("nan"))))), "dnsmos", "ovrl") is None
     )
+
+
+def test_cost_per_item():
+    c = M.METRICS["cost_usd"]
+    assert c.score({}, dict(text="x", cost_usd=0.0012), None) == 0.0012 and c.score({}, dict(text="x"), None) == 0.0
+    assert c.score({}, dict(cost_usd=1.0), "failed") is None and c.score({}, "text", None) is None
+    assert c.score({}, dict(recorded=True), None) is None and c.score({}, dict(cli="agy"), None) is None
+    assert (c.shape, c.better) == ("mean", "lower")

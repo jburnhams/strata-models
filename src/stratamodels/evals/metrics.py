@@ -470,6 +470,18 @@ def _latency(item, output, error):
     return item.get("_run_s")
 
 
+def _cost(item, output, error):
+    """US dollars the item cost: a cloud API model's `cost_usd` (from the ledger's price, runtimes/cloud.py), 0 for a model run here (its cost
+    is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item."""
+    if error or not isinstance(output, dict):
+        return None
+    if isinstance(output.get("cost_usd"), (int, float)):
+        return float(output["cost_usd"])
+    if output.get("recorded") or output.get("cli"):
+        return None
+    return 0.0
+
+
 def _exact(item, output, error):
     want = (item.get("reference") or {}).get("answer")
     if want is None:
@@ -701,6 +713,14 @@ METRICS = {
             "Seconds the model ran per item (model already loaded; load time is reported apart)",
             "s",
             _latency,
+        ),
+        Metric(
+            "cost_usd",
+            "mean",
+            "lower",
+            "US dollars per item on a cloud API (Claude, Google AI Studio's paid key), priced from the call's tokens; 0 for a model run here, none for a subscription CLI's recordings",
+            "$",
+            _cost,
         ),
     ]
 }
