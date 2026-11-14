@@ -115,6 +115,11 @@ vision-language model read the same thing; `cer` decides, `wer` is context, and 
   pages nobody has typed.
 Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
 
+## Files in candidate params
+A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS
+candidates, for one), so a spec in this public repository names no machine's paths. `{data}` is filled in when each job is made, so the
+result key, and with it every cached output, is the same as with the full path.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

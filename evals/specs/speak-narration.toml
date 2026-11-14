@@ -17,8 +17,8 @@ role = "transcribe"
 model = "whisper-large-v3-turbo"
 params = { language = "en", word_timestamps = false, beam_size = 5 }
 
-# The runner's own voice (cloning candidates): data/evals/voices/runner.wav, ~21 s of race speech cut by the dataset builder (wind and
-# breathing: the best reference the footage has, not a studio recording). Paths are absolute so jobs read them from anywhere.
+# The runner's own voice (cloning candidates): {data}/evals/voices/runner.wav, ~21 s of race speech cut by the dataset builder (wind and
+# breathing: the best reference the footage has, not a studio recording). "{data}" is the service's data folder, filled in per job.
 
 [[candidates]]
 name = "kokoro-lewis"
@@ -40,24 +40,24 @@ note = "a little slower: narration over pictures"
 [[candidates]]
 name = "chatterbox-runner"
 model = "chatterbox"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
+params = { voice = "{data}/evals/voices/runner.wav", exaggeration = 0.5, cfg_weight = 0.5 }
 note = "the runner's own voice, cloned"
 
 [[candidates]]
 name = "chatterbox-runner-calm"
 model = "chatterbox"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", exaggeration = 0.35, cfg_weight = 0.3 }
+params = { voice = "{data}/evals/voices/runner.wav", exaggeration = 0.35, cfg_weight = 0.3 }
 note = "Resemble's advice for slower, steadier delivery: lower cfg_weight and exaggeration"
 
 [[candidates]]
 name = "chatterbox-turbo-runner"
 model = "chatterbox-turbo"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav" }
+params = { voice = "{data}/evals/voices/runner.wav" }
 
 [[candidates]]
 name = "qwen3-clone-runner"
 model = "qwen3-tts-clone"
-params = { voice = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.wav", voice_text_file = "/home/jburnhams/code/github/strata-models/data/evals/voices/runner.txt" }
+params = { voice = "{data}/evals/voices/runner.wav", voice_text_file = "{data}/evals/voices/runner.txt" }
 
 [[candidates]]
 name = "qwen3-design-narrator"
