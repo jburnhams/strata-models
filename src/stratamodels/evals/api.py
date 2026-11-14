@@ -5,6 +5,7 @@ PUT  /api/evals/{name}/spec                  {spec as JSON, the TOML's fields} a
 GET  /api/evals/{name}                       the analysis: every metric with its interval, comparisons with the baseline, the decision; kept in
                                              the database and worked out in the background (summary: computed_at, seconds, stale)
 POST /api/evals/{name}/run                   run what is missing, in the background, through the queue (batch); progress in GET .../status
+     ?candidate=&limit=&recover=1            recover: take the outputs of jobs that already finished with the same params (a run lost to a restart)
 POST /api/evals/{name}/refresh                work the kept analysis out again (outputs changed from outside the service)
 GET  /api/evals/{name}/status
 GET  /api/evals/{name}/report                the standard write-up, as Markdown
@@ -211,7 +212,7 @@ def mount(app, scheduler):
             raise HTTPException(400, str(e))
 
     @app.post("/api/evals/{name}/run", status_code=202)
-    def post_run(name: str, candidate: str | None = None, limit: int | None = None):
+    def post_run(name: str, candidate: str | None = None, limit: int | None = None, recover: bool = False):
         s = spec_or_404(name)
         if runs.get(name, {}).get("state") == "running":
             return runs[name]
@@ -226,6 +227,7 @@ def mount(app, scheduler):
                         C.SchedulerExecutor(scheduler),
                         candidates=[candidate] if candidate else None,
                         limit=limit,
+                        recover=recover,
                         log=lambda m: st["log"].append(m),
                     ),
                     "done",

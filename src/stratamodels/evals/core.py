@@ -58,7 +58,7 @@ import os
 import time
 import tomllib
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from stratamodels import settings
 from stratamodels.db.models import EvalCandidate, EvalDataset, EvalExperiment, EvalItem, EvalJudgment, EvalResult
@@ -739,9 +739,11 @@ def cached(engine, keys):
         return {r.key: r for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(list(keys))))} if keys else {}
 
 
-def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=print, batch=32):
+def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=print, batch=32, recover=False):
     """Run what is missing: every (candidate, item) without a cached output goes to `executor` (submit(role, params, model, options) -> job id;
-    wait(job id) -> job row). Returns dict(ran, cached, failed)."""
+    wait(job id) -> job row). Each output is saved as its job finishes. `recover`: a job that already finished with exactly the same params is
+    taken from the jobs table instead of run again (the run that queued it was lost to a restart); off by default, so `forget` then `run`
+    makes new outputs. Returns dict(ran, cached, failed), and recovered when asked to."""
     ds = dataset or load_dataset(spec.dataset, engine=engine)
     items = ds.items[:limit] if limit else ds.items
     cands = [spec.candidate(c) for c in candidates] if candidates else spec.candidates
@@ -755,7 +757,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
         ]  # two candidates that are the same job run it once
     total = sum(len(sample(c, items, engine)) for c in cands)
     log(f"{spec.name}: {total - len(todo)} of {total} outputs cached, {len(todo)} to run")
-    failed = 0
+    failed = recovered = 0
     ran = len(todo)
     staged = _run_stages(spec, engine, executor, todo, ds, log, batch)
     broken = [(c, it, k) for c, it, k in todo if k in staged and staged[k][0] is None]
@@ -780,51 +782,29 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     todo = [t for t in todo if t not in broken]
     for i in range(0, len(todo), batch):
         chunk = todo[i : i + batch]
-        ids = [
-            executor.submit(
-                spec.role, {**c.params, **staged[k][0]} if k in staged else job_params(spec, c, it), c.model, c.options
-            )
-            for c, it, k in chunk
+        sent = [
+            ({**c.params, **staged[k][0]} if k in staged else job_params(spec, c, it), c, it, k) for c, it, k in chunk
         ]
-        done = [
-            (c, it, k, executor.wait(jid)) for (c, it, k), jid in zip(chunk, ids)
-        ]  # wait outside the lock: the worker needs the store meanwhile
-        rows = []
-        for c, it, k, j in done:
-            out, run_s = (j.get("result") if j["status"] == "done" else None), j.get("run_s")
-            if k in staged:  # a pipeline: its steps kept with the end result, its time is all of theirs
-                trace = staged[k][1] + [
-                    dict(
-                        role=spec.role,
-                        model=c.model,
-                        sent=staged[k][0].get(c.stages[-1]["into"]),
-                        run_s=run_s,
-                        load_s=j.get("load_s"),
-                    )
-                ]
-                if out is not None:
-                    out = {**out, "pipeline": trace}
-                if run_s is not None:
-                    run_s = run_s + sum(t.get("run_s") or 0 for t in staged[k][1])
-            rows.append(
-                EvalResult(
-                    key=k,
-                    dataset=ds.name,
-                    item_id=it["id"],
-                    role=spec.role,
-                    model=c.model,
-                    created_at=time.time(),
-                    output=out,
-                    error=None if j["status"] == "done" else (j.get("error") or j["status"]),
-                    run_s=run_s,
-                    load_s=j.get("load_s"),
-                    job_id=j.get("id"),
-                )
-            )
-        failed += sum(1 for *_, j in done if j["status"] != "done")
-        save(engine, rows)
+        # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
+        # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
+        ids = [
+            (recover and done_job(engine, spec.role, c.model, params, c.options))
+            or executor.submit(spec.role, params, c.model, c.options)
+            for params, c, it, k in sent
+        ]
+        recovered += sum(isinstance(j, dict) for j in ids)
+        for (_params, c, it, k), jid in zip(sent, ids, strict=True):
+            j = (
+                jid if isinstance(jid, dict) else executor.wait(jid)
+            )  # wait outside the lock: the worker needs the store meanwhile
+            failed += j["status"] != "done"
+            save(
+                engine, [_result_row(spec, ds, c, it, k, j, staged)]
+            )  # each as it comes: a restart loses only the job running then
         log(f"  {min(i + batch, len(todo))} of {len(todo)} run")
-    out = dict(ran=ran, cached=total - ran, failed=failed)
+    if recovered:
+        log(f"  {recovered} taken from jobs that had already finished")
+    out = dict(ran=ran - recovered, cached=total - ran, failed=failed, **({"recovered": recovered} if recover else {}))
     if spec.score:
         out["scored"] = score_outputs(
             spec, engine, executor, {result_key(spec, c, it): it for c in cands for it in items}, log, batch
@@ -927,6 +907,65 @@ def scored_view(spec, output):
     if not spec.score or not isinstance(output, dict):
         return output
     return {**output, "scored": readings(output).get(score_key(spec))}
+
+
+def _result_row(spec, ds, c, it, k, j, staged):
+    """The eval_results row of one finished job (a pipeline's steps kept with its end result)."""
+    out, run_s = (j.get("result") if j["status"] == "done" else None), j.get("run_s")
+    if k in staged:  # a pipeline: its steps kept with the end result, its time is all of theirs
+        trace = staged[k][1] + [
+            dict(
+                role=spec.role,
+                model=c.model,
+                sent=staged[k][0].get(c.stages[-1]["into"]),
+                run_s=run_s,
+                load_s=j.get("load_s"),
+            )
+        ]
+        if out is not None:
+            out = {**out, "pipeline": trace}
+        if run_s is not None:
+            run_s = run_s + sum(t.get("run_s") or 0 for t in staged[k][1])
+    return EvalResult(
+        key=k,
+        dataset=ds.name,
+        item_id=it["id"],
+        role=spec.role,
+        model=c.model,
+        created_at=time.time(),
+        output=out,
+        error=None if j["status"] == "done" else (j.get("error") or j["status"]),
+        run_s=run_s,
+        load_s=j.get("load_s"),
+        job_id=j.get("id"),
+    )
+
+
+def done_job(engine, role, model, params, options=None):
+    """A finished job of `role` on `model` whose params were exactly these (load options included, as the scheduler keeps them), with its
+    result still kept (results go after a week): {id, status: done, result, run_s, load_s}, or None. Lets an eval run pick up the outputs of
+    jobs that finished while the run waited, when the service restarted before the run could save them."""
+    from stratamodels.db.models import Job, JobResult
+    from stratamodels.scheduler import OPTIONS
+
+    want = _canon({**params, **({OPTIONS: dict(options)} if options else {})})
+    with session(engine) as s:
+        rows = s.execute(
+            select(Job, JobResult)
+            .join(JobResult, JobResult.job_id == Job.id)
+            .where(
+                Job.kind == "run",
+                Job.status == "done",
+                Job.role == role,
+                or_(Job.model == model, Job.model.startswith(f"{model}~")),
+            )  # a candidate with load options ran on a variant, `model~<hash>`; the params check below (options included) picks the right one
+            .order_by(Job.id.desc())
+            .limit(500)
+        ).all()
+        for job, res in rows:
+            if _canon(job.params or {}) == want:
+                return dict(id=job.id, status="done", result=res.output, run_s=job.run_s, load_s=job.load_s)
+    return None
 
 
 def save(engine, rows):

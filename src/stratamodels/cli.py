@@ -211,7 +211,14 @@ def cmd_eval(args):
 
         if not sm.available():
             sys.exit(f"strata-models is not running at {sm.url()}: eval jobs go through its queue")
-        r = C.run(spec, engine, C.ClientExecutor(sm), candidates=args.candidate or None, limit=args.limit)
+        r = C.run(
+            spec,
+            engine,
+            C.ClientExecutor(sm),
+            candidates=args.candidate or None,
+            limit=args.limit,
+            recover=args.recover,
+        )
         print(json.dumps(r))
         return 0
     if args.action == "judge":
@@ -375,6 +382,11 @@ def main(argv=None):
     e.add_argument("name", nargs="?")
     e.add_argument("--candidate", action="append", help="only this candidate (repeatable)")
     e.add_argument("--limit", type=int, help="only the first N items (a trial run); judge: at most N pairs per judge")
+    e.add_argument(
+        "--recover",
+        action="store_true",
+        help="run: take outputs from jobs that already finished with the same params (a run lost to a restart)",
+    )
     e.add_argument(
         "--judge", action="append", help="judge: only this model judge (repeatable; default every judge in the spec)"
     )
