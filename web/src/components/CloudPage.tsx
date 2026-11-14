@@ -155,9 +155,8 @@ export default function CloudPage() {
   const setFilter = (k: string, v: string) => setParams(p => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); n.delete('open'); return n })
   const spend = useLoad({ queryKey: ['spend'], queryFn: api.spend, refetchInterval: 30_000 })
   const series = useLoad({ queryKey: ['spend-series', filters.provider, filters.model, filters.app, days], queryFn: () => api.spendSeries(filters) })
-  const breakdown = series.status === 'ready' ? series.data.breakdown : []
-  const models = [...new Set(breakdown.map(r => r.model))].sort()
-  const apps = [...new Set(breakdown.map(r => r.app).filter((a): a is string => !!a))].sort()
+  const models = series.status === 'ready' ? series.data.options.models : []
+  const apps = series.status === 'ready' ? series.data.options.apps : []
   return (
     <div className="grid gap-8">
       <PageHeader title="Cloud APIs" scope="What the Claude, Google and NVIDIA keys spend, and every request they made" finding={spend.status === 'ready' ? { text: spendFinding(spend.data.providers) } : undefined} />

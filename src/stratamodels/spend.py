@@ -40,7 +40,10 @@ WARN_AT = (0.5, 0.8, 1.0)  # shares of a budget at which the web app warns
 
 _store = None
 clock = time.time  # tests set it
-_lock = threading.Lock()
+_lock = threading.Lock()  # guards _reserved
+_budget = (
+    threading.RLock()
+)  # one boundary for check-then-reserve and reservation-to-ledger, so two calls can't both fit the same budget
 _reserved = {}  # provider -> {ticket: usd} of calls under way
 _ticket = [0]
 _job = contextvars.ContextVar("stratamodels_spend_job", default=(None, None))
@@ -171,28 +174,29 @@ def summary(now=None):
 
 def reserve(provider, worst_usd, now=None):
     """Hold `worst_usd` of a provider's budget for a call about to be made; returns a ticket for `record`. Raises OverBudget if it does not fit."""
-    if PROVIDERS[provider]["budgeted"]:
-        if _store is None:
-            raise OverBudget(f"no spend ledger: {PROVIDERS[provider]['label']} calls are refused")
-        st = state(provider, now)
-        if not st["budget"]:
-            raise OverBudget(
-                f"no budget is set for {st['label']}: set {provider}_budget_usd (and {provider}_rollover) first"
-            )
-        if worst_usd > st["left"]:
-            raise OverBudget(
-                f"{st['label']}: this call could cost ${worst_usd:.4f} and ${st['left']:.4f} of the ${st['budget']:.2f} budget is left"
-                + (
-                    f" until {datetime.datetime.fromtimestamp(st['next_rollover'], datetime.UTC).date()}"
-                    if st["next_rollover"]
-                    else ""
+    with _budget:
+        if PROVIDERS[provider]["budgeted"]:
+            if _store is None:
+                raise OverBudget(f"no spend ledger: {PROVIDERS[provider]['label']} calls are refused")
+            st = state(provider, now)
+            if not st["budget"]:
+                raise OverBudget(
+                    f"no budget is set for {st['label']}: set {provider}_budget_usd (and {provider}_rollover) first"
                 )
-            )
-    with _lock:
-        _ticket[0] += 1
-        t = (provider, _ticket[0])
-        _reserved.setdefault(provider, {})[t] = float(worst_usd)
-    return t
+            if worst_usd > st["left"]:
+                raise OverBudget(
+                    f"{st['label']}: this call could cost ${worst_usd:.4f} and ${st['left']:.4f} of the ${st['budget']:.2f} budget is left"
+                    + (
+                        f" until {datetime.datetime.fromtimestamp(st['next_rollover'], datetime.UTC).date()}"
+                        if st["next_rollover"]
+                        else ""
+                    )
+                )
+        with _lock:
+            _ticket[0] += 1
+            t = (provider, _ticket[0])
+            _reserved.setdefault(provider, {})[t] = float(worst_usd)
+        return t
 
 
 def release(ticket):
@@ -202,22 +206,25 @@ def release(ticket):
 
 def record(ticket, model, cost_usd=0.0, now=None, **fields):
     """Write a call's row (fields: tokens_in, tokens_out, cache_read, cache_write, ok, error, seconds, model_key, finish, request, response)
-    and free its reservation. Returns the row."""
-    release(ticket)
+    and free its reservation, the row first so the spend never drops out of the count in between. Returns the row."""
     app, job_id = _job.get()
     if fields.get("response") is not None:
         fields["response"] = str(fields["response"])[:100_000]
-    if _store is None:
-        return None
-    return _store.add_api_call(
-        at=now if now is not None else clock(),
-        provider=ticket[0],
-        model=model,
-        app=app,
-        job_id=job_id,
-        cost_usd=round(float(cost_usd), 8),
-        **fields,
-    )
+    with _budget:
+        try:
+            if _store is None:
+                return None
+            return _store.add_api_call(
+                at=now if now is not None else clock(),
+                provider=ticket[0],
+                model=model,
+                app=app,
+                job_id=job_id,
+                cost_usd=round(float(cost_usd), 8),
+                **fields,
+            )
+        finally:
+            release(ticket)
 
 
 def per_task(since=0.0):

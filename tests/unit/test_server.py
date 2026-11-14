@@ -284,10 +284,11 @@ def test_spend_budgets_series_and_request_log(client, scheduler, monkeypatch):
         and len(ser["breakdown"]) == 2
     )
     assert client.get("/api/spend/series", params=dict(bucket="week")).status_code == 400
-    assert [
-        p["provider"]
-        for p in client.get("/api/spend/series", params=dict(provider="claude", app="evals")).json()["points"]
-    ] == ["claude"]
+    filtered = client.get("/api/spend/series", params=dict(provider="claude", app="evals")).json()
+    assert [p["provider"] for p in filtered["points"]] == ["claude"]
+    assert [r["provider"] for r in filtered["breakdown"]] == ["claude"] and filtered["options"] == dict(
+        models=["claude-haiku-5-5", "nvidia/x"], apps=["evals"]
+    )
     page = client.get("/api/spend/calls", params=dict(limit=1)).json()
     assert len(page["calls"]) == 1 and page["next"] == page["calls"][0]["id"]
     assert client.get("/api/spend/calls", params=dict(before=page["next"])).json()["next"] is None

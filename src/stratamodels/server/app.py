@@ -25,7 +25,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   DELETE /api/leases/{id}                give it back
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
   GET  /api/spend                        each cloud API key's budget, spent, left, period and warning level (spend.summary)
-  GET  /api/spend/series?days=30&bucket=day   cost, calls and tokens per bucket and provider, and the breakdown by provider, model and app
+  GET  /api/spend/series?days=30&bucket=day   cost, calls and tokens per bucket and provider, the breakdown by provider, model and app (filtered), and the filter options
   GET  /api/spend/calls?provider=&model=&app=&ok=&days=&before=&limit=   the ledger, newest first (without bodies)
   GET  /api/spend/calls/{id}             one call with what was sent and what came back
   GET/PUT /api/settings
@@ -299,11 +299,15 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             raise HTTPException(400, "bucket is hour or day")
         now = s.clock()
         since = (now - max(min(days, 400.0), 0.0) * 86400.0) // size * size
+        rows = s.store.api_breakdown(since)
+        wanted = dict(provider=provider, model=model, app=app_name)
         return dict(
             since=since,
             bucket_s=size,
             points=spend.series(since, size, provider, model, app_name),
-            breakdown=s.store.api_breakdown(since),
+            # the table shows what the filters pick; the filter menus are filled from every row
+            breakdown=[r for r in rows if all(v is None or r[k] == v for k, v in wanted.items())],
+            options=dict(models=sorted({r["model"] for r in rows}), apps=sorted({r["app"] for r in rows if r["app"]})),
         )
 
     @app.get("/api/spend/calls")

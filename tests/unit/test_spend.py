@@ -145,3 +145,36 @@ def test_series_buckets_by_provider(ledger, monkeypatch):  # noqa: F811
         and ledger.api_log(model="other") == []
     )
     assert ledger.api_call(log[0]["id"])["request"] is None and ledger.api_call(999) is None
+
+
+def test_concurrent_reservations_cannot_overrun_the_budget(ledger, monkeypatch):  # noqa: F811
+    """Two calls checking the same budget at once: only one $0.75 reservation fits in $1, however the threads interleave."""
+    import threading
+
+    monkeypatch.setattr(settings, "budget", lambda p: (1.0, None))
+    real_state = spend.state
+    gate = threading.Barrier(2, timeout=0.5)
+
+    def slow_state(*a, **k):
+        st = real_state(*a, **k)
+        try:
+            gate.wait()  # without the lock both threads read the budget here before either reserves
+        except threading.BrokenBarrierError:
+            pass
+        return st
+
+    monkeypatch.setattr(spend, "state", slow_state)
+    got = []
+
+    def go():
+        try:
+            got.append(spend.reserve("claude", 0.75))
+        except spend.OverBudget:
+            got.append(None)
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(x is None for x in got) == [False, True]

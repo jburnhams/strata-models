@@ -39,7 +39,7 @@ export interface ProviderState {
 export interface Spend { providers: ProviderState[]; keys: Record<string, boolean>; warn_at: number[] }
 export interface SpendPoint { t: number; provider: Provider; cost_usd: number; calls: number; failed: number; tokens: number }
 export interface SpendRow { provider: Provider; model: string; app: string | null; calls: number; failed: number; tokens_in: number; tokens_out: number; cost_usd: number }
-export interface SpendSeries { since: number; bucket_s: number; points: SpendPoint[]; breakdown: SpendRow[] }
+export interface SpendSeries { since: number; bucket_s: number; points: SpendPoint[]; breakdown: SpendRow[]; options: { models: string[]; apps: string[] } }
 export interface ApiCall {
   id: number; at: number; provider: Provider; model: string; app: string | null; job_id: number | null; tokens_in: number; tokens_out: number; cache_read: number; cache_write: number
   cost_usd: number; ok: boolean; error: string | null; seconds: number | null; model_key: string | null; finish: string | null
