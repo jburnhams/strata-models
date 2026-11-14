@@ -561,6 +561,112 @@ AUDIO_METRICS = [
 ]
 
 
+# ---- rebuilt pages (page-build and the readers that fill its page description: reference.page is the cleaned page, as a description) ------
+def _page_ref(item):
+    return (item.get("reference") or {}).get("page")
+
+
+def _page_out(output):
+    return output.get("page") if isinstance(output, dict) and isinstance(output.get("page"), dict) else None
+
+
+def _xyxy(box):
+    x, y, w, h = (float(v) for v in box)
+    return [x, y, x + w, y + h]
+
+
+def _area(b):
+    return (b[2] - b[0]) * (b[3] - b[1])
+
+
+def _pieces(whole, parts, min_share=0.1):
+    """Indices of the `parts` that lie mostly inside `whole` (over half of each inside) and are not slivers of it (at least `min_share` of
+    its area): two or more such parts are `whole` split, or, read the other way, merged into it."""
+    w = _xyxy(whole["box"])
+    out = []
+    for k, p in enumerate(parts):
+        b = _xyxy(p["box"])
+        a = _area(b)
+        inter = max(0.0, min(w[2], b[2]) - max(w[0], b[0])) * max(0.0, min(w[3], b[3]) - max(w[1], b[1]))
+        if a > 0 and inter / a > 0.5 and a >= min_share * _area(w):
+            out.append(k)
+    return out
+
+
+def match_boxes(ref, got, min_iou=0.5):
+    """Pairs (i, j) of reference and output parts (each a dict with an [x, y, w, h] `box`) that are the same part: greedily by best IoU first,
+    each used once, at least `min_iou`. A reference part the output split (two or more output parts mostly inside it) and an output part that
+    merged reference parts match nothing, whatever their IoU: an even split has IoU 0.5 with each half, an uneven one more, and either would
+    otherwise be scored as a found block when it is the segmentation error these metrics measure."""
+    split = {i for i, r in enumerate(ref) if len(_pieces(r, got)) > 1}
+    merged = {j for j, g in enumerate(got) if len(_pieces(g, ref)) > 1}
+    scored = sorted(
+        (
+            (iou(_xyxy(r["box"]), _xyxy(g["box"])), i, j)
+            for i, r in enumerate(ref)
+            if i not in split
+            for j, g in enumerate(got)
+            if j not in merged
+        ),
+        reverse=True,
+    )
+    used_r, used_g, out = set(), set(), []
+    for v, i, j in scored:
+        if v < min_iou:
+            break
+        if i not in used_r and j not in used_g:
+            used_r.add(i)
+            used_g.add(j)
+            out.append((i, j))
+    return sorted(out)
+
+
+def _parts_f1(key):
+    def score(item, output, error):
+        ref = _page_ref(item)
+        if ref is None:
+            return None
+        r = ref.get(key) or []
+        g = [] if error else (_page_out(output) or {}).get(key) or []
+        if not r and not g:
+            return None  # nothing to find and nothing found: says nothing about the reader
+        return 2 * len(match_boxes(r, g)) / (len(r) + len(g))
+
+    return score
+
+
+def _matched_blocks(item, output, error):
+    ref, got = _page_ref(item), None if error else _page_out(output)
+    if ref is None or got is None:
+        return None
+    r, g = ref.get("blocks") or [], got.get("blocks") or []
+    return [(r[i], g[j], i, j) for i, j in match_boxes(r, g)]
+
+
+def _role_acc(item, output, error):
+    m = _matched_blocks(item, output, error)
+    if not m:
+        return None
+    return sum((a.get("role") or "body") == (b.get("role") or "body") for a, b, _, _ in m) / len(m)
+
+
+def _reading_rank(blocks):
+    """Each block's place in reading order, as strata_python.pages reads it: numbered blocks by number, then the rest as listed."""
+    idx = sorted(range(len(blocks)), key=lambda k: (blocks[k].get("order") is None, blocks[k].get("order") or 0, k))
+    return {k: n for n, k in enumerate(idx)}
+
+
+def _order_tau(item, output, error):
+    m = _matched_blocks(item, output, error)
+    if not m or len(m) < 2:
+        return None
+    ref, got = _page_ref(item)["blocks"], _page_out(output)["blocks"]
+    rr, gr = _reading_rank(ref), _reading_rank(got)
+    pairs = [(rr[i], gr[j]) for _, _, i, j in m]
+    s = sum(np.sign(a[0] - b[0]) * np.sign(a[1] - b[1]) for k, a in enumerate(pairs) for b in pairs[k + 1 :])
+    return float(s) / (len(pairs) * (len(pairs) - 1) / 2)  # Kendall's tau (no ties: ranks are distinct)
+
+
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error):
     """The job's run time; for outputs recorded elsewhere (runtime `recorded`: a replay takes no time) the time they took when made, if it
@@ -731,6 +837,38 @@ METRICS = {
             _faces_recall,
         ),
         Metric("face_found", "binary", "higher", "The labelled face was detected (IoU 0.5)", "%", _face_found),
+        Metric(
+            "block_f1",
+            "mean",
+            "higher",
+            "Text blocks found where the cleaned page has them: F1 of blocks matched at IoU 0.5 (a merged or split block matches nothing)",
+            "%",
+            _parts_f1("blocks"),
+        ),
+        Metric(
+            "figure_f1",
+            "mean",
+            "higher",
+            "Pictures found where the cleaned page has them: F1 of figures matched at IoU 0.5",
+            "%",
+            _parts_f1("figures"),
+        ),
+        Metric(
+            "role_acc",
+            "mean",
+            "higher",
+            "Of the blocks found, the share given the right role (body, heading, caption, footnote, running head, folio...)",
+            "%",
+            _role_acc,
+        ),
+        Metric(
+            "order_tau",
+            "mean",
+            "higher",
+            "Reading order of the blocks found against the cleaned page's: Kendall's tau (1 the same order, -1 reversed)",
+            "",
+            _order_tau,
+        ),
         Metric(
             "verification_auc",
             "dataset",

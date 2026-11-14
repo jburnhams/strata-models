@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Page rebuild, first part: the `page-build` role and layout metrics (#67, branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py` (**new**, role `page-build`, model `pagebuild`, CPU lane): a page description in (JSON or a path; or a Tesseract `ocr` answer, turned into the plain-overlay baseline), the PDF out, drawn by `strata_python.pages.render`; also writes the raster at the scan's dpi and returns the text read back from the PDF. Output defaults to `<data>/pages/<hash>.pdf`. In the pyright strict list.
+- Dependency: `strata-python[db,pdf]>=0.2.2,<0.3` (the `pdf` extra brings ReportLab and pdfium).
+- `evals/metrics.py`: `block_f1`, `figure_f1`, `role_acc`, `order_tau` against `reference.page`, and `match_boxes` (greedy IoU matching of `[x, y, w, h]` boxes). docs/evals.md says how a page-rebuild eval is scored.
+- Tests: `tests/unit/test_pagebuild.py`, `tests/unit/test_page_metrics.py` (**new**).
+
 **strata-python 0.2.1 from PyPI: its database layer, test fakes, dev tools and web serving replace this repo's copies (branch `claude/project-thread-dvu0cz`)**
 strata-python is on PyPI now: the dependency is `strata-python[db]>=0.2.1,<0.3` instead of a git pin of its main, so a breaking change there reaches the service only through a deliberate edit of the range. **Deploy needs the service unit's environment changed first** (below).
 
