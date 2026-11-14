@@ -19,6 +19,7 @@ import strata_models_client as sm
 
 sm.faces("/photos/a.jpg", app="bright-horizons")  # boxes, keypoints, 512-d ArcFace embeddings
 sm.transcribe("/clips/a.wav", app="strata-360", language="en")  # segments with word timings
+sm.ocr("/scans/p012.png", app="strata-scan")  # lines and words with boxes
 with sm.gpu_lease("strata-stills", vram_gb=4, note="arena build"):
     ...  # the GPU is yours until the block ends
 ```
@@ -43,6 +44,7 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `transcribe` | Whisper large-v3-turbo (faster-whisper, float16, in its own CUDA 12 worker venv) | 2.0 GB, 0.4 s for 11 s of speech |
 | `transcribe-fast` | Whisper small | 0.6 GB, 0.3 s for 11 s |
 | `denoise-audio` | DeepFilterNet3 capped at 18 dB with strata-360's speech finish and -14 LUFS (its `audio_clean`), in its own worker venv; MossFormer2, MossFormerGAN, FRCRN, Resemble Enhance, noisereduce and afftdn as eval candidates | not yet measured here |
+| `ocr` | Tesseract 5 (`eng`, LSTM), on the CPU: lines and words with boxes, and a searchable PDF page on request | CPU, about 1-3 s a book page |
 | `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
 The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.

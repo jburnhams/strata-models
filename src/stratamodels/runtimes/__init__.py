@@ -17,6 +17,7 @@ RUNTIMES = {
     "venv-worker": "stratamodels.runtimes.worker",
     "llama-server": "stratamodels.runtimes.llama",
     "recorded": "stratamodels.runtimes.recorded",
+    "tesseract": "stratamodels.runtimes.tesseract",
 }
 NEEDS = {
     "fake": (),
@@ -27,6 +28,7 @@ NEEDS = {
     "venv-worker": (),
     "llama-server": ("huggingface_hub",),
     "recorded": (),
+    "tesseract": (),
 }  # venv-worker: its libraries are in the model's own venv (checked when it loads)
 
 
@@ -62,4 +64,8 @@ def available():
 
     if not os.path.isfile(llama.binary(settings.models_dir())):
         out["llama-server"] = out["llama-server"] + ["the llama-server binary (llama.cpp)"]
+    from stratamodels.runtimes import tesseract
+
+    if not tesseract.binary():
+        out["tesseract"] = out["tesseract"] + ["the tesseract command (Tesseract 5)"]
     return out

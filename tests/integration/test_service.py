@@ -108,3 +108,16 @@ def test_the_judge_plays_only_the_phrase(service, tmp_path):
     assert (
         ctype == "audio/wav" and len(body) < wav.stat().st_size / 5
     )  # 5 s (the phrase and 2 s either side) of a 60 s recording
+
+
+def test_ocr_reads_a_page_through_the_service(service, tmp_path):
+    """The shipped `ocr` role on the real Tesseract, through the client as strata-scan calls it: a CPU job, so it never takes a GPU slot."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    im = Image.new("RGB", (1200, 300), "white")
+    ImageDraw.Draw(im).text((80, 110), "Punch and Judy", fill="black", font=ImageFont.load_default(size=64))
+    im.save(tmp_path / "page.png", dpi=(300, 300))
+    r = sm.ocr(str(tmp_path / "page.png"), app="it", pdf=str(tmp_path / "page.pdf"))
+    assert r["text"].lower().split() == ["punch", "and", "judy"] and r["model"] == "tesseract-eng"
+    assert (tmp_path / "page.pdf").read_bytes()[:5] == b"%PDF-"
+    assert sm.role_model("ocr") == "tesseract-eng"
