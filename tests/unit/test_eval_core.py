@@ -489,3 +489,65 @@ def test_the_video_spec_runs_swinir_on_the_face_close_up_only():
     s = C.parse_spec(tomllib.load(open(os.path.join(C.REPO_SPECS, "video-enhance-vhs.toml"), "rb")))
     assert s.candidate("swinir-real-x4").items == ["07-face-zoom-closeup"]
     assert s.candidate("lanczos").items is None
+
+
+def test_each_output_is_saved_as_its_job_finishes(setup, scheduler, engine):
+    # 2026-11-14: a service restart in the middle of a 7-clip SeedVR2 batch lost the five outputs that had finished, because a batch was saved
+    # only once all of its jobs were waited for
+    stop = scheduler.start()
+    try:
+        s = C.load_spec("fake-asr")
+        real = C.SchedulerExecutor(scheduler)
+
+        class Restart(C.SchedulerExecutor):
+            def __init__(self):
+                super().__init__(scheduler)
+                self.waited = 0
+
+            def wait(self, job_id):
+                self.waited += 1
+                if self.waited == 4:
+                    raise RuntimeError("the service restarted")
+                return real.wait(job_id)
+
+        with pytest.raises(RuntimeError, match="restarted"):
+            C.run(s, engine, Restart(), candidates=["base"], log=lambda m: None)
+        assert (
+            len(
+                C.cached(
+                    engine, {C.result_key(s, s.candidate("base"), it): it for it in C.load_dataset(s.dataset).items}
+                )
+            )
+            == 3
+        )
+    finally:
+        stop.set()
+
+
+def test_recover_takes_outputs_from_jobs_that_already_finished(setup, scheduler, engine):
+    stop = scheduler.start()
+    try:
+        s = C.load_spec("fake-asr")
+        first = C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=["base"], limit=5, log=lambda m: None)
+        assert first == dict(ran=5, cached=0, failed=0)
+        jobs_before = scheduler.store.list(limit=500)
+        C.forget(s, engine, candidate="base")
+        log = []
+        r = C.run(s, engine, C.SchedulerExecutor(scheduler), candidates=["base"], limit=5, log=log.append, recover=True)
+        assert (
+            r == dict(ran=0, cached=0, failed=0, recovered=5)
+            and "5 taken from jobs that had already finished" in log[-1]
+        )
+        assert len(scheduler.store.list(limit=500)) == len(jobs_before)  # nothing was queued again
+        assert C.analyse(s, engine)["candidates"]["base"]["metrics"]["wer"]["n"] == 5
+        C.forget(s, engine, candidate="base")
+        assert C.run(
+            s, engine, C.SchedulerExecutor(scheduler), candidates=["base"], limit=5, log=lambda m: None
+        ) == dict(ran=5, cached=0, failed=0)  # forget, then run: new jobs
+        opt = s.candidate("better")  # params of its own: no finished job matches
+        assert (
+            C.done_job(engine, s.role, opt.model, C.job_params(s, opt, C.load_dataset(s.dataset).items[0]), opt.options)
+            is None
+        )
+    finally:
+        stop.set()
