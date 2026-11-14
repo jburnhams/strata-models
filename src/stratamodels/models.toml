@@ -114,7 +114,7 @@ options = { worker = "whisper", venv = "whisper", compute_type = "float16" }
 [models."qwen3.5-9b-vl"]
 runtime = "llama-server"
 name = "Qwen3.5-9B Q4_K_M"
-roles = ["vision-language", "text", "judge-text", "judge-vision"]
+roles = ["vision-language", "text", "judge-text", "judge-vision", "ocr"]   # ocr: only as an eval candidate (ocr-pages): it reads text but gives no boxes
 vram_gb = 7.5
 licence = "Apache-2.0"
 source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
@@ -124,7 +124,7 @@ options = { model = "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", mmproj = "
 [models."gemma-4-12b-vl"]
 runtime = "llama-server"
 name = "Gemma 4 12B QAT UD-Q4_K_XL"
-roles = ["vision-language", "text", "judge-text", "judge-vision"]
+roles = ["vision-language", "text", "judge-text", "judge-vision", "ocr"]   # ocr: only as an eval candidate (ocr-pages): it reads text but gives no boxes
 vram_gb = 9.0
 licence = "Gemma Terms of Use"
 source = "https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF"

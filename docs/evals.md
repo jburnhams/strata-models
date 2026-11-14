@@ -95,6 +95,18 @@ Every engine gets the same deinterlaced, cropped, square-pixel clip and the same
 Cleanup evals (`vhs-chroma-shift`, `vhs-chroma-cleanup`, `vhs-grain`) hold the upscale fixed (lanczos) and vary only the worker's `cleanup`
 stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate.
 
+## OCR: which cleanup and which reader on hard book pages
+`ocr-pages` (`evals/specs/ocr-pages.toml`, built by `scripts/evals/ocr_pages.py` from strata-scan or a folder of PNGs) is ten hard pages of
+two public-domain books (title pages, display-type adverts, small capitals, italics, footnotes, a grey 1828 scan) with their text typed by
+hand from the page (`scripts/evals/ocr_pages/<item>.txt`). The item's only input is `image` (the dpi is in the PNG), so Tesseract and a
+vision-language model read the same thing; `cer` decides, `wer` is context, and `tags.hard` breaks the report down by what makes a page hard.
+- **Before OCR**: Tesseract candidates differ only in `clean` (steps of `runtimes/pageclean.py`: flatten, contrast, sharpen, denoise, otsu,
+  adaptive, upscale) and `psm`.
+- **Instead of OCR**: a vision-language model (`ocr-read-v1`) transcribes the page; it gives text but no boxes, so it is a candidate only.
+- **After OCR**: a pipeline whose first stage is Tesseract (`into = "prompt"`) and whose candidate is a vision-language model with
+  `ocr-correct-v1`, which corrects the OCR text against the page.
+Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

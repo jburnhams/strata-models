@@ -1,0 +1,103 @@
+name = "ocr-pages"
+question = "On hard pages of old printed books, does cleaning the page before Tesseract, or a vision-language model reading or correcting it, give fewer wrong words than Tesseract on the page as scanned?"
+role = "ocr"
+dataset = "ocr-pages"            # scripts/evals/ocr_pages.py: 10 hard pages of Ward 1874 and Collier 1828 with hand-typed text
+metrics = ["cer", "wer", "latency_s", "failed"]
+judge = false
+
+[decision]
+primary = "cer"
+baseline = "tesseract"
+min_effect = 0.005               # half a point of CER: on a 1,800-character page, about nine characters
+guards = { failed = 1.0 }        # no latency guard: a page read once and kept can take a minute; the write-up states the cost
+# What the vision-language candidates cannot give: boxes. A winner among them would serve the text (and strata-scan keeps Tesseract's
+# boxes for the overlay and the searchable PDF), so a VL win means a second pass, not a swap.
+
+# ---- Tesseract on the page as scanned, and with the page cleaned first (runtimes/pageclean.py) ----------------------------------------
+[[candidates]]
+name = "tesseract"
+model = "tesseract-eng"
+note = "what strata-scan does today: psm 3, the page as cut"
+
+[[candidates]]
+name = "psm4"
+model = "tesseract-eng"
+params = { psm = 4 }
+note = "one column of text of varying sizes: title pages and adverts"
+
+[[candidates]]
+name = "flatten"
+model = "tesseract-eng"
+params = { clean = "flatten" }
+note = "diary-study's background division: yellowed paper and shadows to white"
+
+[[candidates]]
+name = "denoise"
+model = "tesseract-eng"
+params = { clean = "denoise" }
+
+[[candidates]]
+name = "adaptive"
+model = "tesseract-eng"
+params = { clean = "adaptive" }
+note = "Sauvola binarisation"
+
+[[candidates]]
+name = "upscale"
+model = "tesseract-eng"
+params = { clean = "upscale" }
+note = "twice the size: small capitals"
+
+[[candidates]]
+name = "flatten-sharpen"
+model = "tesseract-eng"
+params = { clean = "flatten,sharpen" }
+
+[[candidates]]
+name = "flatten-psm4"
+model = "tesseract-eng"
+params = { clean = "flatten", psm = 4 }
+
+[[candidates]]
+name = "flatten-denoise-psm4"
+model = "tesseract-eng"
+params = { clean = "flatten,denoise", psm = 4 }
+
+# ---- A vision-language model reading the page itself -----------------------------------------------------------------------------------
+[[candidates]]
+name = "qwen-read"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096, temperature = 0.0 }
+
+[[candidates]]
+name = "gemma-read"
+model = "gemma-4-12b-vl"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096, temperature = 0.0 }
+
+# ---- After OCR: Tesseract's text corrected by a vision-language model looking at the page ---------------------------------------------
+[[candidates]]
+name = "tesseract-qwen-fix"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "ocr-correct-v1", max_tokens = 4096, temperature = 0.0 }
+note = "Tesseract (page as scanned), then Qwen corrects its text against the page"
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "flatten-qwen-fix"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "ocr-correct-v1", max_tokens = 4096, temperature = 0.0 }
+note = "Tesseract on the flattened page, then Qwen corrects its text"
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "flatten,sharpen" }
+input = "{image}"
+send = "image"
+into = "prompt"

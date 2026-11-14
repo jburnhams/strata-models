@@ -8,7 +8,10 @@ automatic), oem (default 1 = LSTM), binary (the command, else `tesseract` on PAT
 traineddata files, else Tesseract's own).
 
 params:
-  path     the page picture (PNG, JPEG, TIFF)
+  path     the page picture (PNG, JPEG, TIFF); `image` is the same (the name vision-language jobs use, so one eval dataset serves both)
+  clean    steps to clean the page before reading it, in order: a list or "flatten,upscale" (runtimes/pageclean.py: flatten, contrast,
+           sharpen, denoise, otsu, adaptive, upscale). Boxes are then in the cleaned picture's pixels (twice the size after upscale), and
+           `width`/`height` say so; a `pdf` shows the cleaned picture
   lang     overrides the model's languages for this page
   psm      overrides the page segmentation mode (6 = one block of text, 4 = one column of varying sizes, 11 = sparse text)
   dpi      the scan's resolution, when the file does not say (Tesseract guesses otherwise, and small type suffers)
@@ -27,7 +30,9 @@ import tempfile
 import time
 from typing import Any
 
-from stratamodels.runtimes import RunError  # pyright: ignore[reportMissingTypeStubs]  (the package __init__ is not in the strict list yet)
+from PIL import Image
+
+from stratamodels.runtimes import RunError, pageclean  # pyright: ignore[reportMissingTypeStubs]  (the package __init__ is not in the strict list yet)
 
 WINDOWS_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # where the UB Mannheim installer and Chocolatey put it; it is not on PATH
 
@@ -116,9 +121,13 @@ def parse_tsv(tsv: str) -> dict[str, Any]:
 
 
 def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
-    path = params.get("path")
+    path = params.get("path") or params.get("image")
     if not isinstance(path, str) or not os.path.isfile(path):
         raise RunError(f"no such picture: {path!r}")
+    try:
+        steps = pageclean.steps_of(params.get("clean"))
+    except ValueError as e:
+        raise RunError(str(e)) from e
     lang = str(params.get("lang") or handle["lang"])
     psm = int(params.get("psm") or handle["psm"])
     pdf = params.get("pdf")
@@ -129,11 +138,22 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     ):
         raise RunError(f"pdf must be a .pdf path in an existing folder: {pdf!r}")
     t0 = time.monotonic()
+    dpi: float | None = float(params["dpi"]) if params.get("dpi") else None
     with tempfile.TemporaryDirectory(prefix="stratamodels-ocr-") as tmp:
         base = os.path.join(tmp, "page")
+        if steps:
+            try:
+                with Image.open(path) as im:
+                    found = im.info.get("dpi")
+                    dpi = dpi or (float(found[0]) if found and found[0] > 1 else None)
+                    cleaned, dpi = pageclean.clean(im, steps, dpi)
+            except OSError as e:
+                raise RunError(f"tesseract failed on {path}: not a picture ({e})") from e
+            path = os.path.join(tmp, "clean.png")
+            cleaned.save(path, dpi=(dpi, dpi) if dpi else None)
         cmd = [handle["exe"], path, base, "-l", lang, "--psm", str(psm), "--oem", str(handle["oem"])]
-        if params.get("dpi"):
-            cmd += ["--dpi", str(int(params["dpi"]))]
+        if dpi:
+            cmd += ["--dpi", str(round(dpi))]
         if handle.get("tessdata"):
             cmd += ["--tessdata-dir", str(handle["tessdata"])]
         cmd += ["tsv"] + (["pdf"] if pdf else [])
@@ -153,6 +173,7 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         engine=handle["version"],
         lang=lang,
         psm=psm,
+        clean=steps,
         seconds=round(time.monotonic() - t0, 3),
         model=handle["key"],
     )

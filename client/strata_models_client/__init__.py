@@ -118,7 +118,7 @@ def transcribe(path, app, role="transcribe", priority="batch", model=None, **par
 
 
 def ocr(path, app, priority="batch", model=None, **params):
-    """Printed text from a page picture (role `ocr`): params lang ('eng', 'eng+fra'), psm (Tesseract's page segmentation), dpi, pdf (a .pdf path
+    """Printed text from a page picture (role `ocr`): params lang ('eng', 'eng+fra'), psm (Tesseract's page segmentation), dpi, clean (steps that clean the page first, such as "flatten,sharpen": see runtimes/pageclean.py; boxes are then in the cleaned picture's pixels), pdf (a .pdf path
     to write as well: the picture with its text searchable). Returns {width, height, text, lines: [{text, box: [x, y, w, h], conf, block,
     words: [{text, box, conf}]}], engine, lang, seconds}; conf is 0-100."""
     params["path"] = os.path.abspath(path)

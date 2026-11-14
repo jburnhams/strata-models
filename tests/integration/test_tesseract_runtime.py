@@ -70,3 +70,25 @@ def test_bad_params_and_a_missing_command(tmp_path, monkeypatch):
         with pytest.raises(RunError, match="not installed"):
             tesseract.load(model(), str(tmp_path))
         assert "the tesseract command (Tesseract 5)" in runtimes.available()["tesseract"]
+
+
+def test_cleans_a_shaded_page_before_reading_it(tmp_path):
+    """`image` names the page as `path` does (eval datasets give an image); `clean` runs runtimes/pageclean.py first, and `upscale`
+    doubles the pixels the boxes are in. The page is a grey scan darkening to the left, as at a gutter."""
+    p = page(str(tmp_path / "p.png"), ["The tragical comedy", "of Punch and Judy"])
+    with Image.open(p) as im:
+        shade = Image.linear_gradient("L").rotate(90).resize(im.size).point(lambda v: 70 + v // 2)
+        Image.composite(im.convert("L"), shade, im.convert("L").point(lambda v: 255 if v < 128 else 0)).save(
+            p, dpi=(300, 300)
+        )
+    h = tesseract.load(model(), str(tmp_path))
+    r = tesseract.run(h, dict(image=p, clean="flatten,sharpen,upscale", pdf=str(tmp_path / "p.pdf")))
+    words = r["text"].lower().split()
+    assert "punch" in words and "judy" in words
+    assert r["clean"] == ["flatten", "sharpen", "upscale"] and (r["width"], r["height"]) == (2800, 880)
+    with pytest.raises(RunError, match="unknown clean steps"):
+        tesseract.run(h, dict(image=p, clean="blur"))
+    with open(tmp_path / "junk.png", "w") as f:
+        f.write("not a picture")
+    with pytest.raises(RunError, match="not a picture"):
+        tesseract.run(h, dict(image=str(tmp_path / "junk.png"), clean="flatten"))
