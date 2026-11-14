@@ -97,6 +97,14 @@ def test_closeness():
             ["libre-bodoni", "old-standard"],
         ),
         ("Playfair Display Black, then playfair-display", ["playfair-display-black", "playfair-display"]),
+        (
+            '{"faces": ["old-standard", "libra-bodoni", "prata"]}',
+            ["old-standard", "libre-bodoni", "prata"],
+        ),  # a near miss of an id
+        (
+            '{"class": "old-style", "faces": ["no-such-face"]}',
+            [k for k, v in F.catalogue().items() if v["class"] == "old-style"],
+        ),
         ("", []),
         (None, []),
         ("no idea", []),
