@@ -11,6 +11,7 @@ job counts as wrong for binary metrics and as all errors for ratios, never silen
 
 import collections
 import dataclasses
+import functools
 import json
 import math
 import re
@@ -667,6 +668,102 @@ def _order_tau(item, output, error):
     return float(s) / (len(pairs) * (len(pairs) - 1) / 2)  # Kendall's tau (no ties: ranks are distinct)
 
 
+# ---- fonts (role font-match) ----------------------------------------------------------------------------------------------------------
+@functools.lru_cache(maxsize=256)
+def _scan_ink(image, ocr):
+    """(the item's ink, the area of its words) for ink_f1: the picture binarised as runtimes/fontfit.py does, and the union of Tesseract's
+    word boxes (3 px around), so rules, ornaments and specks outside the words count for no candidate."""
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    im = Image.open(image)
+    found = im.info.get("dpi")
+    dpi = float(found[0]) if found and found[0] > 1 else 300.0
+    full, _ = INK.binarise(im, dpi, deskew=False)
+    mask = np.zeros_like(full)
+    try:
+        with open(ocr, encoding="utf8") as f:
+            lines = json.load(f).get("lines") or []
+    except (OSError, ValueError, TypeError):
+        lines = []
+    for ln in lines:
+        for w in ln.get("words") or []:
+            x, y, bw, bh = w["box"]
+            mask |= INK.box_mask(full.shape, [x - 3, y - 3, bw + 6, bh + 6])
+    return full, (mask if mask.any() else None), dpi
+
+
+def _ink_f1(item, output, error):
+    """F1 of the rendering's ink against the scan's within the words (evals/ink.py), measured here from the two pictures, not taken from the
+    runtime's own score: every candidate is held to the same reading of the scan."""
+    if error or not isinstance(output, dict) or not output.get("path"):
+        return 0.0 if error else None
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    inp = item.get("input") or {}
+    try:
+        ref, mask, dpi = _scan_ink(inp.get("image"), inp.get("ocr"))
+        got = np.asarray(Image.open(output["path"]).convert("L")) < 128
+    except (OSError, ValueError, TypeError):
+        return None
+    if got.shape != ref.shape:
+        return 0.0
+    return INK.ink_f1(ref, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
+
+
+def _ref_classes(item):
+    r = item.get("reference") or {}
+    return list(r.get("classes") or ([r["class"]] if r.get("class") else []))
+
+
+def _font_class_hit(item, output, error):
+    want = _ref_classes(item)
+    if not want:
+        return None
+    return False if error or not isinstance(output, dict) else output.get("class") in want
+
+
+def _font_class_close(item, output, error):
+    from stratamodels.runtimes.fontfit import closeness
+
+    want = _ref_classes(item)
+    if not want:
+        return None
+    if error or not isinstance(output, dict):
+        return 0.0
+    return max(closeness(output.get("class"), c) for c in want)
+
+
+def _font_face(n):
+    def score(item, output, error):
+        want = (item.get("reference") or {}).get("face")
+        if not want:
+            return None
+        if error or not isinstance(output, dict):
+            return False
+        ranked = [f.get("face") for f in output.get("faces") or []] or [output.get("face")]
+        return want in ranked[:n] if n > 1 else output.get("face") == want
+
+    return score
+
+
+def _font_style(item, output, error):
+    want = (item.get("reference") or {}).get("style")
+    if not want:
+        return None
+    return False if error or not isinstance(output, dict) else output.get("style") == want
+
+
+def _font_size_err(item, output, error):
+    want = (item.get("reference") or {}).get("size_pt")
+    if not want or error or not isinstance(output, dict) or not output.get("size_pt"):
+        return None
+    return abs(float(output["size_pt"]) - float(want)) / float(want)
+
+
 # ---- generic ------------------------------------------------------------------------------------------------------------------------------
 def _latency(item, output, error):
     """The job's run time; for outputs recorded elsewhere (runtime `recorded`: a replay takes no time) the time they took when made, if it
@@ -914,6 +1011,57 @@ METRICS = {
             "exact_match", "binary", "higher", "The answer equals the reference answer after normalise()", "%", _exact
         ),
         Metric("parsed", "binary", "higher", "The output is valid JSON", "%", _parsed),
+        Metric(
+            "ink_f1",
+            "mean",
+            "higher",
+            "F1 of the fitted text's ink against the scan's within the words, a pixel or two of tolerance (evals/ink.py): how closely the face, size, width and weight reproduce the print; needs no reference",
+            "",
+            _ink_f1,
+        ),
+        Metric(
+            "font_class",
+            "binary",
+            "higher",
+            "The face's class (old-style, modern, clarendon...) is one the reference accepts",
+            "%",
+            _font_class_hit,
+        ),
+        Metric(
+            "font_close",
+            "mean",
+            "higher",
+            "Closeness of the face's class to the reference's: 1 the same, 0.5 a neighbouring class (old-style/transitional, modern/fat-face, clarendon/slab...), 0 otherwise",
+            "",
+            _font_class_close,
+        ),
+        Metric(
+            "font_top1",
+            "binary",
+            "higher",
+            "The face is the reference face (synthetic items, whose face is known)",
+            "%",
+            _font_face(1),
+        ),
+        Metric(
+            "font_top3", "binary", "higher", "The reference face is among the three best ranked", "%", _font_face(3)
+        ),
+        Metric(
+            "font_style",
+            "binary",
+            "higher",
+            "The main style (roman, italic, bold, small capitals) is the reference's",
+            "%",
+            _font_style,
+        ),
+        Metric(
+            "font_size_err",
+            "mean",
+            "lower",
+            "Relative error of the size in points (synthetic items)",
+            "%",
+            _font_size_err,
+        ),
         Metric("failed", "binary", "lower", "The job failed", "%", _failed),
         Metric(
             "peak_vram_gb",

@@ -497,3 +497,41 @@ def test_page_build_draws_a_page_through_the_registered_role(tmp_path):
     assert out["text"].strip() == "PUNCH AND JUDY"
     assert open(out["pdf"], "rb").read() == open(again["pdf"], "rb").read()  # the same description draws the same bytes
     assert out["png"] and os.path.isfile(out["png"])
+
+
+def test_font_match_fits_the_real_catalogue(tmp_path):
+    """The real catalogue path: faces fetched from Google Fonts into the models folder, a block set in one of them, and the fit naming it.
+    CPU only (vram 0), but here because it downloads."""
+    from stratamodels.runtimes import fontfit as F
+
+    model = Registry.load().resolve("font-match")
+    h = runtimes.get(model.runtime).load(model, MODELS)
+    face = F.Face("old-standard", F.fetch("old-standard", MODELS))
+    canvas = np.zeros((220, 1400), dtype=bool)
+    words, x = [], 40.0
+    for w in ["The", "Punch", "Puppet", "has", "a", "big", "belly"]:
+        m, left, base = face.word("roman", w, 60.0, 1.0, 0.0, 0.5)
+        F._paste(canvas, m, left, base, x, 120)
+        cols, rows = np.flatnonzero(m.any(0)), np.flatnonzero(m.any(1))
+        bw = int(cols[-1] - cols[0] + 1)
+        words.append(
+            dict(text=w, box=[int(x), int(120 - (base - rows[0])), bw, int(rows[-1] - rows[0] + 1)], conf=95.0)
+        )
+        x += bw + 18
+    from PIL import Image
+
+    p = str(tmp_path / "block.png")
+    Image.fromarray(np.where(canvas, 40, 225).astype(np.uint8)).save(p, dpi=(400, 400))
+    line = dict(text=" ".join(w["text"] for w in words), box=[40, 60, int(x), 90], words=words)
+    r = runtimes.get(model.runtime).run(
+        h,
+        dict(
+            image=p,
+            lines=[line],
+            candidates=["old-standard", "libre-bodoni", "tinos", "rye"],
+            out=str(tmp_path / "fit.png"),
+        ),
+    )
+    print(f"\nfontfit: {r['face']} ink_f1 {r['ink_f1']} in {r['seconds']} s; ranked {[f['face'] for f in r['faces']]}")
+    assert r["face"] == "old-standard"
+    assert r["blocks"][0]["lines"][0]["words"][0]["size_px"] == pytest.approx(60.0, rel=0.08)

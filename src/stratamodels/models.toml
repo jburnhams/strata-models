@@ -377,6 +377,20 @@ licence = "BSD-3-Clause (ReportLab), Apache-2.0 (pdfium)"
 source = "https://pypi.org/project/strata-python/ (the pdf extra)"
 used_by = ["strata-scan"]
 
+[roles.font-match]
+description = "Which typeface a scanned block is printed in, and its size, width, spacing and weight, line by line, with each word's style (page rebuilds)"
+model = "fontfit"                            # first pick (2026-11-14): render-and-fit over the open period faces of runtimes/fonts.toml; eval font-match decides whether a vision model's shortlist should come first
+
+[models.fontfit]
+runtime = "fontfit"
+name = "fontfit"
+roles = ["font-match"]
+vram_gb = 0.0
+licence = "fonts: SIL Open Font License (each face's own, from Google Fonts)"
+source = "https://fonts.google.com (faces listed in runtimes/fonts.toml)"
+used_by = []
+options = { top = 6 }
+
 [roles.image-generate]
 description = "Pictures from a prompt, optionally edited from reference images"
 model = "flux3-klein"
