@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**A resumed eval run waits on the jobs its lost run left queued (branch `claude/eval-resume-waits`)**
+After the 17:20 restart on 2026-11-14 the queue still held the lost FlashVSR+ Base run's jobs, nothing waited on them, and the resumed run (`recover`) queued copies: the same clip ran twice. `evals/core.py`: with `recover`, a queued or running job of the same role, model (or a variant of it) and params is waited on (`pending_job`), after a finished one is looked for (`done_job`), before a new job is queued.
+
 **FlashVSR+ reads and writes in segments, and heavy video workers get a memory cap (branch `claude/flashvsr-decode-every`)**
 On 2026-11-14 at 17:20 systemd-oomd killed strata-models (29.1 GB memory peak, 27.1 GB swap) while FlashVSR+ Base ran: with `--decode-every auto` its CLI holds the whole input and the whole 1536 x 1152 output of an 8 s clip in RAM (20.6 GB for one process on a 46 GB machine). `models.toml`: Turbo and Base pass `decode-every = 28`, which reads, decodes and writes in segments (its IncrementalVideoWriter). Base also needs more than Turbo because its KV cache does not fit the card (it estimates 16-17 GB of VRAM against 10.8 free) and 30 of its layers' caches go to host RAM; Turbo offloads none.
 - `runtimes/worker.py`: models.toml `options.memory_max_gb` starts the venv worker (and the CLIs it runs) in a systemd user scope with MemoryMax and no swap (Linux with a user bus; elsewhere as before), so a worker that outgrows it is killed alone and its job fails, instead of systemd-oomd killing the service. FlashVSR+ Turbo, Base and SeedVR2: 16 GB.
