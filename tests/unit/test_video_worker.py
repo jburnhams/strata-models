@@ -978,3 +978,52 @@ def test_blend_needs_two_sources(tmp_path, clip, ffmpeg_on_path):
         V.run(
             dict(path=clip, out_dir=str(tmp_path / "o"), sources=[str(a)], refine=dict(method="blend")), run_=FakeRun()
         )
+
+
+def test_refine_fails_when_a_decoder_fails_part_way(tmp_path, clip, ffmpeg_on_path):
+    # Codex on #74: a source decoder that errors after some frames looked like a normal end, and a cut-short clip was kept as a success
+    import numpy as np
+
+    a = tmp_path / "a.mp4"
+    a.write_bytes(b"x")
+    V.load(dict(key="video-refine", vram_gb=0, options=dict(engine="refine")), str(tmp_path))
+    lr = np.zeros((576, 768, 3), np.uint8).tobytes()
+    hr = np.full((1080, 1440, 3), 200, np.uint8).tobytes()
+
+    def popen_with(source_rc, source_frames):
+        def popen(cmd, stdout=None, stdin=None, **kw):
+            tape = any("crop=" in str(c) for c in cmd)
+            rc = 0 if tape or stdin else source_rc
+            data = lr * 3 if tape else hr * source_frames
+            return types.SimpleNamespace(
+                cmd=cmd, stdout=Pipe(data), stdin=Pipe(), wait=lambda: rc, kill=lambda: None, pid=1
+            )
+
+        return popen
+
+    with pytest.raises(RuntimeError, match="source 1 decoding"):
+        V.run(
+            dict(
+                path=clip,
+                crop=[14, 0, 692, 568],
+                out_dir=str(tmp_path / "o"),
+                sources=[str(a)],
+                refine=dict(method="backproject"),
+            ),
+            run_=FakeRun(),
+            popen=popen_with(1, 2),
+        )
+    r = V.run(
+        dict(
+            path=clip,
+            crop=[14, 0, 692, 568],
+            out_dir=str(tmp_path / "o"),
+            sources=[str(a)],
+            refine=dict(method="backproject"),
+        ),
+        run_=FakeRun(),
+        popen=popen_with(0, 5),
+    )
+    assert (
+        r["engine"] == "refine"
+    )  # a source longer than the tape is cut, and that is fine (the kill's exit status is not an error)

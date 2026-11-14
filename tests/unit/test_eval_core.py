@@ -689,3 +689,17 @@ def test_a_candidate_cannot_be_made_from_one_that_is_itself_made_from_others(set
     text = MADE_FROM + '[[candidates]]\nname = "twice"\nmodel = "small"\nfrom = ["refined"]\n'
     with pytest.raises(C.EvalError, match="itself made from others"):
         C.parse_spec(__import__("tomllib").loads(text))
+
+
+def test_forgetting_a_source_forgets_what_was_made_from_it(setup, scheduler, engine):
+    # Codex on #74: after forget(source) and a rerun the source has a new output under the same key, and a refinement made from the old
+    # one stayed cached
+    s = _made_from_spec()
+    stop = scheduler.start()
+    try:
+        C.run(s, engine, C.SchedulerExecutor(scheduler), limit=1, log=lambda m: None)
+        assert C.forget(s, engine, candidate="up") == 2 * len(C.load_dataset(s.dataset).items[:1])  # up's and refined's
+        r = C.run(s, engine, C.SchedulerExecutor(scheduler), limit=1, log=lambda m: None)
+        assert r == dict(ran=2, cached=1, failed=0)  # up and refined again; other was kept
+    finally:
+        stop.set()

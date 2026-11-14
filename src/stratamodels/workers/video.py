@@ -920,31 +920,41 @@ def refine(p, src, out, fps, audio, popen=subprocess.Popen):
     def frame(buf, h, w):
         return np.frombuffer(buf, np.uint8).reshape(h, w, 3).astype(np.float32) / 255.0
 
-    n, done = 0, False
+    decoders = [tape, *ups]
+    n, done, ended = 0, False, []
     try:
         while True:
             lb = tape.stdout.read(pw * ph * 3)
             hb = [u.stdout.read(W * H * 3) for u in ups]
-            if len(lb) < pw * ph * 3 or any(len(b) < W * H * 3 for b in hb):
+            ended = [
+                i for i, (b, size) in enumerate([(lb, pw * ph * 3)] + [(b, W * H * 3) for b in hb]) if len(b) < size
+            ]
+            if ended:
                 break
             y = refine_step(method, frame(lb, ph, pw), [frame(b, H, W) for b in hb], r)
             enc.stdin.write(np.round(y * 255).astype(np.uint8).tobytes())
             n += 1
         done = True
     finally:
-        procs = [tape, *ups, enc]
         if not done:
-            for proc in procs:
+            for proc in (*decoders, enc):
                 with contextlib.suppress(OSError):
                     proc.kill()
         with contextlib.suppress(OSError):
             enc.stdin.close()
-        for proc in (tape, *ups):  # a source longer than the tape (or the other way round) is cut, not waited for
-            with contextlib.suppress(OSError):
-                proc.kill()
-        codes = [proc.wait() for proc in procs]
-    if codes[-1] != 0 or n == 0:
-        raise RuntimeError(f"ffmpeg failed (encode exit {codes[-1]}, {n} frames)")
+        for i, proc in enumerate(
+            decoders
+        ):  # one still going (a longer stream than the one that ended) is cut, not waited for
+            if i not in ended:
+                with contextlib.suppress(OSError):
+                    proc.kill()
+        codes = [proc.wait() for proc in (*decoders, enc)]
+    # a decoder that stopped early must have stopped cleanly: one that failed part-way would otherwise pass for a short clip
+    bad = [("the tape" if i == 0 else f"source {i}") for i in ended if codes[i] != 0]
+    if bad or codes[-1] != 0 or n == 0:
+        raise RuntimeError(
+            f"ffmpeg failed ({', '.join(bad) + ' decoding, ' if bad else ''}encode exit {codes[-1]}, {n} frames)"
+        )
     return 0.0
 
 

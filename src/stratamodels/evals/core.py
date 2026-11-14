@@ -1103,10 +1103,14 @@ def save(engine, rows):
 
 
 def forget(spec, engine, candidate=None, stages=False):
-    """Drop the cached outputs of an experiment (one candidate, or all) so they run again (after a change the key does not see, e.g. new weights).
+    """Drop the cached outputs of an experiment (one candidate, and those made from it, or all) so they run again (after a change the key does
+    not see, e.g. new weights).
     `stages`: a pipeline's stage outputs too (they are shared with other candidates that make the same first steps, so kept by default)."""
     ds = load_dataset(spec.dataset, engine=engine)
-    keys = [result_key(spec, c, it) for c in spec.candidates if candidate in (None, c.name) for it in ds.items]
+    # a candidate made from the forgotten one goes too: its output was made from the old one, and its key (built from the source's key,
+    # which a rerun keeps) would otherwise keep it cached
+    names = {c.name for c in spec.candidates if candidate in (None, c.name) or candidate in c.sources}
+    keys = [result_key(spec, c, it) for c in spec.candidates if c.name in names for it in ds.items]
     if stages:
         keys += [
             k
