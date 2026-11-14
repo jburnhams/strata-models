@@ -9,6 +9,7 @@ models.toml options (besides the worker's own, passed through on load):
   worker   the script in stratamodels/workers/ (without .py), e.g. "tts"
   venv     the venv's folder name under <models>/venvs/, or an absolute path (default: the worker's name)
   timeout_s  how long one job may run before the worker is stopped (default 1800)
+  memory_max_gb  host RAM the worker and its children may use, no swap (Linux: a systemd user scope); over it they alone are killed
 
 Protocol, one JSON object per line: the service writes {"op": "load", "model": <registry model as JSON>, "models_dir": ...} once, then
 {"op": "run", "params": {...}} per job; the worker answers each with {"ok": true, "result": ...} or {"ok": false, "error": "...", "params":
@@ -97,6 +98,35 @@ class Worker:
             self.log.close()
 
 
+def capped(cmd, memory_max_gb, env=None, which=None, platform=None):
+    """`cmd` in a systemd user scope of its own with MemoryMax and no swap, when models.toml gives options.memory_max_gb (Linux with a user
+    systemd): a worker (and the CLIs it starts) that outgrows it is killed by the kernel on its own, and the job fails, instead of the whole
+    service being killed by systemd-oomd (2026-11-14: FlashVSR+ Base held 20+ GB of host RAM). Elsewhere, or without a user bus, as it is."""
+    import shutil
+
+    if not memory_max_gb:
+        return cmd
+    platform = platform or sys.platform
+    run = (which or shutil.which)("systemd-run")
+    runtime = (env or os.environ).get("XDG_RUNTIME_DIR")
+    if not platform.startswith("linux") or not run or not runtime or not os.path.exists(os.path.join(runtime, "bus")):
+        return cmd
+    gb = float(memory_max_gb)
+    return [
+        run,
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "-p",
+        f"MemoryMax={gb:g}G",
+        "-p",
+        "MemorySwapMax=0",
+        "--",
+        *cmd,
+    ]
+
+
 def load(model, models_dir, popen=subprocess.Popen):
     name = model.options.get("worker")
     if not name:
@@ -120,7 +150,7 @@ def load(model, models_dir, popen=subprocess.Popen):
     ]
     env["LD_LIBRARY_PATH"] = os.pathsep.join([*cuda_libs(root), *inherited])
     # Run as a script (not -I or -P): Python puts the script's folder on sys.path, which is how workers import workers/protocol.py.
-    w = Worker([exe, "-u", script], root + ".log", env, popen)
+    w = Worker(capped([exe, "-u", script], model.options.get("memory_max_gb"), env), root + ".log", env, popen)
     r = w.ask(dict(op="load", model=model.to_json(), models_dir=models_dir))
     if not r.get("ok"):
         w.close()
