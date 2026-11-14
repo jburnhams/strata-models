@@ -61,6 +61,7 @@ case $name in
     # allocate too many mask entries"). Its own Triton kernel (the README's pick for consumer cards) needs flash-attn's utilities: the
     # prebuilt wheel for this venv (cp310, torch 2.7, CUDA 12, C++11 ABI), so nothing is compiled; the kernel is pure Triton.
     VIRTUAL_ENV=$venv uv pip install --no-deps "flash_attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
+    VIRTUAL_ENV=$venv uv pip install "setuptools>=68" wheel   # --no-build-isolation builds with the venv's own backend, and uv venv seeds none (the kernel's pyproject uses setuptools.build_meta)
     VIRTUAL_ENV=$venv uv pip install --no-deps --no-build-isolation -e "$src/operators/flashvsr_attn"
     for f in TCDecoder.ckpt turbo/dit.safetensors turbo/lq_proj_in.safetensors base/dit.safetensors base/lq_proj_in.safetensors; do   # into the repo's ckpts/, where the CLI looks
       fetch "https://huggingface.co/ruchangyao/FlashVSR_plus/resolve/main/$f" "$src/ckpts/$f"
