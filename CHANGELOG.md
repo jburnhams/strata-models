@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**OCR presets v2 (plain text, no Markdown) and preprocessing under Haiku's correction pass (branch `claude/project-thread-gl1u9l`)**
+On ocr-hard, the cloud readers' cer_exact was mostly formatting rather than misreads: Haiku wrapped italics in asterisks, and Flash-Lite added Markdown table rules. `ocr-read-v2` and `ocr-correct-v2` are v1 plus "as plain text: no Markdown". They are new presets, not edits, because outputs are keyed by preset name and the v1 results must stay comparable. ocr-hard gains v2 runs of haiku-read, flash-lite-read and tesseract-haiku-fix, every Tesseract preprocessing setting from ocr-pages on its own, and six of them under Haiku's v2 correction pass, to see how much the cleaning still matters once Haiku corrects the text.
+
 **Cloud runtimes send a schema without its value bounds (branch `claude/project-thread-gl1u9l`)**
 The describe-photos stand-outs failed on every Claude model (400: "For 'integer' type, property 'minimum' is not supported") and on Gemini (400: "Request contains an invalid argument"): photo-describe-v1's schema bounds its integers and arrays, which llama.cpp's grammar takes and the vendors' structured outputs do not. `cloud.portable` drops `minimum`, `maximum`, `exclusive*`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `$schema` and a `minItems` above 1 before Claude, Gemini or NIM sees the schema; the shape (types, properties, required, enum, items, additionalProperties) stays enforced, and the bounds are in the preset's prompt as before.
 
