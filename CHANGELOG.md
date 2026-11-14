@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Whole VHS pipelines judged against each other (branch `claude/project-thread-rea1ol`, on top of the refine branch)**
+Every stage's eval has its shortlist; stages interact, so the winners are now combined into whole pipelines and judged head to head.
+
+- `evals/core.py`, `api.py`, `judges.py`: `[decision] pairs = "all"` makes a judged eval's Judge tab (and a judge's `pairs = "all"`) offer every pair, not only pairs with the baseline. The decision against the baseline still uses the pairs with it; the write-up's Bradley-Terry strengths rank the rest.
+- `workers/video.py`: `cleanup.vs.planes` gives the VapourSynth degrain its own planes, so one job can run SMDegrain on luma and hqdn3d on chroma; `refine.against = "cleaned"` holds a refinement to the tape after the job's own cleanup, so back-projecting a denoised pipeline's upscale does not pull the grain back in.
+- `evals/specs/video-pipeline-vhs.toml`: P1 QTGMC + lanczos; P2 QTGMC + SMDegrain + chroma hqdn3d + Real-ESRGAN x2; P3 the same with FlashVSR+ Turbo (baseline); P4 P3 back-projected at half strength; P5 without the grain step, with and without back-projection. Judges: qwen and Gemini (gemma, which tied nearly every pair, dropped).
+
 **Refining an upscale toward the tape: candidates made from other candidates' outputs (branch `claude/video-refine`)**
 FlashVSR+ Turbo won every judged pair against lanczos but invents detail (Jonathan: "bad on the handwriting"), and its fidelity to the tape is the lowest of the candidates.
 

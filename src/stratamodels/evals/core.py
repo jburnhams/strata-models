@@ -338,6 +338,7 @@ class Spec:
     judges: list = dataclasses.field(
         default_factory=list
     )  # model judges whose verdicts are kept beside people's (evals.judges.parse_judge): [{name, model, role | cli, ...}]
+    pairs: str = "baseline"  # a judged eval's Judge tab: "baseline" (each candidate against it) or "all" (every pair: candidates that all beat the baseline ranked against each other)
 
     def candidate(self, name):
         c = next((c for c in self.candidates if c.name == name), None)
@@ -362,6 +363,7 @@ class Spec:
             source=self.source,
             score=self.score,
             judges=self.judges,
+            pairs=self.pairs,
         )
 
 
@@ -433,7 +435,10 @@ def parse_spec(d, source=""):
             source=source,
             score=dict(d.get("score") or {}),
             judges=[_parse_judge(x) for x in d.get("judges") or []],
+            pairs=str(dec.get("pairs", "baseline")),
         )
+        if s.pairs not in ("baseline", "all"):
+            raise ValueError(f"[decision] pairs is baseline or all, not {s.pairs!r}")
         if s.score and not s.score.get("role"):
             raise ValueError("[score] names no role")
         if not isinstance(s.score.get("with") or {}, dict) or not all(

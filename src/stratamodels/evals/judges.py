@@ -434,7 +434,9 @@ def todo(spec, engine, j, only=None):
             here = [n for n in names if ok(i, n)]
             for k, a in enumerate(here):
                 for b in here[k + 1 :]:
-                    if (spec.primary == "judged" or j["pairs"] == "baseline") and spec.baseline not in (a, b):
+                    if (
+                        (spec.primary == "judged" and spec.pairs == "baseline") or j["pairs"] == "baseline"
+                    ) and spec.baseline not in (a, b):
                         continue  # as the Judge tab: head to head with the baseline only
                     oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
                     if SIM.similarity(oa, ob, spec.similarity or None) < 0.9999:  # identical answers teach nothing

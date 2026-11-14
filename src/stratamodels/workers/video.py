@@ -18,7 +18,8 @@ Engines (models.toml options.engine):
              numz/ComfyUI-SeedVR2_VideoUpscaler: options.repo (default <models>/src/seedvr2), options.args (CLI flags, e.g.
              {dit_model = "seedvr2_ema_3b_fp8_e4m3fn.safetensors", blocks_to_swap = 16, batch_size = 5}).
   refine     CPU, no model: other candidates' finished outputs (params `sources`, filled in by an eval candidate's `from`) kept faithful to
-             the tape: back-projection, a blend of two, or a local fallback where an upscale contradicts the tape (refine_step)
+             the tape: back-projection, a blend of two, or a local fallback where an upscale contradicts the tape (refine_step);
+             refine.against = "cleaned" holds them to the tape after this job's own cleanup (give it the source pipeline's params)
   flashvsr   FlashVSR+ (OpenImagingLab, Apache-2.0), streaming one-step video diffusion SR, through `python -m inference.run_stream`:
              options.repo (default <models>/src/flashvsr-plus), options.args ({mode = "turbo"} ...). Its output size must be a multiple of
              128 on each side (`engine_size`, default 1536 x 1152 for 4:3).
@@ -160,8 +161,9 @@ def needs_vs(p):
 
 def vs_script(p, path):
     """A VapourSynth script (text) for the stage: the clip through bestsource with its field order set, deinterlaced (qtgmc: vsjetpack's
-    QTempGaussMC; bwdif: the bwdif plugin, double rate) and denoised by cleanup.vs = {degrain = {tr, thsad, blksize}} (vsjetpack's
-    mc_degrain: SMDegrain's motion-compensated temporal average, on the cleanup's `planes`). The output is progressive at the field rate."""
+    QTempGaussMC; bwdif: the bwdif plugin, double rate) and denoised by cleanup.vs = {degrain = {tr, thsad, blksize}, planes?}
+    (vsjetpack's mc_degrain: SMDegrain's motion-compensated temporal average, on vs.planes, else the cleanup's `planes`). The output is
+    progressive at the field rate."""
     tff = p["field_order"] == "tff"
     di = p["deinterlace"]
     lines = ["import vapoursynth as vs", "from vapoursynth import core", f"c = core.bs.VideoSource(source={path!r})"]
@@ -176,8 +178,8 @@ def vs_script(p, path):
     c = p.get("cleanup") or {}
     v = c.get("vs")
     if v:
-        if not isinstance(v, dict) or set(v) - {"degrain"}:
-            raise ParamError(f"cleanup vs is {{degrain = {{tr, thsad, blksize}}}}, not {v!r}")
+        if not isinstance(v, dict) or set(v) - {"degrain", "planes"}:
+            raise ParamError(f"cleanup vs is {{degrain = {{tr, thsad, blksize}}, planes?}}, not {v!r}")
         d = v["degrain"] or {}
         if (
             not isinstance(d, dict)
@@ -185,9 +187,11 @@ def vs_script(p, path):
             or not all(isinstance(x, int) and x > 0 for x in d.values())
         ):
             raise ParamError(f"degrain takes whole numbers tr, thsad, blksize, not {d!r}")
-        planes = VS_PLANES.get(c.get("planes", "all"), "bad")
+        # vs.planes, when given, is the degrain's own (a pipeline: SMDegrain on luma, then the ffmpeg filters on chroma); else the cleanup's
+        named = v.get("planes", c.get("planes", "all"))
+        planes = VS_PLANES.get(named, "bad") if isinstance(named, str) else "bad"
         if planes == "bad":
-            raise ParamError(f"cleanup planes is all, luma or chroma, not {c.get('planes')!r}")
+            raise ParamError(f"cleanup planes is all, luma or chroma, not {named!r}")
         lines += [
             "from vsdenoise import mc_degrain",
             f"c = mc_degrain(c, tr={d.get('tr', 2)}, thsad={d.get('thsad', 300)}, blksize={d.get('blksize', 16)}, planes={planes!r})",
@@ -865,6 +869,11 @@ def refine(p, src, out, fps, audio, popen=subprocess.Popen):
     srcs = p.get("sources") or []
     if method not in REFINE:
         raise ParamError(f"refine method is {', '.join(REFINE)}, not {method!r}")
+    # what the sources are held to: the tape as prepared (deinterlaced, and through the VapourSynth stage when the params ask for one), or
+    # `cleaned`, with the cleanup's ffmpeg filters too, so back-projecting a denoised pipeline's upscale does not pull the tape's noise back in
+    against = r.get("against", "tape")
+    if against not in ("tape", "cleaned"):
+        raise ParamError(f"refine against is tape or cleaned, not {against!r}")
     if not srcs or not all(isinstance(x, str) and os.path.isfile(x) for x in srcs):
         raise ParamError(f"refine needs the source outputs (sources): {srcs!r}")
     if method == "blend" and len(srcs) < 2:
@@ -881,7 +890,7 @@ def refine(p, src, out, fps, audio, popen=subprocess.Popen):
             p["path"],
             "-an",
             "-vf",
-            prep_filter({**p, "cleanup": None}, src),
+            prep_filter(p if against == "cleaned" else {**p, "cleanup": None}, src),
             "-f",
             "rawvideo",
             "-pix_fmt",
