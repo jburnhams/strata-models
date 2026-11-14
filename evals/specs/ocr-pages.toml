@@ -101,3 +101,33 @@ params = { clean = "flatten,sharpen" }
 input = "{image}"
 send = "image"
 into = "prompt"
+
+# ---- Model judges: which one can tell good OCR from bad on a page nobody has typed ---------------------------------------------------------
+# Each sees the page and two transcriptions, blind and without the reference (reference = false), and picks the more faithful one; every
+# candidate against the baseline (pairs = baseline: 12 pairs a page, not 78). The analysis scores each judge against cer: on each pair the
+# right answer is the transcription with fewer character errors. A judge that agrees well is the one to rank settings on a book's other pages.
+# qwen and gemma are also candidates (the read and fix ones), so they may favour their own: Gemini is not.
+[[judges]]
+name = "qwen"
+kind = "vision"                  # role judge-vision (qwen3.5-9b-vl)
+pairs = "baseline"
+reference = false
+criteria = "The picture is a page of an old printed book; X and Y are two transcriptions of it. Prefer the one that matches the printed words more exactly, letter for letter, in the page's own order: fewer wrong, missing or invented words and letters. Old spellings, line-end hyphens and line breaks as printed are right, not errors. Ignore layout and spacing."
+
+[[judges]]
+name = "gemma"
+kind = "vision"
+model = "gemma-4-12b-vl"         # a trial of another model serving judge-vision
+pairs = "baseline"
+reference = false
+criteria = "The picture is a page of an old printed book; X and Y are two transcriptions of it. Prefer the one that matches the printed words more exactly, letter for letter, in the page's own order: fewer wrong, missing or invented words and letters. Old spellings, line-end hyphens and line breaks as printed are right, not errors. Ignore layout and spacing."
+
+[[judges]]
+name = "gemini-flash"
+cli = "agy"                      # Google AI Pro via Antigravity; asked both ways round
+model = "gemini-3.8-flash-low"
+kind = "vision"
+pairs = "baseline"
+reference = false
+limit = 40                       # pairs per run, to spare the plan: run again for the rest
+criteria = "The picture is a page of an old printed book; X and Y are two transcriptions of it. Prefer the one that matches the printed words more exactly, letter for letter, in the page's own order: fewer wrong, missing or invented words and letters. Old spellings, line-end hyphens and line breaks as printed are right, not errors. Ignore layout and spacing."

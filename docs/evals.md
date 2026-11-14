@@ -69,9 +69,13 @@ more later (pairs nobody has time for, or a first pass before people).
   files with its file viewer (codex has no audio). 16 kHz is what these models hear anyway, so hiss above 8 kHz is for people to judge.
 - **Cloud judges** (`cli = "codex" | "agy"`, `model` the CLI's slug) call the vendor's own CLI on the plan, never its sign-in token
   elsewhere. Give a dear one a `limit`, like a sampled candidate. A judge that is also a candidate tends to prefer its own answers.
-- Which pairs: `pairs = "judged"` (default; the ones agreement is measured on) or `"all"`; `auto = true` judges each pair right after a person
+- Which pairs: `pairs = "judged"` (default; the ones agreement is measured on), `"all"`, or `"baseline"` (each candidate against the
+  baseline only: a scored eval with many candidates); `auto = true` judges each pair right after a person
   does. Run with `./strata-models eval judge NAME`, or POST `/api/evals/{name}/judges/{judge}/run`. A changed prompt, criteria, params or model
   makes a new judge, whose verdicts start again.
+- **Against a metric**: in an eval decided by a scored metric, each judge is also scored against it (on each pair it judged, the output that
+  scored better on that item is the right answer; a tie when equal), in the write-up's Model judges section. With `reference = false` the
+  judge does not see the item's reference, so this measures it for items that have none.
 
 ## Pipelines: a step before the candidate
 A candidate can run **stages** before its own job (`[[candidates.stages]]`: role, optional model, params, `input` template over the item's
@@ -105,6 +109,10 @@ vision-language model read the same thing; `cer` decides, `wer` is context, and 
 - **Instead of OCR**: a vision-language model (`ocr-read-v1`) transcribes the page; it gives text but no boxes, so it is a candidate only.
 - **After OCR**: a pipeline whose first stage is Tesseract (`into = "prompt"`) and whose candidate is a vision-language model with
   `ocr-correct-v1`, which corrects the OCR text against the page.
+- **Judging OCR without a reference**: three vision judges (qwen, gemma, Gemini through agy) see the page and two transcriptions with the
+  reference hidden (`reference = false`), each candidate against the baseline (`pairs = "baseline"`). The analysis scores each judge
+  against `cer` (the right answer on a pair is the transcription with fewer errors), so the judge that agrees best can rank settings on the
+  pages nobody has typed.
 Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
 
 ## Rules of thumb
