@@ -4,6 +4,7 @@ what the web app formats anyway.
   registry      models, roles, model_roles (which roles a model may serve; a role's `model` is the one chosen for it)
   config        settings (the service's own: folders, VRAM reserve), preferences (an app's own choice of model or default params for a role)
   requests      jobs (every run and lease), results (a run's output, dropped after a week), files (paths a job read or wrote: never the bytes)
+  spend         api_calls (every call to a cloud API, with its tokens and cost: what the budgets count)
   evals         eval_datasets + eval_items, eval_experiments + eval_candidates, eval_results (cached outputs), eval_judgments (blind A/B choices, people's and model judges')
 
 Files in the repository (models.toml, evals/specs/*.toml, dataset .jsonl files) are SEEDS: imported at start, and followed while the row has not
@@ -127,6 +128,37 @@ class JobFile(Base):
     direction: Mapped[str] = mapped_column(sa.String(8))  # input | output
     path: Mapped[str] = mapped_column(sa.String(1024), index=True)
     created_at: Mapped[float]
+
+
+class ApiCall(Base):
+    """One call to a paid or rate-limited cloud API (Claude API, Google AI Studio, NVIDIA NIM): its tokens and what it cost, priced from the
+    model's `price` in models.toml when it was made. The ledger the budgets are counted from (spend.py): kept for good, unlike results."""
+
+    __tablename__ = "api_calls"
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    at: Mapped[float] = mapped_column(index=True)
+    provider: Mapped[str] = mapped_column(sa.String(16), index=True)  # claude | gemini | nim (the key it spent)
+    model: Mapped[str] = mapped_column(sa.String(128))  # the vendor's model id
+    app: Mapped[str | None] = mapped_column(sa.String(64), default=None)
+    job_id: Mapped[int | None] = mapped_column(
+        default=None, index=True
+    )  # no foreign key: a call from the CLI has no job
+    tokens_in: Mapped[int] = mapped_column(default=0)  # uncached input
+    tokens_out: Mapped[int] = mapped_column(default=0)  # output, thinking included
+    cache_read: Mapped[int] = mapped_column(default=0)
+    cache_write: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
+    ok: Mapped[bool] = mapped_column(default=True)
+    error: Mapped[str | None] = mapped_column(sa.Text, default=None)
+    seconds: Mapped[float | None] = mapped_column(default=None)
+    model_key: Mapped[str | None] = mapped_column(
+        sa.String(128), default=None
+    )  # the registry's model (claude-haiku-5-5-api)
+    finish: Mapped[str | None] = mapped_column(sa.String(32), default=None)  # the vendor's stop reason
+    request: Mapped[dict | None] = mapped_column(
+        sa.JSON, default=None
+    )  # what was sent: text in full, pictures as their paths, settings
+    response: Mapped[str | None] = mapped_column(sa.Text, default=None)  # the answer's text (up to 100 000 characters)
 
 
 # ---- registry and config -----------------------------------------------------------------------------------------------------------------

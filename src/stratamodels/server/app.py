@@ -24,6 +24,10 @@ API (JSON), for apps (through the client in client/) and for the web app:
   POST /api/leases/{id}/heartbeat        keep a held lease alive (it expires `ttl_s` after the last one)
   DELETE /api/leases/{id}                give it back
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
+  GET  /api/spend                        each cloud API key's budget, spent, left, period and warning level (spend.summary)
+  GET  /api/spend/series?days=30&bucket=day   cost, calls and tokens per bucket and provider, and the breakdown by provider, model and app
+  GET  /api/spend/calls?provider=&model=&app=&ok=&days=&before=&limit=   the ledger, newest first (without bodies)
+  GET  /api/spend/calls/{id}             one call with what was sent and what came back
   GET/PUT /api/settings
   GET  /api/images?before=&limit=        generated pictures (image-generate jobs), newest first
   GET  /api/images/file?path=            one generated or uploaded picture
@@ -39,7 +43,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from stratamodels import __version__, gpu, runtimes, settings
+from stratamodels import __version__, gpu, keys, runtimes, settings, spend
 from stratamodels.registry import Registry, RegistryError
 from stratamodels.scheduler import QueueError, Scheduler
 
@@ -103,11 +107,16 @@ class SettingsIn(BaseModel):
     gpu_jobs: int | None = None
     cpu_jobs: int | None = None
     whole_card_gb: float | None = None
+    claude_budget_usd: float | None = None
+    claude_rollover: str | None = None  # YYYY-MM-DD; "" clears it
+    gemini_budget_usd: float | None = None
+    gemini_rollover: str | None = None
 
 
 def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     app = FastAPI(title="strata-models", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
     s = scheduler
+    spend.bind(s.store)  # the cloud API runtimes count their calls in this store's ledger
 
     @app.exception_handler(RegistryError)
     @app.exception_handler(QueueError)
@@ -271,6 +280,53 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     def get_usage(hours: float = 24.0):
         return dict(hours=hours, rows=s.store.usage(s.clock() - max(hours, 0.0) * 3600))
 
+    @app.get("/api/spend")
+    def get_spend():
+        return dict(
+            providers=spend.summary(), keys={p: keys.have(p) for p in spend.PROVIDERS}, warn_at=list(spend.WARN_AT)
+        )
+
+    @app.get("/api/spend/series")
+    def get_spend_series(
+        days: float = 30.0,
+        bucket: str = "day",
+        provider: str | None = None,
+        model: str | None = None,
+        app_name: str | None = Query(None, alias="app"),
+    ):
+        size = {"hour": 3600.0, "day": 86400.0}.get(bucket)
+        if size is None:
+            raise HTTPException(400, "bucket is hour or day")
+        now = s.clock()
+        since = (now - max(min(days, 400.0), 0.0) * 86400.0) // size * size
+        return dict(
+            since=since,
+            bucket_s=size,
+            points=spend.series(since, size, provider, model, app_name),
+            breakdown=s.store.api_breakdown(since),
+        )
+
+    @app.get("/api/spend/calls")
+    def get_spend_calls(
+        provider: str | None = None,
+        model: str | None = None,
+        app_name: str | None = Query(None, alias="app"),
+        ok: bool | None = None,
+        days: float | None = None,
+        before: int | None = None,
+        limit: int = 50,
+    ):
+        since = None if days is None else s.clock() - days * 86400.0
+        calls = s.store.api_log(provider, model, app_name, ok, since, before, limit)
+        return dict(calls=calls, next=calls[-1]["id"] if calls and len(calls) >= limit else None)
+
+    @app.get("/api/spend/calls/{call_id}")
+    def get_spend_call(call_id: int):
+        c = s.store.api_call(call_id)
+        if c is None:
+            raise HTTPException(404, f"no call {call_id}")
+        return c
+
     @app.get("/api/settings")
     def get_settings():
         return settings.all_settings()
@@ -284,7 +340,16 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
                 if not os.path.isabs(os.path.expanduser(v)):
                     raise HTTPException(400, f"{k} must be an absolute path")
                 changes[k] = v
-        for k in ("vram_reserve_gb", "gpu_jobs", "cpu_jobs", "whole_card_gb"):
+        for k in (
+            "vram_reserve_gb",
+            "gpu_jobs",
+            "cpu_jobs",
+            "whole_card_gb",
+            "claude_budget_usd",
+            "claude_rollover",
+            "gemini_budget_usd",
+            "gemini_rollover",
+        ):
             if getattr(b, k) is not None:
                 changes[k] = getattr(b, k)
         try:

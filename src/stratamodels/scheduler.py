@@ -38,7 +38,7 @@ import collections
 import threading
 import time
 
-from stratamodels import gpu, runtimes
+from stratamodels import gpu, runtimes, spend
 from stratamodels.store import FINISHED
 
 PRIORITY = {"interactive": 0, "batch": 1}
@@ -741,7 +741,8 @@ class Scheduler:
             r, load_s = self._ensure(model)
             t0 = time.perf_counter()
             try:
-                result = self.get_runtime(model.runtime).run(r.handle, params)
+                with spend.job(j.get("app"), j["id"]):  # a cloud API call's ledger row names the app and the job
+                    result = self.get_runtime(model.runtime).run(r.handle, params)
             except runtimes.RunError:
                 raise
             except Exception:

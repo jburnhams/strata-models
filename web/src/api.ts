@@ -30,6 +30,33 @@ export interface Usage { hours: number; rows: UsageRow[] }
 export interface Settings { data_dir: string; models_dir: string; vram_reserve_gb: number; gpu_jobs: number; cpu_jobs: number; whole_card_gb: number }
 export interface JobFilters { status?: string; app?: string; role?: string; kind?: string }
 
+// ---- cloud APIs (spend.py): one budget per key, the ledger of every call --------------------------------------------------------------
+export type Provider = 'claude' | 'gemini' | 'gemini-free' | 'nim'
+export interface ProviderState {
+  provider: Provider; label: string; budgeted: boolean; unit: 'usd'; budget: number | null; rollover: string | null; period_start: number | null; next_rollover: number | null
+  spent: number; calls: number; reserved: number; left: number | null; used_share: number | null; warn: number | null
+}
+export interface Spend { providers: ProviderState[]; keys: Record<string, boolean>; warn_at: number[] }
+export interface SpendPoint { t: number; provider: Provider; cost_usd: number; calls: number; failed: number; tokens: number }
+export interface SpendRow { provider: Provider; model: string; app: string | null; calls: number; failed: number; tokens_in: number; tokens_out: number; cost_usd: number }
+export interface SpendSeries { since: number; bucket_s: number; points: SpendPoint[]; breakdown: SpendRow[] }
+export interface ApiCall {
+  id: number; at: number; provider: Provider; model: string; app: string | null; job_id: number | null; tokens_in: number; tokens_out: number; cache_read: number; cache_write: number
+  cost_usd: number; ok: boolean; error: string | null; seconds: number | null; model_key: string | null; finish: string | null
+  request?: { system?: string | null; prompt?: string; images?: string[]; schema?: unknown; max_tokens?: number; effort?: string | null } | null; response?: string | null
+}
+export interface ApiCallPage { calls: ApiCall[]; next: number | null }
+export interface CallFilters { provider?: string; model?: string; app?: string; ok?: string; days?: number }
+export interface BudgetChange { claude_budget_usd?: number; claude_rollover?: string; gemini_budget_usd?: number; gemini_rollover?: string }
+
+export function spendUrl(path: string, f: CallFilters, extra: Record<string, string | number | undefined> = {}) {
+  const p = new URLSearchParams()
+  for (const k of ['provider', 'model', 'app', 'ok'] as const) if (f[k]) p.set(k, f[k]!)
+  if (f.days) p.set('days', String(f.days))
+  for (const [k, v] of Object.entries(extra)) if (v !== undefined) p.set(k, String(v))
+  return `${path}?${p}`
+}
+
 // Where the app is served from: '' at the server's own root, '/subpath' behind a reverse proxy at that path. From the page's own URL (vite base './'), so one build works in both places.
 export const BASE = typeof document === 'undefined' ? '' : new URL('.', document.baseURI).pathname.replace(/\/$/, '')
 export const withBase = (u: string) => (u.startsWith('/') ? BASE + u : u)
@@ -64,6 +91,11 @@ export const api = {
   usage: (hours: number) => get<Usage>(`/api/usage?hours=${hours}`),
   settings: () => get<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => send<Settings>('PUT', '/api/settings', s),
+  spend: () => get<Spend>('/api/spend'),
+  spendSeries: (f: CallFilters) => get<SpendSeries>(spendUrl('/api/spend/series', { provider: f.provider, model: f.model, app: f.app }, { days: f.days ?? 30, bucket: (f.days ?? 30) <= 2 ? 'hour' : 'day' })),
+  calls: (f: CallFilters, before?: number) => get<ApiCallPage>(spendUrl('/api/spend/calls', f, { before, limit: 50 })),
+  call: (id: number) => get<ApiCall>(`/api/spend/calls/${id}`),
+  saveBudgets: (b: BudgetChange) => send<Settings>('PUT', '/api/settings', b),
 }
 
 // ---- evals -------------------------------------------------------------------------------------------------------------------------------

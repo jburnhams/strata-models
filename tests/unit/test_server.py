@@ -237,3 +237,66 @@ def test_registry_preferences_and_files_through_the_api(client, scheduler):
     assert client.post("/api/registry/seed", params=dict(follow="nope")).status_code == 400
     out = client.post("/api/registry/seed", params=dict(follow="role:echo")).json()
     assert "role faces" in out["added"] and scheduler.registry.resolve("faces").key == "buffalo_l"
+
+
+def test_spend_budgets_series_and_request_log(client, scheduler, monkeypatch):
+    from stratamodels import settings, spend
+
+    monkeypatch.setattr(spend, "clock", scheduler.clock)
+    monkeypatch.setattr(spend, "_reserved", {})
+    assert client.put("/api/settings", json=dict(claude_rollover="soon")).status_code == 400
+    assert client.put("/api/settings", json=dict(claude_budget_usd=-1)).status_code == 400
+    r = client.put(
+        "/api/settings", json=dict(claude_budget_usd=100, claude_rollover="2026-12-08", gemini_budget_usd=10)
+    ).json()
+    assert (r["claude_budget_usd"], r["claude_rollover"], r["gemini_budget_usd"], r["gemini_rollover"]) == (
+        100.0,
+        "2026-12-08",
+        10.0,
+        None,
+    )
+    assert client.put("/api/settings", json=dict(claude_rollover="")).json()["claude_rollover"] is None
+    settings.save(dict(claude_rollover="2026-12-08"))
+    now = scheduler.clock()
+    with spend.job("evals", 9):
+        spend.record(
+            spend.reserve("claude", 0.5),
+            "claude-haiku-5-5",
+            0.5,
+            now=now,
+            tokens_in=10,
+            tokens_out=2,
+            request=dict(prompt="hi"),
+            response="ok",
+        )
+    spend.record(("nim", 0), "nvidia/x", 0.0, now=now, ok=False, error="HTTP 429")
+    s = client.get("/api/spend").json()
+    claude = next(p for p in s["providers"] if p["provider"] == "claude")
+    assert (
+        (claude["budget"], claude["calls"], claude["left"]) == (100.0, 1, 99.5)
+        and s["keys"] == dict.fromkeys(spend.PROVIDERS, False)
+        and s["warn_at"] == [0.5, 0.8, 1.0]
+    )
+    ser = client.get("/api/spend/series", params=dict(days=7, bucket="hour")).json()
+    assert (
+        ser["bucket_s"] == 3600.0
+        and {p["provider"] for p in ser["points"]} == {"claude", "nim"}
+        and len(ser["breakdown"]) == 2
+    )
+    assert client.get("/api/spend/series", params=dict(bucket="week")).status_code == 400
+    assert [
+        p["provider"]
+        for p in client.get("/api/spend/series", params=dict(provider="claude", app="evals")).json()["points"]
+    ] == ["claude"]
+    page = client.get("/api/spend/calls", params=dict(limit=1)).json()
+    assert len(page["calls"]) == 1 and page["next"] == page["calls"][0]["id"]
+    assert client.get("/api/spend/calls", params=dict(before=page["next"])).json()["next"] is None
+    calls = client.get("/api/spend/calls").json()["calls"]
+    assert [c["provider"] for c in calls] == ["nim", "claude"] and "response" not in calls[0]
+    assert [
+        c["provider"] for c in client.get("/api/spend/calls", params=dict(app="evals", ok=True, days=1)).json()["calls"]
+    ] == ["claude"]
+    one = client.get(f"/api/spend/calls/{calls[1]['id']}").json()
+    assert (one["request"], one["response"], one["job_id"]) == ({"prompt": "hi"}, "ok", 9)
+    assert client.get("/api/spend/calls/999").status_code == 404
+    spend.bind(None)

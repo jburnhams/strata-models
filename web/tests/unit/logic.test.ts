@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { describeJob, finding, processName, seconds, vramParts } from '../../src/logic'
-import { jobsUrl } from '../../src/api'
+import { bucketSeries, describeJob, finding, processName, seconds, spendFinding, ticksOf, usd, vramParts } from '../../src/logic'
+import { jobsUrl, spendUrl } from '../../src/api'
 import { byApp } from '../../src/components/UsagePage'
-import { fixtures } from '../utils/server'
+import { fixtures, spendFixtures } from '../utils/server'
 
 describe('words for jobs and processes', () => {
   it('describes runs and leases', () => {
@@ -78,5 +78,29 @@ import { window_ } from '../../src/components/PhrasePlayer'
 describe('the phrase window', () => {
   it('starts 2 s before and stops 1 s after, never before 0', () => {
     expect(window_([14.4, 16.2])).toEqual({ from: 12.4, to: 17.2 }); expect(window_([1, 2]).from).toBe(0); expect(window_(undefined)).toEqual({ from: 0, to: Infinity })
+  })
+})
+
+describe('cloud spend', () => {
+  it('writes dollars to the cent, and below a cent to four places', () => {
+    expect([usd(62.5), usd(0), usd(0.00012), usd(0.01), usd(null), usd(undefined)]).toEqual(['$62.50', '$0.00', '$0.0001', '$0.01', '–', '–'])
+  })
+  it('finds the paid key nearest its budget, or the keys without one', () => {
+    const ps = spendFixtures.spend().providers
+    expect(spendFinding(ps)).toMatch(/^Claude API: \$62\.50 of \$100\.00 spent, \$37\.50 left until /)
+    expect(spendFinding([{ ...ps[0], next_rollover: null }])).toBe('Claude API: $62.50 of $100.00 spent, $37.50 left.')
+    expect(spendFinding([{ ...ps[0], budget: null }])).toBe('No budget is set for Claude API: their calls are refused until one is.')
+    expect(spendFinding([ps[3]])).toBe('No paid keys.')
+  })
+  it('fills every bucket to now and sums the providers shown', () => {
+    const pts = [{ t: 100, provider: 'claude' as const, cost_usd: 1, calls: 2, failed: 0, tokens: 9 }, { t: 100, provider: 'nim' as const, cost_usd: 0, calls: 3, failed: 0, tokens: 1 }]
+    expect(bucketSeries(pts, 0, 100, 250, 'calls')).toEqual([{ x: 0, y: 0 }, { x: 100_000, y: 5 }, { x: 200_000, y: 0 }])
+    expect(ticksOf([{ x: 0, y: 0 }, { x: 400, y: 1 }])).toEqual([0, 100, 200, 300, 400])
+    expect(ticksOf([{ x: 5, y: 0 }])).toEqual([5])
+    expect(ticksOf([])).toEqual([])
+  })
+  it('builds the spend URLs from the filters', () => {
+    expect(spendUrl('/api/spend/calls', { provider: 'claude', ok: 'false', days: 7 }, { before: 9, limit: 50 })).toBe('/api/spend/calls?provider=claude&ok=false&days=7&before=9&limit=50')
+    expect(spendUrl('/api/spend/series', {}, { days: undefined })).toBe('/api/spend/series?')
   })
 })

@@ -712,3 +712,40 @@ def test_a_lease_above_the_whole_card_size_gets_the_card_and_only_one_bigger_tha
     assert (
         r["id"] == huge["id"] and r["status"] == "failed" and r["error"] == "13 GB will never fit: the card has 12.0 GB"
     )
+
+
+def test_a_job_runs_inside_its_app_and_id_for_the_spend_ledger(scheduler, monkeypatch):
+    from stratamodels import spend
+    from stratamodels.runtimes import fake
+
+    seen = []
+    monkeypatch.setattr(fake, "run", lambda handle, params: seen.append(spend._job.get()) or {})
+    j = scheduler.submit("echo", {}, "bh")
+    scheduler.step()
+    assert seen == [("bh", j["id"])] and spend._job.get() == (None, None)
+
+
+def test_cost_per_task_from_the_ledger(scheduler, monkeypatch):
+    from stratamodels import spend
+    from stratamodels.runtimes import fake
+
+    spend.bind(scheduler.store)
+    monkeypatch.setattr(spend, "_reserved", {})
+
+    def run(handle, params):
+        for usd in params["usd"]:
+            spend.record(("nim", 0), "m", usd, tokens_in=10, tokens_out=4, model_key="small")
+        return {}
+
+    monkeypatch.setattr(fake, "run", run)
+    for usd in ([0.1, 0.2], [0.5]):
+        scheduler.submit("echo", dict(usd=usd), "evals")
+        scheduler.step()
+    spend.record(("nim", 0), "m", 9.0, model_key="small")  # no job: not a task
+    got = spend.per_task()
+    assert (
+        list(got) == [("echo", "small")] and got[("echo", "small")]["n"] == 2 and got[("echo", "small")]["failed"] == 0
+    )
+    assert abs(got[("echo", "small")]["usd"] - 0.4) < 1e-9 and got[("echo", "small")]["tokens_in"] == 15.0
+    spend.bind(None)
+    assert spend.per_task() == {}
