@@ -240,3 +240,11 @@ def test_the_slow_video_models_have_room_to_finish():
         m["video-realplksr-nomos"].options["timeout_s"] >= 3600
         and m["video-lanczos-cleanup"].options["timeout_s"] >= 3600
     )
+
+
+def test_seedvr2_decodes_in_tiles_that_fit_the_12_gb_card():
+    # 2026-11-13: with 1024 px VAE decode tiles SeedVR2 3B ran out of memory at its first decode batch (8.8 -> 10.7 GiB allocated)
+    from stratamodels.registry import Registry
+
+    a = Registry.load().models["video-seedvr2-3b"].options["args"]
+    assert a["vae_decode_tile_size"] <= 512 and a["vae_encode_tile_size"] <= 512 and a["vae_decode_tiled"] is True

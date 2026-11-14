@@ -17,7 +17,13 @@ Jonathan asked for evals of strata-scan's trickier pages to see what helps, and 
 - `evals/metrics.py`: `transcript` (what `cer` and `wer` read) takes an output's `text` when it has no `segments`; an `ocr` page or a vision-language answer scored 100 % wrong before. `tests/unit/test_eval_metrics.py`: that case.
 - First numbers, the nine Tesseract candidates through a local service (CER, %): no cleaning 4.93, psm 4 3.48, flatten 3.60, denoise 3.83, adaptive 4.27, upscale 4.62, flatten+sharpen 2.87 (the report's pick: 2.06 points better, interval 0.28 to 6.93), flatten with psm 4 3.13, flatten+denoise with psm 4 3.04. Tried locally and left out: otsu 5.11, flatten then upscale 5.56. The vision-language candidates need the GPU.
 
+**FlashVSR+ gets its Triton attention kernel (branch `claude/flashvsr-triton`)**
+The first FlashVSR+ Turbo run (one clip, 2026-11-13) stopped before any frame: with neither Block-Sparse-Attention nor FlashVSR's own Triton kernel installed it falls back to PyTorch SDPA, which refuses a 1536 x 1152 clip ("would allocate too many mask entries"); the card had peaked at 4.2 GB. `scripts/setup_worker_venv.sh flashvsr-plus` now also installs flash-attn 2.7.4.post1 (the prebuilt wheel for cp310, torch 2.7, CUDA 12, C++11 ABI: no CUDA compile) and the repo's `operators/flashvsr_attn` (pure Triton), the backend FlashVSR+'s README recommends for consumer cards.
+
 ## 2026-11-13
+
+**SeedVR2 decodes in 512 px tiles (branch `claude/seedvr2-decode-tiles`)**
+The first SeedVR2 3B run on the RTX 3060 (one clip, 2026-11-13) finished its DiT pass (80 batches of 5 frames, ~6.5 min) and ran out of memory at the first VAE decode batch: 1024 px tiles took allocation from 8.8 to 10.7 GiB. `models.toml`: VAE encode and decode tiles 512 px with 64 px overlap.
 
 **An `ocr` role on Tesseract, for strata-scan (branch `claude/project-thread-0n1ijc`)**
 Jonathan is turning strata-scan into an app for scanned books (rotate, crop, text and pictures out) and asked for the model work to live here. A page needs its lines and words with boxes, which Tesseract gives on the CPU, so the role uses the CPU lane and never waits for the GPU; a vision-language reader is the eval to run against it later.
