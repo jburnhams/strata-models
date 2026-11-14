@@ -44,7 +44,7 @@ def body(job):
     if job["effort"]:
         gc["thinkingConfig"] = {"thinkingLevel": job["effort"]}
     if job["schema"]:
-        gc.update(responseMimeType="application/json", responseJsonSchema=job["schema"])
+        gc.update(responseMimeType="application/json", responseJsonSchema=cloud.portable(job["schema"]))
     b = dict(contents=[{"role": "user", "parts": parts}], generationConfig=gc)
     if job["system"]:
         b["systemInstruction"] = {"parts": [{"text": job["system"]}]}

@@ -69,6 +69,49 @@ def encode(path):
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+# JSON-schema keywords that only bound a value: the vendors' structured outputs refuse them (Claude: "For 'integer' type, property 'minimum'
+# is not supported"; Gemini: "Request contains an invalid argument") while llama.cpp's grammar takes them. The shape (types, properties,
+# required, enum, items, additionalProperties) is what they enforce; the bounds stay in the prompt, and the eval checks the answer after.
+BOUNDS = (
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "format",
+    "maxItems",
+    "uniqueItems",
+    "$schema",
+)
+
+
+LITERAL = ("enum", "const", "default", "examples")
+
+
+def portable(schema):
+    """`schema` without BOUNDS anywhere in it, and with minItems only where it is 0 or 1 (Claude takes no other), for a vendor's API."""
+    if isinstance(schema, list):
+        return [portable(x) for x in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for k, v in schema.items():
+        if k in BOUNDS or (k == "minItems" and v not in (0, 1)):
+            continue
+        if k in LITERAL:  # data, not a schema: {"enum": [{"format": "png"}]} keeps its "format"
+            out[k] = v
+            continue
+        out[k] = (
+            {n: portable(x) for n, x in v.items()}
+            if k in ("properties", "$defs", "definitions") and isinstance(v, dict)
+            else portable(v)
+        )
+    return out
+
+
 def parse(params):
     """{text, system, images: [(path, mime, base64)], schema, max_tokens, effort} from a job's params."""
     from stratamodels.runtimes import llama

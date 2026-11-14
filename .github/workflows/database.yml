@@ -12,5 +12,6 @@ jobs:
   database:
     uses: jburnhams/database/.github/workflows/app-db.yml@main
     with:
-      install: uv pip install -e . --group dev
+      # the versions uv.lock pins (strata-python too: `uv pip install -e .` would take its main, which may not match omarchy-db yet)
+      install: uv export --frozen --group dev --no-emit-project --no-hashes -o /tmp/locked.txt && uv pip install -r /tmp/locked.txt && uv pip install --no-deps -e .
       tests: tests/unit/test_database.py tests/unit/test_store.py

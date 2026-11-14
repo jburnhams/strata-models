@@ -47,7 +47,7 @@ def body(handle, job):
     if job["schema"]:
         b["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "answer", "schema": job["schema"], "strict": True},
+            "json_schema": {"name": "answer", "schema": cloud.portable(job["schema"]), "strict": True},
         }
     return b
 
