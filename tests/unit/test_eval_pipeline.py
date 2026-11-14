@@ -232,3 +232,48 @@ def test_judges_see_the_end_result_only_and_the_outputs_show_every_step(pipe, sc
         assert "## Pipelines" in r
     finally:
         stop.set()
+
+
+def test_cost_usd_adds_a_cloud_stage_to_a_local_job(pipe, scheduler):
+    """A cloud model's step (a layout read by Gemini) before a local job (page-build) costs the item what the step cost: the report's cost_usd
+    read 0 for every such candidate while only the last job's output was counted. Runs saved before stages carried their cost get it from the
+    stage's own cached row."""
+    from sqlalchemy import select, update
+
+    from stratamodels.db.models import EvalResult
+    from stratamodels.evals import metrics as M
+
+    engine = scheduler.store.engine
+    stop = scheduler.start()
+    try:
+        d = C.load_spec("fake-pipe").to_json()
+        d["metrics"] = ["cost_usd", "failed"]
+        d["candidates"] = [
+            d["candidates"][0],
+            dict(
+                name="cloud",
+                model="small",
+                stages=[dict(role="echo", model="big", send="expand", params=dict(cost_usd=0.01))],
+            ),
+        ]
+        s = C.parse_spec(d)
+        C.run(s, engine, C.SchedulerExecutor(scheduler))
+        _, outs, _ = C.outputs_for(s, engine)
+        assert outs["cloud"][0][0]["pipeline"][0]["cost_usd"] == 0.01
+        cost = lambda: {c: M.summarise("cost_usd", [{}] * 6, outs[c])["value"] for c in ("raw", "cloud")}
+        assert cost() == pytest.approx(dict(raw=0.0, cloud=0.01))
+        # a row saved before the trace kept the cost: the stage's own row still has it
+        with C.session(engine) as ss:
+            for r in ss.scalars(select(EvalResult).where(EvalResult.role == "echo", EvalResult.model == "small")):
+                if r.output and r.output.get("pipeline"):
+                    out = dict(r.output)
+                    out["pipeline"] = [{k: v for k, v in t.items() if k != "cost_usd"} for t in out["pipeline"]]
+                    ss.execute(update(EvalResult).where(EvalResult.key == r.key).values(output=out))
+            ss.commit()
+        _, outs, _ = C.outputs_for(s, engine)
+        assert cost() == pytest.approx(dict(raw=0.0, cloud=0.01))
+        assert (
+            M.METRICS["cost_usd"].score({}, dict(pipeline=[dict(cli="agy"), dict()]), None) is None
+        )  # a step paid in quota
+    finally:
+        stop.set()
