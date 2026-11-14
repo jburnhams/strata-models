@@ -115,6 +115,26 @@ vision-language model read the same thing; `cer` decides, `wer` is context, and 
   pages nobody has typed.
 Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
 
+## Fonts: which face a scanned block was printed in (`font-match`)
+The role (`runtimes/fontfit.py`, CPU) sets a block's words, from Tesseract's boxes, in a candidate face and searches size, width (hscale),
+tracking and weight to make the rendering's ink agree with the scan's (`evals/ink.py`: F1 with a pixel or two of tolerance); each word then
+keeps the style that fits it, and the face that agrees best wins. Faces are open period fonts from Google Fonts (`runtimes/fonts.toml`, 57 in
+10 classes after Vox-ATypI with the 19th-century display kinds apart: modern, fat face, Clarendon, slab, grotesque, decorated...).
+- **Dataset** (`scripts/evals/font_match.py`, from archive.org, no strata-scan needed): 38 real blocks of Ward 1874 and Collier 1828
+  (`font_match/regions.toml`, class and style labelled by eye) and 30 synthetic blocks, the books' text set in a known catalogue face and
+  printed badly (ink spread or starved, paper tone, noise, blur, tilt). Period type mostly exists in no font file, so real blocks are scored
+  by ink and by class (`font_close`: 1 the same class, 0.5 a neighbour), and the synthetic ones by exact face (`font_top1`, `font_top3`) and size.
+- **Candidates**: `naive` (Tesseract's boxes in Tinos, each word stretched to its box: what a rebuild does without the role), `exhaustive`
+  (every face: a quick screen, then the full fit of the best 6), a vision model's shortlist then the fit (`qwen-fit`, `gemma-fit`,
+  `flash-fit`, `haiku-fit` on a sample; preset `font-propose-v1` lists the catalogue), and the shortlist alone (`*-only`, `mode = "measure"`:
+  its first face sized from the measured x-height), which shows what the fit adds.
+- `ink_f1` decides against the baseline, but the fit maximises it, so compare the fitted candidates with each other on it and read
+  `font_top3` and `font_close` beside it: a shortlist that keeps both against `exhaustive` in less time is the one to adopt.
+- Model judges see the block and two renderings and pick the one whose type looks more like the print; the analysis scores them against
+  `ink_f1`.
+- Before the role is deployed, `scripts/evals/font_match_trial.py` runs the same candidates with the stages through the running service and
+  the fit in its own process.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

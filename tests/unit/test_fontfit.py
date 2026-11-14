@@ -1,0 +1,229 @@
+"""The font-match runtime (runtimes/fontfit.py): the catalogue, fetching faces from Google Fonts (faked), reading a vision model's shortlist,
+and the render-and-fit on a block set in a known font at a known size and width. Pillow's own bundled face (Aileron) stands in for the
+catalogue's files, so nothing is downloaded."""
+
+import json
+import os
+
+import numpy as np
+import pytest
+from PIL import Image, ImageFont
+
+from stratamodels.runtimes import RunError
+from stratamodels.runtimes import fontfit as F
+
+
+@pytest.fixture
+def ttf(tmp_path):
+    p = tmp_path / "aileron.ttf"
+    p.write_bytes(ImageFont.load_default(20).path.getvalue())
+    return str(p)
+
+
+@pytest.fixture
+def models(tmp_path, ttf):
+    """A models folder where 'tinos' and 'old-standard' are already fetched (both Aileron); any other face fails to fetch."""
+    d = tmp_path / "models"
+    for fid in ("tinos", "old-standard"):
+        f = d / "fonts" / fid
+        f.mkdir(parents=True)
+        (f / "manifest.json").write_text(json.dumps({"roman": ttf, "italic": ttf}))
+    return str(d)
+
+
+def no_network(url):
+    raise OSError("offline")
+
+
+def handle(models):
+    return dict(key="fontfit", models_dir=models, top=2, get=no_network)
+
+
+def block(tmp_path, ttf, size=40.0, hscale=1.1, text=("Punch and Judy", "with the Baby")):
+    """A grey scan of two lines set in the font at `size` px, stretched by `hscale`; its words and boxes as Tesseract gives them."""
+    face = F.Face("tinos", {"roman": ttf})
+    W, H = 700, 160
+    canvas = np.zeros((H, W), dtype=bool)
+    lines = []
+    for i, ln in enumerate(text):
+        x, words = 20.0, []
+        for w in ln.split():
+            m, left, base = face.word("roman", w, size, hscale, 0.0, 0.5)
+            cols, rows = np.flatnonzero(m.any(0)), np.flatnonzero(m.any(1))
+            y = 55 + i * 60
+            F._paste(canvas, m, left, base, x, y)
+            bw, top = int(cols[-1] - cols[0] + 1), int(y - (base - rows[0]))
+            words.append(dict(text=w, box=[int(x), top, bw, int(rows[-1] - rows[0] + 1)], conf=95.0))
+            x += bw + size * 0.3
+        lines.append(dict(text=ln, box=F_union([w["box"] for w in words]), conf=95.0, block=1, words=words))
+    g = np.where(canvas, 50, 220).astype(np.uint8)
+    p = str(tmp_path / "block.png")
+    Image.fromarray(g).save(p, dpi=(300, 300))
+    return p, lines
+
+
+def F_union(boxes):
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    return [x0, y0, max(b[0] + b[2] for b in boxes) - x0, max(b[1] + b[3] for b in boxes) - y0]
+
+
+def test_the_catalogue_has_every_class_and_known_classes_only():
+    cat = F.catalogue()
+    assert len(cat) >= 50
+    assert {v["class"] for v in cat.values()} == set(F.CLASSES)
+    assert all(v["family"] and v["like"] for v in cat.values())
+
+
+def test_the_proposer_preset_lists_the_catalogue():
+    from stratamodels.runtimes import llama
+
+    text = llama.preset("font-propose-v1")[0]
+    assert all(fid in text for fid in F.catalogue())
+
+
+def test_closeness():
+    assert F.closeness("modern", "modern") == 1.0
+    assert F.closeness("modern", "transitional") == F.closeness("slab", "clarendon") == 0.5
+    assert F.closeness("modern", "slab") == 0.0
+    assert F.closeness(None, "modern") == 0.0
+
+
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        (["old-standard", "tinos"], ["old-standard", "tinos"]),
+        (
+            '{"class": "modern", "faces": ["Libre Bodoni", "old-standard"], "why": "hairlines"}',
+            ["libre-bodoni", "old-standard"],
+        ),
+        ("Playfair Display Black, then playfair-display", ["playfair-display-black", "playfair-display"]),
+        ("", []),
+        (None, []),
+        ("no idea", []),
+    ],
+)
+def test_parse_candidates(value, want):
+    assert F.parse_candidates(value) == want
+
+
+def test_a_class_without_faces_proposes_the_class():
+    got = F.parse_candidates('{"class": "blackletter", "faces": []}')
+    assert got and all(F.catalogue()[f]["class"] == "blackletter" for f in got)
+
+
+def test_fetch_reads_the_css_saves_each_style_and_reuses_it(tmp_path):
+    calls = []
+    css = """@font-face { font-family: 'Old Standard TT'; font-style: italic; font-weight: 400; src: url(https://fonts.gstatic.com/i.ttf) format('truetype'); }
+@font-face { font-family: 'Old Standard TT'; font-style: normal; font-weight: 400; src: url(https://fonts.gstatic.com/r.ttf) format('truetype'); }
+@font-face { font-family: 'Old Standard TT'; font-style: normal; font-weight: 700; src: url(https://fonts.gstatic.com/b.ttf) format('truetype'); }"""
+
+    def get(url):
+        calls.append(url)
+        if "googleapis" in url:
+            if "ital,wght@0,400;0,700;1,400;1,700" in url:
+                return css.encode()
+            raise OSError("400")
+        return url.encode()
+
+    files = F.fetch("old-standard", str(tmp_path), get)
+    assert sorted(files) == ["bold", "italic", "roman"]
+    assert open(files["bold"], "rb").read() == b"https://fonts.gstatic.com/b.ttf"
+    n = len(calls)
+    assert F.fetch("old-standard", str(tmp_path), get) == files and len(calls) == n  # the manifest is reused
+    with pytest.raises(RunError, match="no face"):
+        F.fetch("nonesuch", str(tmp_path), get)
+    with pytest.raises(RunError, match="Google Fonts has no"):
+        F.fetch("tinos", str(tmp_path), lambda url: b"")
+
+
+def test_fetch_takes_small_capitals_and_a_one_weight_face(tmp_path):
+    def get(url):
+        if "googleapis" in url:
+            fam = "SC" if "SC" in url else "R"
+            return f"@font-face {{ font-style: normal; font-weight: 400; src: url(https://x/{fam}.ttf) }}".encode()
+        return b"ttf"
+
+    files = F.fetch("playfair-display", str(tmp_path), get)
+    assert set(files) == {"roman", "small-caps"}
+
+
+def test_fit_recovers_the_size_and_width_of_a_known_setting(tmp_path, ttf, models):
+    p, lines = block(tmp_path, ttf, size=40.0, hscale=1.1)
+    r = F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"], out=str(tmp_path / "fit.png")))
+    assert r["face"] == "tinos" and r["mode"] == "fit"
+    ln = r["blocks"][0]["lines"][0]
+    assert ln["size_px"] == pytest.approx(40.0, rel=0.06)
+    assert ln["size_pt"] == pytest.approx(ln["size_px"] * 72 / 300, abs=0.01)
+    assert ln["hscale"] == pytest.approx(1.1, abs=0.08)
+    assert r["ink_f1"] > 0.9
+    assert [w["style"] for w in ln["words"]] and r["style"] == "roman"
+    assert os.path.isfile(r["path"]) and Image.open(r["path"]).size == (700, 160)
+
+
+def test_naive_and_measure_modes_and_the_ranking(tmp_path, ttf, models):
+    p, lines = block(tmp_path, ttf)
+    ocr = tmp_path / "ocr.json"
+    ocr.write_text(json.dumps(dict(lines=lines)))
+    naive = F.run(handle(models), dict(image=p, ocr=str(ocr), mode="naive", out=str(tmp_path / "n.png")))
+    assert naive["face"] == "tinos" and naive["faces"] == []
+    measure = F.run(
+        handle(models),
+        dict(
+            image=p,
+            ocr=str(ocr),
+            mode="measure",
+            candidates='{"faces": ["old-standard"], "style": "italic"}',
+            out=str(tmp_path / "m.png"),
+        ),
+    )
+    assert measure["face"] == "old-standard" and measure["style"] == "italic"
+    # every face: only the two fetched ones can be fitted (the rest fail to fetch and are skipped); the screen keeps the best `top`
+    fit = F.run(handle(models), dict(image=p, ocr=str(ocr), top=1, out=str(tmp_path / "f.png")))
+    assert [f["face"] for f in fit["faces"]] and len(fit["faces"]) == 2
+    assert [f["screened"] for f in fit["faces"]] == [False, True]
+    assert fit["ink_f1"] >= naive["ink_f1"]
+
+
+def test_box_limits_the_lines(tmp_path, ttf, models):
+    p, lines = block(tmp_path, ttf)
+    r = F.run(
+        handle(models),
+        dict(image=p, lines=lines, candidates=["tinos"], box=[0, 0, 700, 80], out=str(tmp_path / "b.png")),
+    )
+    assert len(r["blocks"][0]["lines"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("params", "match"),
+    [
+        (dict(image="nope.png"), "no such picture"),
+        (dict(mode="guess"), "mode is fit"),
+        (dict(candidates="nothing I know"), "no catalogue face"),
+        (dict(lines=[]), "no words"),
+    ],
+)
+def test_bad_jobs_are_refused(tmp_path, ttf, models, params, match):
+    p, lines = block(tmp_path, ttf)
+    with pytest.raises(RunError, match=match):
+        F.run(handle(models), dict(dict(image=p, lines=lines), **params))
+
+
+def test_a_file_that_is_not_a_picture_and_an_unreadable_ocr(tmp_path, ttf, models):
+    bad = tmp_path / "x.png"
+    bad.write_text("no")
+    with pytest.raises(RunError, match="not a picture"):
+        F.run(handle(models), dict(image=str(bad), lines=[]))
+    p, _ = block(tmp_path, ttf)
+    with pytest.raises(RunError, match="cannot read ocr"):
+        F.run(handle(models), dict(image=p, ocr=str(tmp_path / "missing.json")))
+
+
+def test_load_and_unload(models):
+    class M:
+        key = "fontfit"
+        options = {"top": 3}
+
+    h = F.load(M(), models)
+    assert h["top"] == 3 and h["models_dir"] == models
+    F.unload(h)
+    assert h == {}

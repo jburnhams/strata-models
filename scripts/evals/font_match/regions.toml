@@ -1,0 +1,347 @@
+# Text blocks of the two public-domain books for the `font-match` eval (scripts/evals/font_match.py). Each is cut from an Internet Archive
+# scan (book = which scan, leaf = its image number there, box = [x, y, w, h] in that image's pixels) and labelled from the page by eye:
+# `classes` the kind(s) of type it is (fonts.toml's classes; the first is the best guess, the rest acceptable: period type is often between
+# two), `style` the main style of its words. Labelled by Claude while building the eval (2026-11-14); check by hand before trusting a small
+# difference on the class metrics. No exact face is given: these faces mostly do not exist as font files, which is what the synthetic items
+# are for.
+
+# ---- Ward 1874: the title page -----------------------------------------------------------------------------------------------------------
+[ward1874-title-punch]
+book = "ward1874"
+leaf = 13
+box = [450, 420, 1830, 255]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+note = "PUNCH AND JUDY, condensed modern capitals"
+
+[ward1874-title-instructions]
+book = "ward1874"
+leaf = 13
+box = [600, 786, 1560, 370]
+classes = ["modern", "transitional"]
+style = "roman"
+kind = "display"
+note = "With Instructions / How to Manage the Little: light wide roman"
+
+[ward1874-title-wooden]
+book = "ward1874"
+leaf = 13
+box = [450, 1260, 1830, 180]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+note = "WOODEN ACTORS; extended modern capitals"
+
+[ward1874-title-dialogues]
+book = "ward1874"
+leaf = 13
+box = [450, 1665, 1830, 180]
+classes = ["decorated", "clarendon"]
+style = "roman"
+kind = "display"
+note = "New and Easy Dialogues: shaded Clarendon"
+
+[ward1874-title-arranged]
+book = "ward1874"
+leaf = 13
+box = [750, 1965, 1100, 90]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+note = "ARRANGED FOR THE USE OF: modern capitals"
+
+[ward1874-title-puppets]
+book = "ward1874"
+leaf = 13
+box = [510, 2370, 1740, 120]
+classes = ["modern"]
+style = "small-caps"
+kind = "display"
+note = "How to Work the Puppets: wide modern, capitals and small capitals"
+
+[ward1874-title-sunday]
+book = "ward1874"
+leaf = 13
+box = [420, 2700, 1860, 225]
+classes = ["clarendon", "modern"]
+style = "roman"
+kind = "display"
+note = "Sunday Schools, Private Parties: condensed Clarendon"
+
+[ward1874-title-by]
+book = "ward1874"
+leaf = 13
+box = [840, 3120, 1080, 75]
+classes = ["clarendon", "slab"]
+style = "roman"
+kind = "display"
+note = "BY THOS. A. M. WARD: extended bold Clarendon"
+
+# ---- Ward 1874: advertisements -------------------------------------------------------------------------------------------------------------
+[ward1874-ad17-punch]
+book = "ward1874"
+leaf = 29
+box = [390, 585, 1860, 165]
+classes = ["decorated"]
+style = "roman"
+kind = "display"
+note = "PUNCH AND JUDY! shaded display"
+
+[ward1874-ad17-amusing]
+book = "ward1874"
+leaf = 29
+box = [390, 795, 1860, 140]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+
+[ward1874-ad17-talking]
+book = "ward1874"
+leaf = 29
+box = [390, 954, 1860, 81]
+classes = ["decorated"]
+style = "roman"
+kind = "display"
+note = "TALKING MARIONETTES, ornamented"
+
+[ward1874-ad17-open]
+book = "ward1874"
+leaf = 29
+box = [390, 1155, 1860, 105]
+classes = ["decorated", "modern"]
+style = "roman"
+kind = "display"
+note = "PUNCH AND JUDY: open (outline) extended capitals"
+
+[ward1874-ad17-riding]
+book = "ward1874"
+leaf = 29
+box = [390, 1374, 1860, 250]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+
+[ward1874-ad17-secured]
+book = "ward1874"
+leaf = 29
+box = [390, 1635, 1860, 105]
+classes = ["clarendon", "slab", "grotesque"]
+style = "bold"
+kind = "display"
+note = "CAN BE SECURED: condensed heavy antique"
+
+[ward1874-ad17-evening]
+book = "ward1874"
+leaf = 29
+box = [390, 1746, 1860, 159]
+classes = ["clarendon"]
+style = "bold"
+kind = "display"
+note = "For Evening Parties: Clarendon"
+
+[ward1874-ad17-tailors]
+book = "ward1874"
+leaf = 29
+box = [390, 2745, 1860, 165]
+classes = ["clarendon", "fat-face"]
+style = "bold"
+kind = "display"
+note = "Tailors and Clothiers: condensed heavy"
+
+[ward1874-ad17-chestnut]
+book = "ward1874"
+leaf = 29
+box = [390, 3345, 1860, 150]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+note = "603 and 605 Chestnut Street: condensed modern"
+
+[ward1874-ad22-blitz]
+book = "ward1874"
+leaf = 34
+box = [330, 585, 1860, 165]
+classes = ["decorated"]
+style = "roman"
+kind = "display"
+note = "SIGNOR BLITZ: shaded extended"
+
+[ward1874-ad22-sunday]
+book = "ward1874"
+leaf = 34
+box = [390, 870, 1800, 150]
+classes = ["modern", "decorated"]
+style = "roman"
+kind = "display"
+note = "SUNDAY AND PUBLIC SCHOOLS: condensed capitals"
+
+[ward1874-ad22-societies]
+book = "ward1874"
+leaf = 34
+box = [690, 1050, 1170, 90]
+classes = ["grotesque"]
+style = "roman"
+kind = "display"
+note = "SOCIETIES, LODGES: light extended sans"
+
+[ward1874-ad22-private]
+book = "ward1874"
+leaf = 34
+box = [330, 1185, 1860, 105]
+classes = ["clarendon"]
+style = "roman"
+kind = "display"
+
+[ward1874-ad22-city]
+book = "ward1874"
+leaf = 34
+box = [600, 1320, 1380, 75]
+classes = ["grotesque"]
+style = "bold"
+kind = "display"
+
+[ward1874-ad22-apply]
+book = "ward1874"
+leaf = 34
+box = [330, 1434, 1860, 171]
+classes = ["grotesque"]
+style = "roman"
+kind = "body"
+note = "Apply at No. 503: sans serif text"
+
+[ward1874-ad22-chegaray]
+book = "ward1874"
+leaf = 34
+box = [390, 1725, 1800, 180]
+classes = ["decorated", "clarendon"]
+style = "roman"
+kind = "display"
+
+[ward1874-ad22-ladies]
+book = "ward1874"
+leaf = 34
+box = [330, 1950, 1860, 195]
+classes = ["slab", "clarendon", "grotesque"]
+style = "bold"
+kind = "display"
+
+[ward1874-ad22-established]
+book = "ward1874"
+leaf = 34
+box = [420, 2160, 1740, 75]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+note = "mixed with small capitals"
+
+[ward1874-ad22-thornley]
+book = "ward1874"
+leaf = 34
+box = [330, 2850, 1860, 195]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+note = "JOHN THORNLEY, extended light Didone"
+
+[ward1874-ad22-manufacturer]
+book = "ward1874"
+leaf = 34
+box = [630, 3270, 1320, 75]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+
+[ward1874-ad22-rubber]
+book = "ward1874"
+leaf = 34
+box = [510, 3405, 1500, 135]
+classes = ["decorated", "clarendon"]
+style = "roman"
+kind = "display"
+
+# ---- Ward 1874: the text -----------------------------------------------------------------------------------------------------------------
+[ward1874-p6-body]
+book = "ward1874"
+leaf = 18
+box = [300, 600, 1600, 700]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+note = "with a word in small capitals"
+
+[ward1874-p7-dialogue]
+book = "ward1874"
+leaf = 19
+box = [405, 555, 1845, 650]
+classes = ["modern"]
+style = "roman"
+kind = "body"
+note = "names in small capitals, one italic phrase"
+
+[ward1874-p7-directions]
+book = "ward1874"
+leaf = 19
+box = [405, 1710, 1845, 465]
+classes = ["modern"]
+style = "italic"
+kind = "italic"
+
+[ward1874-p7-song]
+book = "ward1874"
+leaf = 19
+box = [780, 2670, 1140, 150]
+classes = ["modern"]
+style = "roman"
+kind = "small"
+
+# ---- Collier 1828 -----------------------------------------------------------------------------------------------------------------------
+[collier1828-p9-chapter]
+book = "collier1828"
+leaf = 29
+box = [720, 1365, 465, 75]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+
+[collier1828-p9-origin]
+book = "collier1828"
+leaf = 29
+box = [510, 1800, 885, 75]
+classes = ["modern"]
+style = "roman"
+kind = "display"
+
+[collier1828-p9-footnotes]
+book = "collier1828"
+leaf = 29
+box = [225, 2580, 1455, 555]
+classes = ["modern"]
+style = "italic"
+kind = "footnote"
+note = "footnotes, half italic"
+
+[collier1828-p10-head]
+book = "collier1828"
+leaf = 30
+box = [1200, 840, 795, 60]
+classes = ["modern"]
+style = "roman"
+kind = "small"
+note = "running head in capitals"
+
+[collier1828-p10-body]
+book = "collier1828"
+leaf = 30
+box = [855, 975, 1470, 1185]
+classes = ["modern", "transitional"]
+style = "roman"
+kind = "body"
+
+[collier1828-p10-footnotes]
+book = "collier1828"
+leaf = 30
+box = [855, 2295, 1470, 840]
+classes = ["modern", "transitional"]
+style = "roman"
+kind = "footnote"

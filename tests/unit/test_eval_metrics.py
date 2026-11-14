@@ -1,5 +1,6 @@
 """stratamodels.evals.metrics: scoring outputs against references, and summaries and comparisons with the right direction."""
 
+import json
 import math
 
 import pytest
@@ -328,3 +329,67 @@ def test_cost_per_item():
     assert c.score({}, dict(cost_usd=1.0), "failed") is None and c.score({}, "text", None) is None
     assert c.score({}, dict(recorded=True), None) is None and c.score({}, dict(cli="agy"), None) is None
     assert (c.shape, c.better) == ("mean", "lower")
+
+
+# ---- fonts (role font-match) --------------------------------------------------------------------------------------------------------------
+def _font_item(tmp_path, reference):
+    from PIL import Image, ImageDraw
+
+    img = Image.new("L", (120, 60), 220)
+    ImageDraw.Draw(img).rectangle([20, 20, 60, 40], fill=40)
+    p = str(tmp_path / "scan.png")
+    img.save(p, dpi=(300, 300))
+    ocr = tmp_path / "scan.ocr.json"
+    ocr.write_text(json.dumps(dict(lines=[dict(words=[dict(text="x", box=[20, 20, 41, 21])])])))
+    return dict(id="b", input=dict(image=p, ocr=str(ocr)), reference=reference)
+
+
+def _render(tmp_path, name, box):
+    from PIL import Image, ImageDraw
+
+    img = Image.new("L", (120, 60), 255)
+    ImageDraw.Draw(img).rectangle(box, fill=0)
+    p = str(tmp_path / name)
+    img.save(p)
+    return p
+
+
+def test_ink_f1_measures_the_rendering_against_the_scan(tmp_path):
+    item = _font_item(tmp_path, {})
+    m = M.METRICS["ink_f1"]
+    assert m.score(item, dict(path=_render(tmp_path, "good.png", [20, 20, 60, 40])), None) == 1.0
+    assert m.score(item, dict(path=_render(tmp_path, "off.png", [40, 20, 80, 40])), None) < 0.7
+    assert m.score(item, None, "boom") == 0.0
+    assert m.score(item, dict(face="x"), None) is None
+    from PIL import Image
+
+    small = str(tmp_path / "small.png")
+    Image.new("L", (10, 10), 255).save(small)
+    assert m.score(item, dict(path=small), None) == 0.0  # a rendering of another size matches nothing
+    assert m.score(item, dict(path=str(tmp_path / "missing.png")), None) is None
+
+
+def test_font_class_style_face_and_size_metrics():
+    item = dict(reference=dict(face="old-standard", classes=["modern", "transitional"], style="italic", size_pt=10.0))
+    out = dict(
+        face="libre-bodoni",
+        faces=[dict(face="libre-bodoni"), dict(face="prata"), dict(face="old-standard")],
+        style="italic",
+        size_pt=11.0,
+    )
+    out["class"] = "modern"
+    assert M.METRICS["font_class"].score(item, out, None) is True
+    assert M.METRICS["font_close"].score(item, out, None) == 1.0
+    assert M.METRICS["font_close"].score(item, dict(out, **{"class": "old-style"}), None) == 0.5
+    assert M.METRICS["font_top1"].score(item, out, None) is False
+    assert M.METRICS["font_top3"].score(item, out, None) is True
+    assert M.METRICS["font_style"].score(item, out, None) is True
+    assert M.METRICS["font_size_err"].score(item, out, None) == pytest.approx(0.1)
+    for name in ("font_class", "font_top1", "font_style"):
+        assert M.METRICS[name].score(item, None, "failed") is False
+    assert M.METRICS["font_close"].score(item, None, "failed") == 0.0
+    assert M.METRICS["font_size_err"].score(item, None, "failed") is None
+    bare = dict(reference={})
+    for name in ("font_class", "font_close", "font_top1", "font_top3", "font_style", "font_size_err"):
+        assert M.METRICS[name].score(bare, out, None) is None
+    assert M.METRICS["font_class"].score(dict(reference=dict(**{"class": "modern"})), out, None) is True

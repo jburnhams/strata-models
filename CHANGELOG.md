@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Font identification: role `font-match`, a catalogue of period faces, and its eval (branch `claude/project-thread-01gj43`)**
+Jonathan: font identification is a skill of its own; a vision model suggests candidates, then an optimisation finds the exact face and settings. The page rebuild (strata-scan: real text in a matching face) consumes it.
+
+- `runtimes/fontfit.py` (**new**, role `font-match`, model `fontfit`, CPU): render-and-fit. Each line of a block is set from Tesseract's words in a candidate face; size, width, tracking and weight are searched to match the scan's ink, then each word keeps its best style (roman, italic, bold, small capitals, real or made from capitals). Answer: the face and class, a ranked list of the others, and per line the size in px and pt, hscale, tracking, weight and baseline, per word the style, and a rendering for judging. Modes: `fit` (candidates given, or every face screened), `measure` (a proposer's first face, no search), `naive` (Tinos stretched to Tesseract's boxes).
+- `runtimes/fonts.toml` (**new**): 57 open faces from Google Fonts in 10 classes, each with what historical type it is like; fetched once into `<models_dir>/fonts/`.
+- `evals/ink.py` (**new**, shared with the page rebuild): binarise (flatten, deskew, Sauvola, despeckle) and ink F1 with a tolerance, by box or mask.
+- Metrics `ink_f1`, `font_class`, `font_close`, `font_top1`, `font_top3`, `font_style`, `font_size_err`; preset `font-propose-v1`; spec `evals/specs/font-match.toml`; dataset builder `scripts/evals/font_match.py` and `font_match_trial.py` (trial before deploy).
+- First numbers (this machine, CPU only, no vision model yet): on 29 synthetic blocks `exhaustive` names the exact face 83 % of the time (top 3: 90 %), size within 5 %; on 38 real blocks ink F1 0.84 against 0.58 for `naive`, but the class is right on only 26 % (heavy display faces fit blurred print too well): what a vision model's shortlist should fix.
+
 **Cloud runtimes send a schema without its value bounds (branch `claude/project-thread-gl1u9l`)**
 The describe-photos stand-outs failed on every Claude model (400: "For 'integer' type, property 'minimum' is not supported") and on Gemini (400: "Request contains an invalid argument"): photo-describe-v1's schema bounds its integers and arrays, which llama.cpp's grammar takes and the vendors' structured outputs do not. `cloud.portable` drops `minimum`, `maximum`, `exclusive*`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `$schema` and a `minItems` above 1 before Claude, Gemini or NIM sees the schema; the shape (types, properties, required, enum, items, additionalProperties) stays enforced, and the bounds are in the preset's prompt as before.
 
