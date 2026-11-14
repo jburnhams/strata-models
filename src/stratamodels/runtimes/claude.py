@@ -48,6 +48,24 @@ def _usage(u):
     )
 
 
+def _grammar_too_large(e, oc):
+    return (
+        "format" in oc
+        and getattr(e, "status_code", None) == 400
+        and "grammar is too large" in str(getattr(e, "message", e)).lower()
+    )
+
+
+def schema_prompt(schema):
+    """The instruction that stands in for structured output when Claude cannot compile the schema."""
+    import json
+
+    return (
+        "Answer with one JSON object, and nothing else (no code fence, no prose), that matches this JSON Schema:\n"
+        + json.dumps(schema)
+    )
+
+
 def run(handle, params):
     import anthropic
 
@@ -62,36 +80,45 @@ def run(handle, params):
     if job["schema"]:
         oc["format"] = {"type": "json_schema", "schema": cloud.portable(job["schema"])}
     log = dict(cloud.logged(job), effort=oc.get("effort"))
-    try:
-        n_in = client.messages.count_tokens(**req).input_tokens
-    except anthropic.APIError as e:
-        raise RunError(keys.redact(f"Claude API refused to count the request: {e}"))
-    ticket = spend.reserve(PROVIDER, spend.worst(handle["price"], n_in, job["max_tokens"]))
-    t0 = time.perf_counter()
-    try:
-        r = client.messages.create(max_tokens=job["max_tokens"], **req, **({"output_config": oc} if oc else {}))
-    except anthropic.APIStatusError as e:  # a refused request (400, 401, 429, 5xx) is not billed
-        spend.record(
-            ticket,
-            handle["model"],
-            ok=False,
-            error=keys.redact(str(e))[:2000],
-            seconds=round(time.perf_counter() - t0, 2),
-            model_key=handle["key"],
-            request=log,
-        )
-        raise RunError(keys.redact(f"Claude API {e.status_code}: {e.message}"))
-    except anthropic.APIConnectionError as e:
-        spend.record(
-            ticket,
-            handle["model"],
-            ok=False,
-            error=keys.redact(str(e))[:2000],
-            seconds=round(time.perf_counter() - t0, 2),
-            model_key=handle["key"],
-            request=log,
-        )
-        raise RunError(keys.redact(f"could not reach the Claude API: {e}"))
+    for attempt in (1, 2):
+        try:
+            n_in = client.messages.count_tokens(**req).input_tokens
+        except anthropic.APIError as e:
+            raise RunError(keys.redact(f"Claude API refused to count the request: {e}"))
+        ticket = spend.reserve(PROVIDER, spend.worst(handle["price"], n_in, job["max_tokens"]))
+        t0 = time.perf_counter()
+        try:
+            r = client.messages.create(max_tokens=job["max_tokens"], **req, **({"output_config": oc} if oc else {}))
+            break
+        except anthropic.APIStatusError as e:  # a refused request (400, 401, 429, 5xx) is not billed
+            spend.record(
+                ticket,
+                handle["model"],
+                ok=False,
+                error=keys.redact(str(e))[:2000],
+                seconds=round(time.perf_counter() - t0, 2),
+                model_key=handle["key"],
+                request=log,
+            )
+            if attempt == 1 and _grammar_too_large(e, oc):
+                # a schema too big for Claude's constrained decoding (photo-describe-v1: "The compiled grammar is too large"): ask for
+                # the same JSON in the prompt instead, unconstrained; the caller validates what comes back as it does for every runtime
+                oc = {k: v for k, v in oc.items() if k != "format"}
+                req["system"] = ((req.get("system") or "") + "\n\n" + schema_prompt(job["schema"])).strip()
+                log = dict(log, schema_in_prompt=True)
+                continue
+            raise RunError(keys.redact(f"Claude API {e.status_code}: {e.message}"))
+        except anthropic.APIConnectionError as e:
+            spend.record(
+                ticket,
+                handle["model"],
+                ok=False,
+                error=keys.redact(str(e))[:2000],
+                seconds=round(time.perf_counter() - t0, 2),
+                model_key=handle["key"],
+                request=log,
+            )
+            raise RunError(keys.redact(f"could not reach the Claude API: {e}"))
     seconds = round(time.perf_counter() - t0, 2)
     u = _usage(r.usage)
     usd = spend.cost(handle["price"], **u)

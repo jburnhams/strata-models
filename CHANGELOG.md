@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Claude asks for JSON in the prompt when a schema is too large for structured output (branch `claude/project-thread-gl1u9l`)**
+With its bounds stripped (#60), photo-describe-v1 still fails on every Claude model: 400 "The compiled grammar is too large". On that error alone (no charge), `claude-api` retries once without `output_config.format`, with the schema in the system prompt. The ledger marks the call `schema_in_prompt`, and the answer is parsed and validated as before. `cloud.answer` now drops a Markdown code fence around a JSON answer.
+
 **OCR presets v2 (plain text, no Markdown) and preprocessing under Haiku's correction pass (branch `claude/project-thread-gl1u9l`)**
 On ocr-hard, the cloud readers' cer_exact was mostly formatting rather than misreads: Haiku wrapped italics in asterisks, and Flash-Lite added Markdown table rules. `ocr-read-v2` and `ocr-correct-v2` are v1 plus "as plain text: no Markdown". They are new presets, not edits, because outputs are keyed by preset name and the v1 results must stay comparable. ocr-hard gains v2 runs of haiku-read, flash-lite-read and tesseract-haiku-fix, every Tesseract preprocessing setting from ocr-pages on its own, and six of them under Haiku's v2 correction pass, to see how much the cleaning still matters once Haiku corrects the text.
 

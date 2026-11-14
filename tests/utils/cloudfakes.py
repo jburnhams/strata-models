@@ -55,7 +55,10 @@ class FakeMessages:
 
     def create(self, **kw):
         self.created.append(kw)
-        if self.error is not None:
+        if isinstance(self.error, list):  # a script: each call raises the next error, then the reply once they run out
+            if self.error:
+                raise self.error.pop(0)
+        elif self.error is not None:
             raise self.error
         return self.reply
 

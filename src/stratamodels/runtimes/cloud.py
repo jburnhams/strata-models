@@ -15,6 +15,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -178,8 +179,11 @@ def answer(job, text):
     """{text, json?}: the JSON parsed when a schema was asked for."""
     out = dict(text=text)
     if job["schema"]:
+        body = re.sub(
+            r"^\s*```(?:json)?\s*|\s*```\s*$", "", text
+        )  # a model asked for JSON in the prompt may still fence it
         try:
-            out["json"] = json.loads(text)
+            out["json"] = json.loads(body)
         except ValueError:
             pass
     return out

@@ -220,6 +220,35 @@ def test_claude_refusal_and_errors_are_recorded(ledger):  # noqa: F811
         claude.run(h, dict(prompt="hi"))
 
 
+def test_claude_asks_for_json_in_the_prompt_when_the_schema_is_too_large_to_compile(ledger):  # noqa: F811
+    settings.save(dict(claude_budget_usd=1.0))
+    req = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    big = anthropic.BadRequestError(
+        "The compiled grammar is too large. Simplify your tool schemas",
+        response=httpx2.Response(400, request=req),
+        body=None,
+    )
+    schema = {"type": "object", "properties": {"a": {"type": "integer"}}}
+    c = FakeAnthropic(error=[big], reply=claude_reply('```json\n{"a": 1}\n```'))
+    h = claude.load(model(model="claude-haiku-5-5", price=PRICE), "/m", client=c)
+    out = claude.run(h, dict(prompt="hi", system="s", schema=schema, max_tokens=100))
+    assert out["json"] == {"a": 1}  # the fence a free answer may carry is dropped
+    first, second = c.messages.created
+    assert first["output_config"]["format"]["schema"] == schema and "output_config" not in second
+    assert (
+        second["system"].startswith("s\n\nAnswer with one JSON object")
+        and '"a": {"type": "integer"}' in second["system"]
+    )
+    assert [r["ok"] for r in ledger.api_log()][::-1] == [False, True]
+    assert ledger.api_call(ledger.api_log()[0]["id"])["request"]["schema_in_prompt"] is True
+    other = anthropic.BadRequestError("bad image", response=httpx2.Response(400, request=req), body=None)
+    c = FakeAnthropic(error=[other], reply=claude_reply("{}"))
+    h = claude.load(model(model="claude-haiku-5-5", price=PRICE), "/m", client=c)
+    with pytest.raises(RunError, match="400: bad image"):  # any other 400 is not retried
+        claude.run(h, dict(prompt="hi", schema=schema))
+    assert len(c.messages.created) == 1
+
+
 # ---- gemini-api --------------------------------------------------------------------------------------------------------------------------
 
 G = dict(input=1.0, output=10.0)
