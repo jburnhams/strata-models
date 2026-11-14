@@ -88,3 +88,61 @@ def test_a_split_or_merged_block_matches_nothing_even_at_iou_one_half_or_more(cu
     assert M.match_boxes(halves, whole) == []  # merged
     speck = [block([0, 0, 100, 98]), block([10, 98, 5, 2])]  # a sliver beside the block is not a split
     assert M.match_boxes(whole, speck) == [(0, 0)]
+
+
+# ---- page_ink_f1: the rebuilt page's raster against the scan, within the reference text blocks ---------------------------------------------
+def _scan(tmp_path, name, bars, size=(400, 300), dpi=200):
+    from PIL import Image, ImageDraw
+
+    im = Image.new("L", size, 235)  # paper
+    d = ImageDraw.Draw(im)
+    for x0, y0, x1, y1 in bars:
+        d.rectangle([x0, y0, x1, y1], fill=20)
+    p = str(tmp_path / name)
+    im.save(p, dpi=(dpi, dpi))
+    return p
+
+
+def test_page_ink_f1_scores_the_raster_against_the_print_in_the_text_blocks(tmp_path):
+    text = [(50, 50, 350, 60), (50, 80, 350, 90)]
+    stamp = (300, 200, 380, 280)  # ink outside every text block (a library stamp): no candidate is held to it
+    scan = _scan(tmp_path, "scan.png", [*text, stamp])
+    item = dict(
+        input=dict(image=scan),
+        reference=dict(page=dict(width=400, height=300, dpi=200, blocks=[dict(box=[50, 50, 301, 41])])),
+    )
+    m = M.METRICS["page_ink_f1"]
+    assert m.score(item, dict(png=_scan(tmp_path, "same.png", text)), None) == pytest.approx(1.0)
+    assert m.score(item, dict(png=_scan(tmp_path, "low.png", [(50, 64, 350, 74), (50, 94, 350, 104)])), None) < 0.5
+    assert m.score(item, dict(png=_scan(tmp_path, "other.png", text, size=(401, 300))), None) == 0.0
+    assert m.score(item, None, "boom") == 0.0
+    assert m.score(item, dict(pdf="x.pdf"), None) is None  # drawn without a raster
+    assert m.score(item, dict(png=str(tmp_path / "gone.png")), None) is None
+    assert m.score(dict(input=dict(image=scan), reference={}), dict(png=scan), None) is None
+
+
+def test_the_labelled_pages_are_drawable_and_consistent():
+    """scripts/evals/page_layout/pages.toml: every page a valid description whose blocks and figures each match only themselves (no label
+    is split or merged by its neighbours, so a perfect reader scores 1)."""
+    import os
+    import sys
+    import tomllib
+
+    from strata_python.pages import Page
+
+    here = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "evals")
+    with open(os.path.join(here, "page_layout", "pages.toml"), "rb") as f:
+        pages = tomllib.load(f)
+    sys.path.insert(0, here)
+    try:
+        import page_layout as PL
+    finally:
+        sys.path.remove(here)
+    assert len(pages) == 10
+    for pid, p in pages.items():
+        ref = PL.reference(p, 2700, 4300, 500)
+        Page.from_dict(ref)  # roles and kinds are the renderer's
+        for part in ("blocks", "figures"):
+            parts = ref[part]
+            assert M.match_boxes(parts, parts) == [(i, i) for i in range(len(parts))], pid
+        assert M.METRICS["block_f1"].score(dict(reference=dict(page=ref)), dict(page=ref), None) == 1.0

@@ -1,0 +1,72 @@
+name = "page-layout"
+question = "Can a vision model read a scanned book page's layout (its text blocks, their roles and reading order, its ornaments) better than Tesseract's blocks, which is all a rebuilt page has today?"
+role = "page-build"
+dataset = "page-layout"          # scripts/evals/page_layout.py: 10 whole pages of Ward 1874 and Collier 1828, layout labelled by eye
+metrics = ["block_f1", "role_acc", "order_tau", "figure_f1", "page_ink_f1", "latency_s", "cost_usd", "failed"]
+judge = true                     # blind: which rebuilt page looks more like the scan
+similarity = "image"
+
+[decision]
+primary = "block_f1"
+baseline = "tesseract"
+min_effect = 0.05
+guards = { failed = 1.0 }
+# Tesseract has no roles (every block is body) and finds no figures, so role_acc and figure_f1 measure what a reader adds over it; block_f1
+# and order_tau compare the segmentation itself. page_ink_f1 is context here: a vision model gives no line boxes, so its lines are spread
+# evenly over each block and its ink lands worse than Tesseract's measured lines even with a better layout. The rebuild that strata-scan
+# wants combines them (a model's blocks and roles, Tesseract's lines), which is the next eval once a layout reader wins this one.
+
+[[candidates]]
+name = "tesseract"
+model = "pagebuild"
+note = "the item's Tesseract reading (psm 3) drawn as it is: one body block per Tesseract block, lines in Times at their boxes"
+
+[[candidates]]
+name = "qwen-layout"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "qwen3.5-9b-vl"
+params = { preset = "page-layout-v1", max_tokens = 8192, temperature = 0.0 }
+input = "{image}"
+send = "image"
+into = "layout"
+
+[[candidates]]
+name = "gemma-layout"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemma-4-12b-vl"
+params = { preset = "page-layout-v1", max_tokens = 8192, temperature = 0.0 }
+input = "{image}"
+send = "image"
+into = "layout"
+
+[[candidates]]
+name = "flash-layout"
+model = "pagebuild"
+note = "the free key first; Flash thinks before it answers, hence the token budget"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "gemini-3.8-flash-api"
+params = { preset = "page-layout-v1", max_tokens = 16384 }
+input = "{image}"
+send = "image"
+into = "layout"
+
+[[candidates]]
+name = "haiku-layout"
+model = "pagebuild"
+note = "about a cent a page"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-layout-v1", max_tokens = 8192 }
+input = "{image}"
+send = "image"
+into = "layout"

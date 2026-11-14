@@ -125,6 +125,15 @@ The reference is the cleaned page as a description (`reference.page`, boxes in s
 blocks found) and `order_tau` (Kendall's tau of the reading order of the blocks found); text by `cer_exact` on the text read back from the
 PDF. Separate evals per stage (layout, text, style, figures, whole page): see the tracking issue jburnhams/strata-models#67.
 
+`page-layout` (`evals/specs/page-layout.toml`, built by `scripts/evals/page_layout.py`) is the first of these evals: ten whole pages of the
+two books (Ward 1874's title page, dialogue and two pages of advertisements; Collier 1828's chapter openings, prose, footnotes and a sonnet)
+with their layout labelled by eye in `scripts/evals/page_layout/pages.toml` (86 blocks, 12 ornaments and rules; the conventions are at the top
+of that file and in preset `page-layout-v1`, so a reader is told the same rules it is scored by). Each item's input is the scan (`image`)
+and Tesseract's reading of it (`ocr`, psm 3, as strata-scan reads pages). The baseline draws the `ocr`; each vision-model candidate is a
+pipeline whose stage answers preset `page-layout-v1` (schema-checked JSON: blocks in reading order with boxes in thousandths, roles and
+lines; figures) `into = "layout"`, which page-build draws in the picture's pixels. `page_ink_f1` compares page-build's raster with the scan
+inside the reference text blocks (borders, stamps and show-through count for nobody).
+
 ## Files in candidate params
 A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS
 candidates, for one), so a spec in this public repository names no machine's paths. `{data}` is filled in when each job is made, so the
