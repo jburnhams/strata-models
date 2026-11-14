@@ -1,0 +1,351 @@
+# The routing catalogue: every backend a job could go to (this machine's GPU and CPU, the subscription CLIs, the API keys), each model it
+# offers mapped to roles, power (tier) and cost, so stratamodels.routing can compare local and cloud like with like. The data folder's
+# catalogue.toml is merged over this one, table by table (a tariff, a new measured quota, a tier changed after an eval).
+#
+# Not a second registry: models.toml says what this service runs and how (runtime, VRAM, options, and an API model's `options.price`); this
+# file adds what routing needs and the registry does not know. Local models come from the registry (their GPU seconds from the job history);
+# a cloud model the registry does not serve yet (a subscription model only recorded for evals) is an `offers` entry here.
+#
+# Backends:
+#   kind        local | subscription | api
+#   order       which to spend first when quality is equal (lower first). Jonathan, 2026-11-14: the GPU first, then the free but limited ones
+#               (agy, NIM, the free Gemini key) "as much as you like", then codex "fairly sparingly", then the paid keys (Gemini paid only as a
+#               fallback after agy; Claude has $100 until 2026-12-08).
+#   use         freely | sparingly | fallback | budget: Jonathan's words for it, shown with every option
+#   min_left    keep this share of the allowance in reserve: below it the backend is not picked (subscriptions: Jonathan's 10 % rule)
+#   allowance   how much is left is read from: agy | codex (their own CLIs, evals.cloud.USAGE) or spend:<provider> (stratamodels.spend, the
+#               API keys' own tracking); none: not tracked
+#   leaves      true: the inputs (photos, audio) leave this machine. A private job never goes there.
+#   plan_usd_month  what the plan costs, to price a call's share of it (usd_equiv): a subscription's marginal cost is nothing until it runs out
+#   watts, usd_per_kwh  the local lanes' electricity, for the same reason. Set usd_per_kwh to the real tariff in the data folder's copy.
+#   fallback_for  only picked when no option of the same family is left on that backend
+#
+# Offers (cloud models; keyed by anything, matched to a registry model of the same backend by `model`, the vendor's id, once one exists):
+#   backend, model, roles, family (the same model on two backends: claude-sonnet-5-5 on agy and on the API), tier, price (USD per million
+#   tokens {in, out}; the registry's options.price wins), quota (share of a bucket per call, measured), evals (registry keys whose eval
+#   results stand for this model: the recorded outputs), images/audio (takes them as input), note.
+#
+# Tiers: 5 frontier, 4 strong, 3 good, 2 the best that fits this GPU, 1 small. A first guess from the vendor's positioning; an eval verdict
+# outranks it (routing reads the eval summaries). A local model with no tier (a detector, a vocoder) is compared on evals and cost only.
+
+[defaults]
+min_left = 0.10
+# Tokens of a typical call per role, to price an API call before it is made (the API keys' spend tracking records the real ones).
+tokens = { text = { in = 1500, out = 500 }, vision-language = { in = 2500, out = 500 }, judge-text = { in = 3000, out = 300 }, judge-vision = { in = 4000, out = 300 }, ocr = { in = 2500, out = 1200 }, transcribe = { in = 2000, out = 600 } }
+
+[backends.local-gpu]
+kind = "local"
+name = "omarchy RTX 3060 12 GB (the GPU lane)"
+order = 0
+use = "freely"
+leaves = false
+watts = 170
+usd_per_kwh = 0.30
+note = "Free but one card: a job waits for VRAM (scheduler gpu_jobs). ~11 GB usable, the card also drives the desktop."
+
+[backends.local-cpu]
+kind = "local"
+name = "omarchy CPU (the CPU lane: models with vram_gb = 0)"
+order = 0
+use = "freely"
+leaves = false
+watts = 65
+usd_per_kwh = 0.30
+
+[backends.agy]
+kind = "subscription"
+name = "Google AI Pro through Antigravity CLI (agy -p)"
+order = 1
+use = "freely"
+allowance = "agy"
+leaves = true
+plan_usd_month = 20.0
+note = "Official binary only, never proxy its sign-in (Google bans accounts for it). Buckets: Gemini models, Gemini 4 Argon (its own), Claude and GPT models; each a 5 h and a weekly window. Its picture model has a hidden quota (~14 per 5 h) that /usage does not show."
+
+[backends.nvidia-nim]
+kind = "api"
+name = "NVIDIA NIM API key (integrate.api.nvidia.com)"
+order = 1
+use = "freely"
+allowance = "spend:nim"
+leaves = true
+note = "Free but rate limited (Jonathan: use as much as you like). Exposes no credit figure: its budget is counted in requests."
+
+[backends.gemini-free]
+kind = "api"
+name = "Google AI Studio key, free tier"
+order = 1
+use = "freely"
+allowance = "spend:gemini-free"
+leaves = true
+fallback_for = "agy"
+note = "Free but rate limited; agy first for the same model, then this, then the paid key. On the free tier Google may use the inputs to improve its models: keep private material off it."
+
+[backends.codex]
+kind = "subscription"
+name = "ChatGPT Plus through Codex CLI (codex exec)"
+order = 2
+use = "sparingly"
+allowance = "codex"
+min_left = 0.30
+leaves = true
+plan_usd_month = 20.0
+note = "Limited (Jonathan, 2026-11-14: fairly sparingly for now): a larger reserve than agy. Windows: 5 h and weekly."
+
+[backends.gemini-api]
+kind = "api"
+name = "Google AI Studio key, paid ($10 a month, rolls over on the 1st)"
+order = 3
+use = "fallback"
+allowance = "spend:gemini"
+leaves = true
+fallback_for = "agy"
+
+[backends.claude-api]
+kind = "api"
+name = "Claude API key ($100 until 2026-12-08, then monthly)"
+order = 3
+use = "budget"
+allowance = "spend:claude"
+leaves = true
+note = "Watched closely (Jonathan): the cheapest Claude that passes the eval, and agy's Claude buckets first."
+
+# ---- local models: tiers only (the rest is the registry) ---------------------------------------------------------------------------------
+[local]
+"qwen3.5-9b-vl" = { tier = 2 }
+"gemma-4-12b-vl" = { tier = 2 }
+"gemma-4-26b-a4b-vl" = { tier = 2 }
+"qwen3.8-27b-vl" = { tier = 2, note = "the largest that fits (IQ3_XXS, 11 GB): the whole card" }
+"flux3-klein-pup" = { tier = 1 }
+"gemma-4-e4b" = { tier = 1 }
+"qwen3-omni-30b-a3b" = { tier = 2 }
+
+# ---- agy (Google AI Pro) ------------------------------------------------------------------------------------------------------------------
+# Measured 2026-11-12 (record_cloud.py, the describe-photos and media evals): quota is the share of the bucket's weekly window one call takes.
+[offers."agy-gemini-3.8-flash"]
+backend = "agy"
+model = "gemini-3.8-flash-low"
+family = "gemini-3.8-flash"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr", "transcribe"]
+tier = 4
+images = true
+audio = true
+quota = { bucket = "Gemini Models", per_call = 0.002 }
+evals = ["gemini-3.8-flash-photos-v1", "gemini-3.8-flash-transcribe-en-v1", "gemini-3.8-flash-transcribe-race-v1"]
+note = "describe-photos: adopt over qwen3.5-9b (+3.3 desc_fields, 2026-11-12). Transcription rejected (slow, ~57 % WER on race audio)."
+
+[offers."agy-gemini-4-argon"]
+backend = "agy"
+model = "gemini-4-argon-medium"
+family = "gemini-4-argon"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 5
+images = true
+quota = { bucket = "Gemini 4 Argon", per_call = 0.003 }
+evals = ["gemini-4-argon-photos-v1"]
+
+[offers."agy-claude-sonnet-5-5"]
+backend = "agy"
+model = "claude-sonnet-5-5-low"
+family = "claude-sonnet-5-5"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 4
+images = true
+quota = { bucket = "Claude and GPT models", per_call = 0.014 }
+evals = ["claude-sonnet-5.5-agy-photos-v1"]
+note = "2.9 % of the 5 h window per picture."
+
+[offers."agy-claude-opus-5-5"]
+backend = "agy"
+model = "claude-opus-5-5-low"
+family = "claude-opus-5-5"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 5
+images = true
+quota = { bucket = "Claude and GPT models", per_call = 0.05 }
+evals = ["claude-opus-5.5-agy-photos-v1"]
+note = "per_call is a guess (\"far more than Sonnet\", 2026-11-12): measure it."
+
+[offers."agy-gpt-oss-120b"]
+backend = "agy"
+model = "gpt-oss-120b"
+family = "gpt-oss-120b"
+roles = ["text", "judge-text"]
+tier = 3
+quota = { bucket = "Claude and GPT models", per_call = 0.005 }
+note = "Cannot see pictures. per_call unmeasured."
+
+[offers."agy-gemini-flash-image"]
+backend = "agy"
+model = "gemini-3.1-flash-image"
+family = "gemini-3.1-flash-image"
+roles = ["image-generate"]
+tier = 4
+quota = { bucket = "image (hidden)", per_call = 0.07, window = "5h" }
+evals = ["gemini-3.8-flash-image-v1"]
+note = "~14 pictures per 5 h, not shown by /usage: routing cannot see what is left."
+
+# ---- codex (ChatGPT Plus) -------------------------------------------------------------------------------------------------------------------
+[offers."codex-gpt-6.1-sol"]
+backend = "codex"
+model = "gpt-6.1-sol"
+family = "gpt-6.1-sol"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 5
+images = true
+quota = { bucket = "codex", per_call = 0.02 }
+evals = ["gpt-6.1-sol-photos-v1"]
+note = "Slow (its own describe-photos-slow eval). per_call unmeasured: Codex shows usage only through its app server."
+
+[offers."codex-gpt-6.1-terra"]
+backend = "codex"
+model = "gpt-6.1-terra"
+family = "gpt-6.1-terra"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 4
+images = true
+quota = { bucket = "codex", per_call = 0.01 }
+evals = ["gpt-6.1-terra-photos-v1"]
+
+[offers."codex-gpt-6-astra"]
+backend = "codex"
+model = "gpt-6-astra"
+family = "gpt-6-astra"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 4
+images = true
+quota = { bucket = "codex", per_call = 0.01 }
+evals = ["gpt-6-astra-photos-v1"]
+
+[offers."codex-gpt-6-luna"]
+backend = "codex"
+model = "gpt-6-luna"
+family = "gpt-6-luna"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 3
+images = true
+quota = { bucket = "codex", per_call = 0.005 }
+evals = ["gpt-6-luna-photos-v1"]
+
+[offers."codex-image"]
+backend = "codex"
+model = "gpt-image-2"
+family = "gpt-image-2"
+roles = ["image-generate"]
+tier = 4
+quota = { bucket = "codex", per_call = 0.007, window = "5h" }
+evals = ["gpt-image-codex-image-v1"]
+
+# ---- Claude API -----------------------------------------------------------------------------------------------------------------------------
+# Prices: Anthropic's list, cached 2026-11-03 (claude-api skill); the registry's options.price wins once the API models are registered.
+[offers."claude-haiku-5-5"]
+backend = "claude-api"
+model = "claude-haiku-5-5"
+family = "claude-haiku-5-5"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]
+tier = 3
+images = true
+price = { in = 0.10, out = 0.50 }
+note = "Prompts over 100K tokens cost $0.50 / $2.50."
+
+[offers."claude-sonnet-5-5"]
+backend = "claude-api"
+model = "claude-sonnet-5-5"
+family = "claude-sonnet-5-5"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]
+tier = 4
+images = true
+price = { in = 2.00, out = 10.00 }
+
+[offers."claude-opus-5-5"]
+backend = "claude-api"
+model = "claude-opus-5-5"
+family = "claude-opus-5-5"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]
+tier = 5
+images = true
+price = { in = 4.00, out = 20.00 }
+
+# ---- NVIDIA NIM ---------------------------------------------------------------------------------------------------------------------------
+# Ids from the public model list (GET integrate.api.nvidia.com/v1/models, 2026-11-14: 83 models); roles and tiers guessed from the names and
+# model cards, not measured. Free: price 0, a request each.
+[offers."nim-kimi-k2.6"]
+backend = "nvidia-nim"
+model = "moonshotai/kimi-k2.6"
+family = "kimi-k2.6"
+roles = ["text", "judge-text"]
+tier = 4
+price = { in = 0.0, out = 0.0 }
+
+[offers."nim-deepseek-v4.1-flash"]
+backend = "nvidia-nim"
+model = "deepseek-ai/deepseek-v4.1-flash"
+family = "deepseek-v4.1-flash"
+roles = ["text", "judge-text"]
+tier = 4
+price = { in = 0.0, out = 0.0 }
+
+[offers."nim-nemotron-3-ultra"]
+backend = "nvidia-nim"
+model = "nvidia/nemotron-3-ultra-550b-a55b"
+family = "nemotron-3-ultra"
+roles = ["text", "judge-text"]
+tier = 4
+price = { in = 0.0, out = 0.0 }
+
+[offers."nim-mistral-large-4"]
+backend = "nvidia-nim"
+model = "mistralai/mistral-large-4-1t-a52b"
+family = "mistral-large-4"
+roles = ["text", "judge-text"]
+tier = 4
+price = { in = 0.0, out = 0.0 }
+
+[offers."nim-nemotron-3.5-super-vl"]
+backend = "nvidia-nim"
+model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+family = "nemotron-3.5-super-vl"
+roles = ["text", "vision-language", "judge-vision", "ocr"]
+tier = 3
+images = true
+price = { in = 0.0, out = 0.0 }
+
+[offers."nim-gemma-4-31b"]
+backend = "nvidia-nim"
+model = "google/gemma-4-31b-it"
+family = "gemma-4-31b"
+roles = ["text", "vision-language", "judge-text", "judge-vision"]
+tier = 3
+images = true
+price = { in = 0.0, out = 0.0 }
+note = "A Gemma 4 bigger than fits here (gemma-4-26b-a4b is the local one)."
+
+[offers."nim-nemotron-parse"]
+backend = "nvidia-nim"
+model = "nvidia/nemotron-parse-2.0"
+family = "nemotron-parse-2.0"
+roles = ["ocr"]
+images = true
+price = { in = 0.0, out = 0.0 }
+note = "Document parsing with boxes: an eval candidate against tesseract-eng."
+
+# ---- Google AI Studio keys -----------------------------------------------------------------------------------------------------------------
+[offers."gemini-free-3.8-flash"]
+backend = "gemini-free"
+model = "gemini-3.8-flash"
+family = "gemini-3.8-flash"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr", "transcribe"]
+tier = 4
+images = true
+audio = true
+price = { in = 0.0, out = 0.0 }
+
+[offers."gemini-api-3.8-flash"]
+backend = "gemini-api"
+model = "gemini-3.8-flash"
+family = "gemini-3.8-flash"
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr", "transcribe"]
+tier = 4
+images = true
+audio = true
+note = "Price from the registry (options.price) once the gemini-api models are registered; unpriced until then."

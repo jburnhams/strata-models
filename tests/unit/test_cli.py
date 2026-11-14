@@ -222,3 +222,129 @@ def test_eval_judge_command(capsys, monkeypatch, tmp_path, setup):
         cli.main(["eval", "judge", "fake-asr-j", "--judge", "flash"]) == 0
     )  # a cloud judge needs no service; no pairs judged yet
     assert '"flash": {"judged": 0' in capsys.readouterr().out
+
+
+def test_catalogue_lists_backends_and_their_models(capsys, tmp_path, monkeypatch):
+    assert cli.main(["catalogue"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "agy (subscription, order 1, use freely)" in out
+        and "claude-opus-5-5" in out
+        and "$4/$20 per Mtok" in out
+        and "0.2% of Gemini Models a call" in out
+    )
+    assert (
+        cli.main(["catalogue", "--json"]) == 0 and json.loads(capsys.readouterr().out)["backends"][0]["kind"] == "local"
+    )
+    from stratamodels import routing
+
+    monkeypatch.setattr(
+        routing.Catalogue, "load", classmethod(lambda cls: (_ for _ in ()).throw(routing.CatalogueError("broken")))
+    )
+    with pytest.raises(SystemExit, match="broken"):
+        cli.main(["catalogue"])
+
+
+def test_route_asks_the_service_and_prints_the_ranking(capsys, monkeypatch):
+    import io
+    import urllib.error
+    import urllib.request
+
+    plan = dict(
+        role="vision-language",
+        goal="best",
+        private=False,
+        pick="qwen",
+        why="qwen (GPU lane, tier 2)",
+        would_pick="agy-flash",
+        would_why="agy-flash: only recorded for evals",
+        options=[
+            dict(
+                key="qwen",
+                backend="local-gpu",
+                kind="local",
+                tier=2,
+                eligible=True,
+                reasons=[],
+                evals=dict(verdict="baseline"),
+                cost=dict(lane="gpu", run_s=4.2),
+                allowance=None,
+            ),
+            dict(
+                key="gemma",
+                backend="local-gpu",
+                kind="local",
+                tier=2,
+                eligible=True,
+                reasons=[],
+                evals=dict(verdict=None),
+                cost=dict(lane="gpu", run_s=None),
+                allowance=None,
+            ),
+            dict(
+                key="agy-flash",
+                backend="agy",
+                kind="subscription",
+                tier=4,
+                eligible=False,
+                reasons=["only recorded"],
+                evals=dict(verdict="better"),
+                cost=dict(lane="cpu", per_call=0.002, bucket="Gemini"),
+                allowance=dict(left=0.4),
+            ),
+            dict(
+                key="haiku",
+                backend="claude-api",
+                kind="api",
+                tier=3,
+                eligible=False,
+                reasons=["x"],
+                evals=dict(verdict=None),
+                cost=dict(lane="cpu", usd_per_call=0.0007),
+                allowance=None,
+            ),
+            dict(
+                key="gem",
+                backend="gemini-api",
+                kind="api",
+                tier=4,
+                eligible=False,
+                reasons=["y"],
+                evals=dict(verdict=None),
+                cost=dict(lane="cpu"),
+                allowance=None,
+            ),
+        ],
+    )
+    seen = []
+
+    def urlopen(url, timeout):
+        seen.append(url)
+        return Resp(plan)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert cli.main(["route", "vision-language", "--goal", "best", "--min-tier", "3", "--no-allowance"]) == 0
+    out = capsys.readouterr().out
+    assert seen[-1].endswith("/api/route/vision-language?goal=best&private=false&allowance=false&min_tier=3")
+    assert (
+        "vision-language (best): qwen (GPU lane, tier 2)" in out
+        and "if it could be called here: agy-flash: only recorded" in out
+    )
+    assert (
+        "* qwen" in out
+        and "4.2 s on the GPU" in out
+        and "GPU, not run yet" in out
+        and "0.2% of Gemini" in out
+        and "40% left" in out
+    )
+    assert "$0.0007" in out and "unpriced" in out and "(only recorded)" in out
+    assert (
+        cli.main(["route", "vision-language", "--json"]) == 0 and json.loads(capsys.readouterr().out)["pick"] == "qwen"
+    )
+
+    def refuse(url, timeout):
+        raise urllib.error.HTTPError(url, 404, "nf", {}, io.BytesIO(b'{"detail": "no role \'x\'"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    with pytest.raises(SystemExit, match="404: no role 'x'"):
+        cli.main(["route", "x"])
