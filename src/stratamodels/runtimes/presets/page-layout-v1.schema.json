@@ -1,0 +1,77 @@
+{
+ "type": "object",
+ "properties": {
+  "blocks": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "box": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      }
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "heading",
+       "body",
+       "footnote",
+       "running-head",
+       "folio",
+       "caption",
+       "other"
+      ]
+     },
+     "lines": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "box",
+     "role",
+     "lines"
+    ],
+    "additionalProperties": false
+   }
+  },
+  "figures": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "box": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      }
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "figure",
+       "engraving",
+       "ornament",
+       "initial",
+       "rule"
+      ]
+     }
+    },
+    "required": [
+     "box",
+     "kind"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "blocks",
+  "figures"
+ ],
+ "additionalProperties": false
+}

@@ -118,6 +118,25 @@ vision-language model read the same thing; `cer` decides, `wer` is context, and 
   pages nobody has typed.
 Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
 
+## Page rebuild: how close a rebuilt PDF gets to the cleaned page
+The `page-build` role (`runtimes/pagebuild.py`, CPU) draws a page description (strata-python's `strata_python.pages`, the renderer
+strata-scan prints with) as a PDF with real text, plus its raster at the scan's dpi; it only draws, so every candidate of a page-rebuild
+eval differs in what fills the description (Tesseract's boxes, a layout model, a vision model's JSON, `font-match`'s fitted faces). The
+baseline is the plain overlay: `ocr` given instead of `page`, one block per Tesseract block, each line one roman span in Times.
+The reference is the cleaned page as a description (`reference.page`, boxes in scan pixels). Layout is scored by `block_f1` and
+`figure_f1` (parts matched at IoU 0.5, greedy, each once; a block split into two or more pieces, or blocks merged into one, match nothing whatever the IoU), `role_acc` (right role among the
+blocks found) and `order_tau` (Kendall's tau of the reading order of the blocks found); text by `cer_exact` on the text read back from the
+PDF. Separate evals per stage (layout, text, style, figures, whole page): see the tracking issue jburnhams/strata-models#67.
+
+`page-layout` (`evals/specs/page-layout.toml`, built by `scripts/evals/page_layout.py`) is the first of these evals: ten whole pages of the
+two books (Ward 1874's title page, dialogue and two pages of advertisements; Collier 1828's chapter openings, prose, footnotes and a sonnet)
+with their layout labelled by eye in `scripts/evals/page_layout/pages.toml` (86 blocks, 12 ornaments and rules; the conventions are at the top
+of that file and in preset `page-layout-v1`, so a reader is told the same rules it is scored by). Each item's input is the scan (`image`)
+and Tesseract's reading of it (`ocr`, psm 3, as strata-scan reads pages). The baseline draws the `ocr`; each vision-model candidate is a
+pipeline whose stage answers preset `page-layout-v1` (schema-checked JSON: blocks in reading order with boxes in thousandths, roles and
+lines; figures) `into = "layout"`, which page-build draws in the picture's pixels. `page_ink_f1` compares page-build's raster with the scan
+inside the reference text blocks (borders, stamps and show-through count for nobody).
+
 ## Files in candidate params
 A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS
 candidates, for one), so a spec in this public repository names no machine's paths. `{data}` is filled in when each job is made, so the
@@ -128,6 +147,26 @@ A candidate may name `from = ["a", "b"]`: its job gets those candidates' output 
 an upscale (back-projection, a blend) is judged like any candidate without running the upscalers again. It runs after them in the same run,
 waits (is not run, is not a failure) while any source is missing or failed, and its key includes theirs, so a new source output makes it
 anew. One level only: a source may not itself be made from others.
+
+## Fonts: which face a scanned block was printed in (`font-match`)
+The role (`runtimes/fontfit.py`, CPU) sets a block's words, from Tesseract's boxes, in a candidate face and searches size, width (hscale),
+tracking and weight to make the rendering's ink agree with the scan's (`evals/ink.py`: F1 with a pixel or two of tolerance); each word then
+keeps the style that fits it, and the face that agrees best wins. Faces are open period fonts from Google Fonts (`runtimes/fonts.toml`, 57 in
+10 classes after Vox-ATypI with the 19th-century display kinds apart: modern, fat face, Clarendon, slab, grotesque, decorated...).
+- **Dataset** (`scripts/evals/font_match.py`, from archive.org, no strata-scan needed): 38 real blocks of Ward 1874 and Collier 1828
+  (`font_match/regions.toml`, class and style labelled by eye) and 30 synthetic blocks, the books' text set in a known catalogue face and
+  printed badly (ink spread or starved, paper tone, noise, blur, tilt). Period type mostly exists in no font file, so real blocks are scored
+  by ink and by class (`font_close`: 1 the same class, 0.5 a neighbour), and the synthetic ones by exact face (`font_top1`, `font_top3`) and size.
+- **Candidates**: `naive` (Tesseract's boxes in Tinos, each word stretched to its box: what a rebuild does without the role), `exhaustive`
+  (every face: a quick screen, then the full fit of the best 6), a vision model's shortlist then the fit (`qwen-fit`, `gemma-fit`,
+  `flash-fit`, `haiku-fit` on a sample; preset `font-propose-v1` lists the catalogue), and the shortlist alone (`*-only`, `mode = "measure"`:
+  its first face sized from the measured x-height), which shows what the fit adds.
+- `ink_f1` decides against the baseline, but the fit maximises it, so compare the fitted candidates with each other on it and read
+  `font_top3` and `font_close` beside it: a shortlist that keeps both against `exhaustive` in less time is the one to adopt.
+- Model judges see the block and two renderings and pick the one whose type looks more like the print; the analysis scores them against
+  `ink_f1`.
+- Before the role is deployed, `scripts/evals/font_match_trial.py` runs the same candidates with the stages through the running service and
+  the fit in its own process.
 
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.

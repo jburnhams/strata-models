@@ -1,0 +1,305 @@
+# The faces the `font-match` role chooses from (runtimes/fontfit.py): open (OFL) fonts on Google Fonts, fetched into <models_dir>/fonts/ on
+# first use, so a rebuilt page can embed what was matched. Period type rarely survives as a font file, so each entry has a `class` (what kind
+# of letter it is, after Vox-ATypI, with the 19th-century display kinds split out) and the eval scores closeness by class as well as exact
+# hits. `like` says what historical type it is close to, for the vision model that proposes candidates; `sc` names a true small-capitals
+# family where there is one (otherwise small capitals are made from the capitals at x-height). `weight` picks a heavier cut of the same family
+# as its own face (fat faces); the default is 400 with 700 as bold and the italic when the family has them.
+#
+# Classes: old-style (Garamond, Caslon, Fell: slanted stress, bracketed serifs), transitional (Baskerville, Bell), modern (Didot, Bodoni,
+# Scotch Roman and the 19th-century book "moderns": vertical stress, hairline serifs), fat-face (Thorne's heavy display moderns),
+# clarendon (bracketed heavy slab, Ionic), slab (Egyptian, square serifs), grotesque (19th-century sans), decorated (Tuscan, ornamented,
+# shaded, outline), blackletter, script.
+
+[faces.eb-garamond]
+family = "EB Garamond"
+class = "old-style"
+like = "Garamond, 16th-century French old style"
+
+[faces.cormorant-garamond]
+family = "Cormorant Garamond"
+class = "old-style"
+like = "Garamond, light display old style"
+sc = "Cormorant SC"
+
+[faces.im-fell-english]
+family = "IM Fell English"
+class = "old-style"
+like = "Fell types, 17th-century Dutch-English old style, rough"
+sc = "IM Fell English SC"
+
+[faces.im-fell-dw-pica]
+family = "IM Fell DW Pica"
+class = "old-style"
+like = "Fell pica, 17th-century book type"
+sc = "IM Fell DW Pica SC"
+
+[faces.im-fell-double-pica]
+family = "IM Fell Double Pica"
+class = "old-style"
+like = "Fell double pica, larger 17th-century type"
+sc = "IM Fell Double Pica SC"
+
+[faces.im-fell-great-primer]
+family = "IM Fell Great Primer"
+class = "old-style"
+like = "Fell great primer, heading size old style"
+sc = "IM Fell Great Primer SC"
+
+[faces.libre-caslon-text]
+family = "Libre Caslon Text"
+class = "old-style"
+like = "Caslon, 18th-century English old style"
+
+[faces.libre-caslon-display]
+family = "Libre Caslon Display"
+class = "old-style"
+like = "Caslon display sizes, high contrast"
+
+[faces.sorts-mill-goudy]
+family = "Sorts Mill Goudy"
+class = "old-style"
+like = "Goudy Old Style, early 20th century"
+
+[faces.crimson-text]
+family = "Crimson Text"
+class = "old-style"
+like = "Minion/Garamond-like book old style"
+
+[faces.cardo]
+family = "Cardo"
+class = "old-style"
+like = "Bembo, Renaissance Aldine"
+
+[faces.linden-hill]
+family = "Linden Hill"
+class = "old-style"
+like = "Goudy Deepdene"
+
+[faces.alegreya]
+family = "Alegreya"
+class = "old-style"
+like = "calligraphic modern old style"
+sc = "Alegreya SC"
+
+[faces.libre-baskerville]
+family = "Libre Baskerville"
+class = "transitional"
+like = "Baskerville, 1750s English transitional (wide, for screens)"
+
+[faces.baskervville]
+family = "Baskervville"
+class = "transitional"
+like = "Baskerville, closer to the 18th-century cut"
+
+[faces.fanwood-text]
+family = "Fanwood Text"
+class = "transitional"
+like = "Fairfield"
+
+[faces.tinos]
+family = "Tinos"
+class = "transitional"
+like = "Times New Roman (metric-compatible): the default a naive rebuild uses"
+
+[faces.pt-serif]
+family = "PT Serif"
+class = "transitional"
+like = "contemporary transitional"
+
+[faces.stix-two-text]
+family = "STIX Two Text"
+class = "transitional"
+like = "Times-like scientific text face"
+
+[faces.gelasio]
+family = "Gelasio"
+class = "transitional"
+like = "Georgia (metric-compatible), Scotch-influenced"
+
+[faces.old-standard]
+family = "Old Standard TT"
+class = "modern"
+like = "late 19th / early 20th century book modern (Scotch-like, Russian and English printing)"
+
+[faces.libre-bodoni]
+family = "Libre Bodoni"
+class = "modern"
+like = "Bodoni text, Italian Didone"
+
+[faces.bodoni-moda]
+family = "Bodoni Moda"
+class = "modern"
+like = "Bodoni, high contrast Didone"
+
+[faces.ibarra-real-nova]
+family = "Ibarra Real Nova"
+class = "modern"
+like = "Ibarra's Real (Spain, 1780), early modern / transitional"
+
+[faces.playfair-display]
+family = "Playfair Display"
+class = "modern"
+like = "Didone display, high contrast, large x-height"
+sc = "Playfair Display SC"
+
+[faces.prata]
+family = "Prata"
+class = "modern"
+like = "Didone text"
+
+[faces.gilda-display]
+family = "Gilda Display"
+class = "modern"
+like = "light Didone display"
+
+[faces.dm-serif-text]
+family = "DM Serif Text"
+class = "modern"
+like = "heavy Scotch / Didone text"
+
+[faces.abril-fatface]
+family = "Abril Fatface"
+class = "fat-face"
+like = "Thorne and Figgins fat faces, 1810s-1850s posters"
+
+[faces.playfair-display-black]
+family = "Playfair Display"
+class = "fat-face"
+weight = 900
+like = "fat Didone display"
+
+[faces.bodoni-moda-black]
+family = "Bodoni Moda"
+class = "fat-face"
+weight = 900
+like = "Bodoni Ultra, fat Didone"
+
+[faces.rozha-one]
+family = "Rozha One"
+class = "fat-face"
+like = "fat Didone display, very high contrast"
+
+[faces.ultra]
+family = "Ultra"
+class = "clarendon"
+like = "fat Clarendon, Victorian poster type"
+
+[faces.coustard]
+family = "Coustard"
+class = "clarendon"
+like = "Clarendon/Ionic, bracketed heavy slab"
+
+[faces.bitter]
+family = "Bitter"
+class = "clarendon"
+like = "bracketed slab text"
+
+[faces.domine]
+family = "Domine"
+class = "clarendon"
+like = "Clarendon-influenced text face"
+
+[faces.kameron]
+family = "Kameron"
+class = "slab"
+like = "Egyptian slab"
+
+[faces.alfa-slab-one]
+family = "Alfa Slab One"
+class = "slab"
+like = "heavy Egyptian, 19th-century poster slab"
+
+[faces.rokkitt]
+family = "Rokkitt"
+class = "slab"
+like = "Rockwell / Egyptian, geometric slab"
+
+[faces.arvo]
+family = "Arvo"
+class = "slab"
+like = "geometric slab"
+
+[faces.zilla-slab]
+family = "Zilla Slab"
+class = "slab"
+like = "contemporary slab"
+
+[faces.holtwood-one-sc]
+family = "Holtwood One SC"
+class = "slab"
+like = "wide heavy Victorian wood-type slab capitals"
+
+[faces.oswald]
+family = "Oswald"
+class = "grotesque"
+like = "Alternate Gothic, condensed grotesque"
+
+[faces.anton]
+family = "Anton"
+class = "grotesque"
+like = "heavy condensed grotesque, poster capitals"
+
+[faces.league-gothic]
+family = "League Gothic"
+class = "grotesque"
+like = "Alternate Gothic No. 1, narrow grotesque"
+
+[faces.archivo-narrow]
+family = "Archivo Narrow"
+class = "grotesque"
+like = "19th-century American grotesque, narrow"
+
+[faces.libre-franklin]
+family = "Libre Franklin"
+class = "grotesque"
+like = "Franklin Gothic"
+
+[faces.rye]
+family = "Rye"
+class = "decorated"
+like = "Victorian ornamented wood type (French Clarendon, spurred)"
+
+[faces.sancreek]
+family = "Sancreek"
+class = "decorated"
+like = "Victorian decorated display, Tuscan"
+
+[faces.smokum]
+family = "Smokum"
+class = "decorated"
+like = "Western reversed-contrast (French Clarendon)"
+
+[faces.diplomata]
+family = "Diplomata"
+class = "decorated"
+like = "extended Didone display, ornamented"
+
+[faces.ewert]
+family = "Ewert"
+class = "decorated"
+like = "Victorian decorative wood type (shaded)"
+
+[faces.unifraktur-maguntia]
+family = "UnifrakturMaguntia"
+class = "blackletter"
+like = "Fraktur"
+
+[faces.unifraktur-cook]
+family = "UnifrakturCook"
+class = "blackletter"
+like = "Textura / Old English"
+
+[faces.pirata-one]
+family = "Pirata One"
+class = "blackletter"
+like = "condensed blackletter display"
+
+[faces.pinyon-script]
+family = "Pinyon Script"
+class = "script"
+like = "English roundhand copperplate"
+
+[faces.italianno]
+family = "Italianno"
+class = "script"
+like = "formal italic script"

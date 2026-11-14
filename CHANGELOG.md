@@ -19,6 +19,31 @@ FlashVSR+ Turbo won every judged pair against lanczos but invents detail (Jonath
 - `models.toml`: `video-refine` (vram 0). `video-enhance-vhs`: candidates turbo+backproject, turbo-blend-x2, turbo-fallback-x2.
 - Review fixes: the refine engine fails the job when the tape or a source decoder stopped with an error (a decoder that errors part-way otherwise looked like a short clip); `forget(candidate=X)` also forgets the outputs of candidates made from X (a rerun gives X a new output under the same key, and its refinements would have stayed cached).
 
+**cost_usd counts a pipeline's cloud steps (branch `claude/project-thread-dvu0cz`)**
+The page-layout run on omarchy (2026-11-14) showed cost_usd 0 for every candidate, though Gemini Flash's and Haiku's layout steps cost $0.088 and $0.011: the metric read only the last job's output (page-build, local). Each step in a pipeline's trace now keeps its answer's `cost_usd` (or the mark of a subscription CLI or recording), `cost_usd` adds the steps to the last job, and `outputs_for` fills the cost of steps saved before this from their own cached rows, so the existing run's report is right without running anything again. `runtimes/fake.py`'s text model takes a `cost_usd` param for the test (`test_eval_pipeline.py`).
+
+**Page rebuild: the `page-layout` eval, ten labelled pages and the page ink score (#67, branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py`: a third input, `layout` (a vision model's reading, preset `page-layout-v1`: boxes in thousandths of the page, blocks in reading order, lines without boxes, figures), drawn in the picture's pixels; `page`, `ocr` and `layout` each also come as JSON text (a model's answer, code fences allowed) or a JSON file's path. The raster is put back on the scan's own size (pdfium rounds a page's size in points up, so a 2660 px scan at 500 dpi came back 2661 wide and matched none of its ink), and the answer names it as `path` too, for the Judge and Outputs tabs.
+- `evals/metrics.py`: `page_ink_f1`, the rebuilt page's raster against the scan within the reference text blocks (evals/ink.py).
+- Preset `page-layout-v1` (**new**, with a schema); `scripts/evals/page_layout.py` and `scripts/evals/page_layout/pages.toml` (**new**: ten pages of Ward 1874 and Collier 1828 from archive.org, layout labelled by Claude, checked by eye); spec `evals/specs/page-layout.toml` (**new**: Tesseract's blocks against qwen, gemma, Gemini Flash and Haiku layouts).
+- Baseline (cloud container, 2026-11-14): Tesseract's blocks score block_f1 77 % [65, 88], role_acc 40 % (every block is body), order_tau 0.96, figure_f1 0, page_ink_f1 39 % on average.
+- Tests: layout input, JSON-text and file params, raster size, `page_ink_f1`, and a check that every labelled page is drawable and matches itself.
+
+**Font identification: role `font-match`, a catalogue of period faces, and its eval (branch `claude/project-thread-01gj43`)**
+Jonathan: font identification is a skill of its own; a vision model suggests candidates, then an optimisation finds the exact face and settings. The page rebuild (strata-scan: real text in a matching face) consumes it.
+
+- `runtimes/fontfit.py` (**new**, role `font-match`, model `fontfit`, CPU): render-and-fit. Each line of a block is set from Tesseract's words in a candidate face; size, width, tracking and weight are searched to match the scan's ink, then each word keeps its best style (roman, italic, bold, small capitals, real or made from capitals). Answer: the face and class, a ranked list of the others, and per line the size in px and pt, hscale, tracking, weight and baseline, per word the style, and a rendering for judging. Modes: `fit` (candidates given, or every face screened), `measure` (a proposer's first face, no search), `naive` (Tinos stretched to Tesseract's boxes).
+- `runtimes/fonts.toml` (**new**): 57 open faces from Google Fonts in 10 classes, each with what historical type it is like; fetched once into `<models_dir>/fonts/`.
+- `evals/ink.py` (**new**, shared with the page rebuild): binarise (flatten, deskew, Sauvola, despeckle) and ink F1 with a tolerance, by box or mask.
+- Metrics `ink_f1`, `font_class`, `font_close`, `font_top1`, `font_top3`, `font_style`, `font_size_err`; preset `font-propose-v1`; spec `evals/specs/font-match.toml`; dataset builder `scripts/evals/font_match.py` and `font_match_trial.py` (trial before deploy).
+- First numbers (this machine, CPU only, no vision model yet): on 29 synthetic blocks `exhaustive` names the exact face 83 % of the time (top 3: 90 %), size within 5 %; on 38 real blocks ink F1 0.84 against 0.58 for `naive`, but the class is right on only 26 % (heavy display faces fit blurred print too well): what a vision model's shortlist should fix.
+
+**Page rebuild, first part: the `page-build` role and layout metrics (#67, branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py` (**new**, role `page-build`, model `pagebuild`, CPU lane): a page description in (JSON or a path; or a Tesseract `ocr` answer, turned into the plain-overlay baseline), the PDF out, drawn by `strata_python.pages.render`; also writes the raster at the scan's dpi and returns the text read back from the PDF. Output defaults to `<data>/pages/<hash>.pdf`. In the pyright strict list.
+- Dependency: `strata-python[db,pdf]>=0.2.2,<0.3` (the `pdf` extra brings ReportLab and pdfium).
+- `evals/metrics.py`: `block_f1`, `figure_f1`, `role_acc`, `order_tau` against `reference.page`, and `match_boxes` (greedy IoU matching of `[x, y, w, h]` boxes). docs/evals.md says how a page-rebuild eval is scored.
+- Tests: `tests/unit/test_pagebuild.py`, `tests/unit/test_page_metrics.py` (**new**).
+
 **strata-python 0.2.1 from PyPI: its database layer, test fakes, dev tools and web serving replace this repo's copies (branch `claude/project-thread-dvu0cz`)**
 strata-python is on PyPI now: the dependency is `strata-python[db]>=0.2.1,<0.3` instead of a git pin of its main, so a breaking change there reaches the service only through a deliberate edit of the range. **Deploy needs the service unit's environment changed first** (below).
 

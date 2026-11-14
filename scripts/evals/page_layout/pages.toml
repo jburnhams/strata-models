@@ -1,0 +1,194 @@
+# Whole pages of the two public-domain books for the `page-layout` eval (scripts/evals/page_layout.py), as the cleaned page should be laid
+# out: each page's text blocks in reading order (role, box [x, y, w, h] in the Internet Archive scan's pixels), and its ornaments and short
+# decorative rules as figures. Conventions (the same ones preset page-layout-v1 gives the vision models):
+# - a block is lines with no extra space between them in about one size of type: running paragraphs are one block, a line in another size
+#   or with space round it is its own (title pages and advertisements are mostly one-line blocks); a running head and its folio are two
+# - reading order: top to bottom, left to right for blocks side by side
+# - figures: ornaments, engravings and short rules standing between blocks; not the page border, the rule under a running head, the
+#   library stamp, a printer's signature mark or show-through
+# Labelled by Claude while building the eval (2026-11-14): rough boxes drawn from the page, then shrunk to the ink inside them. Check by
+# hand before trusting a small difference.
+
+[ward1874-leaf013]
+book = "ward1874"
+leaf = 13
+kind = "title"
+blocks = [
+  { role = "heading", box = [461, 405, 1831, 313] },
+  { role = "heading", box = [920, 808, 937, 76] },
+  { role = "heading", box = [638, 1029, 1495, 137] },
+  { role = "heading", box = [461, 1276, 1817, 165] },
+  { role = "heading", box = [1213, 1546, 305, 32] },
+  { role = "heading", box = [456, 1660, 1818, 228] },
+  { role = "heading", box = [759, 1935, 1203, 102] },
+  { role = "heading", box = [683, 2141, 1355, 145] },
+  { role = "heading", box = [529, 2382, 1691, 95] },
+  { role = "heading", box = [1266, 2606, 182, 34] },
+  { role = "heading", box = [445, 2699, 1817, 220] },
+  { role = "heading", box = [841, 3103, 1069, 90] },
+  { role = "heading", box = [1130, 3187, 484, 61] },
+  { role = "other", box = [1015, 3446, 660, 146] },
+]
+figures = [
+  { kind = "ornament", box = [1052, 3021, 612, 59] },
+  { kind = "ornament", box = [1002, 3296, 661, 63] },
+]
+
+[ward1874-leaf018]
+book = "ward1874"
+leaf = 18
+kind = "dialogue"
+blocks = [
+  { role = "folio", box = [457, 459, 29, 45] },
+  { role = "running-head", box = [1133, 474, 491, 35] },
+  { role = "body", box = [449, 630, 1873, 1743] },
+  { role = "heading", box = [1068, 2546, 634, 53] },
+  { role = "body", box = [455, 2657, 1867, 1063] },
+]
+figures = [
+  { kind = "ornament", box = [1184, 2439, 362, 44] },
+]
+
+[ward1874-leaf019]
+book = "ward1874"
+leaf = 19
+kind = "dialogue"
+blocks = [
+  { role = "running-head", box = [1075, 416, 482, 32] },
+  { role = "folio", box = [2203, 399, 29, 48] },
+  { role = "body", box = [404, 573, 1843, 2095] },
+  { role = "body", box = [800, 2688, 1084, 105] },
+  { role = "body", box = [415, 2810, 1847, 657] },
+  { role = "body", box = [805, 3461, 1080, 174] },
+]
+figures = []
+
+[ward1874-leaf029]
+book = "ward1874"
+leaf = 29
+kind = "advert"
+blocks = [
+  { role = "running-head", box = [1056, 428, 474, 40] },
+  { role = "folio", box = [2162, 419, 60, 49] },
+  { role = "heading", box = [403, 568, 1816, 169] },
+  { role = "body", box = [402, 795, 1822, 134] },
+  { role = "heading", box = [485, 948, 1653, 92] },
+  { role = "body", box = [708, 1071, 1215, 67] },
+  { role = "heading", box = [410, 1168, 1808, 82] },
+  { role = "body", box = [401, 1281, 1823, 338] },
+  { role = "heading", box = [403, 1641, 1820, 85] },
+  { role = "body", box = [401, 1755, 1821, 150] },
+  { role = "body", box = [341, 1930, 1886, 138] },
+  { role = "body", box = [1213, 2081, 945, 58] },
+  { role = "body", box = [396, 2263, 402, 90] },
+  { role = "body", box = [1798, 2266, 425, 93] },
+  { role = "heading", box = [788, 2390, 1035, 123] },
+  { role = "heading", box = [485, 2564, 1637, 134] },
+  { role = "heading", box = [377, 2755, 1837, 176] },
+  { role = "heading", box = [722, 3089, 1181, 127] },
+  { role = "heading", box = [389, 3317, 1835, 175] },
+  { role = "heading", box = [779, 3539, 1040, 90] },
+]
+figures = [
+  { kind = "rule", box = [402, 2164, 1824, 78] },
+  { kind = "ornament", box = [1140, 2988, 353, 28] },
+  { kind = "ornament", box = [1131, 3259, 355, 28] },
+]
+
+[ward1874-leaf034]
+book = "ward1874"
+leaf = 34
+kind = "advert"
+blocks = [
+  { role = "folio", box = [341, 433, 103, 47] },
+  { role = "running-head", box = [1041, 447, 483, 35] },
+  { role = "heading", box = [340, 603, 1849, 135] },
+  { role = "heading", box = [784, 789, 962, 49] },
+  { role = "heading", box = [399, 894, 1729, 131] },
+  { role = "heading", box = [720, 1059, 1086, 82] },
+  { role = "heading", box = [335, 1177, 1851, 106] },
+  { role = "heading", box = [610, 1336, 1309, 54] },
+  { role = "body", box = [335, 1442, 1854, 172] },
+  { role = "heading", box = [430, 1737, 1662, 190] },
+  { role = "heading", box = [331, 1972, 1850, 191] },
+  { role = "body", box = [434, 2162, 1649, 78] },
+  { role = "heading", box = [334, 2349, 1849, 136] },
+  { role = "body", box = [587, 2580, 1540, 173] },
+  { role = "heading", box = [333, 2836, 1879, 205] },
+  { role = "body", box = [445, 3109, 1615, 114] },
+  { role = "body", box = [649, 3258, 1221, 95] },
+  { role = "heading", box = [530, 3423, 1453, 121] },
+  { role = "heading", box = [356, 3598, 1793, 104] },
+]
+figures = [
+  { kind = "rule", box = [332, 1673, 1861, 65] },
+  { kind = "ornament", box = [1039, 2264, 445, 59] },
+  { kind = "ornament", box = [1040, 2505, 444, 32] },
+  { kind = "rule", box = [332, 2799, 1857, 22] },
+]
+
+[collier1828-leaf029]
+book = "collier1828"
+leaf = 29
+kind = "chapter"
+blocks = [
+  { role = "heading", box = [724, 1380, 446, 63] },
+  { role = "heading", box = [517, 1815, 864, 73] },
+  { role = "body", box = [229, 1981, 1440, 474] },
+  { role = "footnote", box = [233, 2579, 1441, 550] },
+]
+figures = [
+  { kind = "rule", box = [780, 1615, 339, 7] },
+]
+
+[collier1828-leaf030]
+book = "collier1828"
+leaf = 30
+kind = "prose"
+blocks = [
+  { role = "folio", box = [888, 833, 59, 48] },
+  { role = "running-head", box = [1224, 853, 772, 36] },
+  { role = "body", box = [858, 956, 1462, 1223] },
+  { role = "footnote", box = [858, 2298, 1446, 865] },
+]
+figures = []
+
+[collier1828-leaf037]
+book = "collier1828"
+leaf = 37
+kind = "footnotes"
+blocks = [
+  { role = "running-head", box = [527, 855, 778, 33] },
+  { role = "folio", box = [1580, 845, 59, 53] },
+  { role = "body", box = [209, 957, 1433, 1162] },
+  { role = "footnote", box = [204, 2251, 1434, 899] },
+]
+figures = []
+
+[collier1828-leaf095]
+book = "collier1828"
+leaf = 95
+kind = "chapter"
+blocks = [
+  { role = "heading", box = [617, 1251, 491, 52] },
+  { role = "heading", box = [374, 1603, 973, 45] },
+  { role = "body", box = [147, 1762, 1431, 1136] },
+  { role = "footnote", box = [146, 3008, 1427, 125] },
+]
+figures = [
+  { kind = "rule", box = [728, 1431, 264, 10] },
+]
+
+[collier1828-leaf105]
+book = "collier1828"
+leaf = 105
+kind = "verse"
+blocks = [
+  { role = "running-head", box = [413, 876, 852, 45] },
+  { role = "folio", box = [1488, 881, 60, 45] },
+  { role = "heading", box = [539, 1007, 598, 48] },
+  { role = "body", box = [201, 1094, 1268, 1411] },
+  { role = "body", box = [97, 2543, 1422, 241] },
+  { role = "footnote", box = [91, 2848, 1424, 272] },
+]
+figures = []
