@@ -146,6 +146,11 @@ def test_requests_presets_and_refusals(setup):
     assert body["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/jpeg;base64,") and body[
         "chat_template_kwargs"
     ] == {"enable_thinking": False}
+    # a text context goes in as it is (Tesseract's numbered lines), not as a JSON string with its line breaks escaped
+    body, _ = llama.request(
+        dict(image=str(img), preset="page-layout-fix-v1", context="1 b1 [0,0,9,9] PUNCH\n2 b2 [0,20,9,29] 17")
+    )
+    assert "PUNCH\n2 b2" in body["messages"][0]["content"][-1]["text"]
     body, schema = llama.request(dict(prompt="what is it?", system="be brief", schema=False, think=True))
     assert (
         schema is False

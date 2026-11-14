@@ -79,7 +79,8 @@ more later (pairs nobody has time for, or a first pass before people).
 
 ## Pipelines: a step before the candidate
 A candidate can run **stages** before its own job (`[[candidates.stages]]`: role, optional model, params, `input` template over the item's
-fields, the `send` param that carries it, the `into` param its answer replaces). The first use: a text model turns a short image prompt into a
+fields, the `send` param that carries it, the `into` param its answer replaces, and `also`, item fields passed as they are beside it, such as
+the `image` a vision model is shown with a text). The first use: a text model turns a short image prompt into a
 detailed caption (`role = "text"`, `system_preset = "image-prompt-*"`, see `runtimes/presets/`), then the image model draws it.
 - Each stage's output is cached under its own key, so candidates that share a first step run it once; stages run level by level, grouped by
   model, so a text model loads once and not once per item between pictures.
@@ -133,6 +134,14 @@ and Tesseract's reading of it (`ocr`, psm 3, as strata-scan reads pages). The ba
 pipeline whose stage answers preset `page-layout-v1` (schema-checked JSON: blocks in reading order with boxes in thousandths, roles and
 lines; figures) `into = "layout"`, which page-build draws in the picture's pixels. `page_ink_f1` compares page-build's raster with the scan
 inside the reference text blocks (borders, stamps and show-through count for nobody).
+
+The `*-fix` candidates do for layout what `tesseract-*-fix` does for OCR text: a page-build stage numbers Tesseract's lines (`list_lines`: number,
+Tesseract's block, box in thousandths, text; a line is split where its words stand more than 1.5 line heights apart, so a running head and its
+folio part) `into = "context"`, a vision model sees them beside the page (`also = ["image"]`, preset `page-layout-fix-v1`, which pastes a
+text `context` in as it is) and answers which lines make each block, with roles and figures, `into = "groups"`, and page-build draws
+Tesseract's own lines in those blocks. Grouping the lines by the labels themselves scores block_f1 97.6 % (the ceiling of the approach: the
+rest is lines Tesseract never read), against 84 % before the split. psm 3 stays: the settings best for OCR text find fewer blocks (block_f1
+psm 4 67 %, flatten 64 %, flatten + psm 4 63 %, against 77 %).
 
 ## Files in candidate params
 A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS
