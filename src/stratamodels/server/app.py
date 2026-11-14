@@ -36,15 +36,15 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/images/file?path=            one generated or uploaded picture
   POST /api/images/upload?name=          a reference picture (body = the file) -> {path}
   /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
-The page at / serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html`."""
+Every other path serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html` (strata_python.web.add_web)."""
 
 import os
 import time
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from strata_python import web
 
 from stratamodels import __version__, gpu, keys, runtimes, settings, spend
 from stratamodels.registry import Registry, RegistryError
@@ -133,12 +133,6 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     def latest():
         return history.latest if history is not None and history.latest is not None else s.probe()
-
-    @app.get("/", response_class=HTMLResponse)
-    def index():
-        built = os.path.join(STATIC, "index.html")
-        with open(built if os.path.exists(built) else LANDING, encoding="utf8") as f:
-            return f.read()
 
     @app.get("/api/health")
     def get_health():
@@ -483,8 +477,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     evals_api.mount(app, s)
 
-    if os.path.isdir(os.path.join(STATIC, "assets")):
-        app.mount("/assets", StaticFiles(directory=os.path.join(STATIC, "assets")), name="assets")
+    web.add_web(
+        app, STATIC, LANDING
+    )  # last: the built app's assets, and its page (with a relative <base href>) at every path outside /api
     return app
 
 

@@ -26,6 +26,8 @@ import subprocess
 import sys
 import threading
 
+from strata_python import oslib
+
 from stratamodels import settings
 from stratamodels.runtimes import RunError
 
@@ -36,8 +38,7 @@ WORKERS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 def python_of(model, models_dir):
     venv = model.options.get("venv") or model.options.get("worker")
     root = venv if os.path.isabs(str(venv)) else os.path.join(models_dir, "venvs", str(venv))
-    exe = os.path.join(root, "Scripts", "python.exe") if os.name == "nt" else os.path.join(root, "bin", "python")
-    return root, exe
+    return root, oslib.venv_python(root)
 
 
 def cuda_libs(root):

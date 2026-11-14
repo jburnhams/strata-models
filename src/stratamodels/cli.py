@@ -16,7 +16,7 @@ CHECKS = (
     ("uvicorn", "uvicorn"),
     ("pydantic", "pydantic"),
     ("sqlalchemy", "sqlalchemy"),
-    ("omarchy-db", "omarchy_db"),
+    ("strata-python[db]", "strata_python.db"),
 )
 
 

@@ -1,7 +1,7 @@
 name: Upgrade strata-python
 
-# strata-python is a git dependency that tracks its main branch; uv.lock pins the commit. This moves the pin weekly (and on demand): it runs the
-# whole gate and the integration tests on the new commit, and only if they pass opens a PR with the lockfile change. The gate runs here because a PR
+# strata-python comes from PyPI within the range in pyproject.toml (>=0.2,<0.3); uv.lock pins the release. This moves the pin to the newest
+# release in that range weekly (and on demand; a new 0.N minor is a deliberate edit of the range): it runs the whole gate and the integration tests on it, and only if they pass opens a PR with the lockfile change. The gate runs here because a PR
 # opened with the default token does not start the other workflows. Needs Settings > Actions > "Allow GitHub Actions to create pull requests".
 
 on:
@@ -36,4 +36,4 @@ jobs:
           title: Upgrade strata-python
           commit-message: Upgrade strata-python (uv lock --upgrade-package strata-python)
           body: |
-            Moves the strata-python pin in `uv.lock` to its latest `main`. The gate (`strata-check`) and the integration tests passed on the new commit in the workflow run that opened this PR.
+            Moves the strata-python pin in `uv.lock` to its newest PyPI release within the range in `pyproject.toml`. The gate (`strata-check`) and the integration tests passed on it in the workflow run that opened this PR.

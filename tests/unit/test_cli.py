@@ -184,7 +184,7 @@ def test_the_cli_never_migrates_a_database_at_another_revision(capsys, monkeypat
     e = sa.create_engine("sqlite:///" + str(tmp_path / "x.sqlite"))
     url = "sqlite:///" + str(tmp_path / "old.sqlite")
     monkeypatch.setenv("STRATAMODELS_DATABASE_URL", url)
-    from omarchy_db import upgrade
+    from strata_python.db import upgrade
 
     from stratamodels.db.models import Base
 

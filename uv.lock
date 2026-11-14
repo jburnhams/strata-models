@@ -1641,16 +1641,6 @@ wheels = [
 ]
 
 [[package]]
-name = "omarchy-db"
-version = "0.1.0"
-source = { git = "https://github.com/jburnhams/database?subdirectory=python#2d2940613d49fea5c2f70f62769a5ca56ea581a9" }
-dependencies = [
-    { name = "alembic" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "sqlalchemy" },
-]
-
-[[package]]
 name = "onnx"
 version = "1.23.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2889,12 +2879,11 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "omarchy-db" },
     { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "sqlalchemy" },
-    { name = "strata-python" },
+    { name = "strata-python", extra = ["db"] },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn" },
 ]
@@ -2902,21 +2891,13 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "diff-cover" },
-    { name = "httpx" },
     { name = "hypothesis" },
     { name = "opencv-python-headless" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-randomly" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "soundfile" },
     { name = "strata-models-client" },
-    { name = "ty" },
+    { name = "strata-python", extra = ["dev"] },
 ]
 gpu = [
     { name = "insightface" },
@@ -2933,12 +2914,11 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "huggingface-hub", specifier = ">=2.4.0" },
     { name = "numpy" },
-    { name = "omarchy-db", git = "https://github.com/jburnhams/database?subdirectory=python" },
     { name = "pillow" },
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "sqlalchemy", specifier = ">=2" },
-    { name = "strata-python", git = "https://github.com/jburnhams/strata-python" },
+    { name = "strata-python", extras = ["db"], specifier = ">=0.2.1,<0.3" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
@@ -2946,20 +2926,12 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "diff-cover" },
-    { name = "httpx", specifier = ">=0.27" },
     { name = "hypothesis" },
     { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
-    { name = "pyright" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-cov", specifier = ">=5" },
-    { name = "pytest-randomly" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "soundfile", specifier = ">=0.14.0" },
     { name = "strata-models-client", editable = "client" },
-    { name = "ty" },
+    { name = "strata-python", extras = ["dev"] },
 ]
 gpu = [
     { name = "insightface" },
@@ -2977,14 +2949,35 @@ source = { editable = "client" }
 
 [[package]]
 name = "strata-python"
-version = "0.1.0"
-source = { git = "https://github.com/jburnhams/strata-python#25d5f8f12fe818d5585891dfd0ed8ae793abbee6" }
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "pytest" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/62/a4/4b0e35cc7821087b892a2fd42a64634cc842be6dc332a09e5d43cf62596f/strata_python-0.2.1.tar.gz", hash = "sha256:c97eacdadd5485f121ffa32cb78f4f314c39a83bf856e41e52a6bbed312b36e4", size = 72309, upload-time = "2026-11-14T17:50:32.813Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/78/d0f3d1ebaa1b06570a57ab0f9d280d7cba89d07cfe7207bfcb185f165017/strata_python-0.2.1-py3-none-any.whl", hash = "sha256:b89b31bd33248ab3db8b0d4dce33d8b51c5e95ded2ae6e270359e94c4ecebff1", size = 59822, upload-time = "2026-11-14T17:50:31.338Z" },
+]
+
+[package.optional-dependencies]
+db = [
+    { name = "alembic" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sqlalchemy" },
+]
+dev = [
+    { name = "httpx" },
+    { name = "pyright" },
+    { name = "pytest-cov" },
+    { name = "pytest-randomly" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "ty" },
 ]
 
 [[package]]
