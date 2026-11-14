@@ -38,6 +38,57 @@ def test_wer_cer_count_failures_as_all_errors():
     assert M.METRICS["cer"].score(it, None, "x")[0] == d and M.METRICS["cer"].score(dict(id="2"), None, None) is None
 
 
+def test_cer_exact_keeps_case_and_punctuation_and_unifies_typography():
+    it = dict(id="1", reference=dict(text="PUNCH and Judy \u2014 \u201csaid\u201d he.\nNo."))
+    assert M.exact_chars("a\u2019b  \u2013\n c\u00ad") == list("a'b - c")
+    assert M.METRICS["cer_exact"].score(it, tx('PUNCH and Judy - "said" he. No.'), None) == (0, 31)
+    assert M.METRICS["cer"].score(it, tx("Punch and Judy said he, No"), None)[0] == 0  # what cer forgives
+    assert (
+        M.METRICS["cer_exact"].score(it, tx("Punch and Judy said he, No"), None)[0] == 4 + 3 + 1 + 1 + 1
+    )  # UNCH, '- "', the closing quote, . for , and the last .
+    assert (
+        M.METRICS["cer_exact"].score(it, None, "x") == (31, 31)
+        and M.METRICS["cer_exact"].score(dict(id="2"), tx("x"), None) is None
+    )
+
+
+def test_space_before_a_stop_is_no_error_and_wer_bag_ignores_order():
+    assert M.exact_chars("his nose ! and ( so ) ;") == list("his nose! and ( so);")
+    it = dict(id="1", reference=dict(text="PUNCH AND JUDY by J. P. Collier"))
+    assert M.METRICS["wer"].score(it, tx("by J. P. Collier PUNCH AND JUDY"), None)[0] > 0
+    assert M.METRICS["wer_bag"].score(it, tx("by J. P. Collier PUNCH AND JUDY"), None) == (0, 7)
+    assert M.METRICS["wer_bag"].score(it, tx("by J. P. Collier PUXCH AND JUDY and more"), None) == (
+        3,
+        7,
+    )  # puxch, and, more added; punch lacking
+    assert (
+        M.METRICS["wer_bag"].score(it, None, "x") == (7, 7)
+        and M.METRICS["wer_bag"].score(dict(id="2"), tx("x"), None) is None
+    )
+
+
+def test_garbled_and_unclear_need_no_reference():
+    text = 'The f0x, tbe | wHat Mrrrr strngth b "Yes." I a 1874 3rd 2d Strength'
+    assert M.garbled_words(text) == (
+        6,
+        15,
+    )  # f0x | wHat Mrrrr strngth b; not tbe (a real-looking misreading), ordinals or numbers
+    assert M.METRICS["garbled"].score(dict(id="1"), dict(text=text), None) == (6, 15)
+    assert (
+        M.METRICS["garbled"].score(dict(id="1"), tx(""), None) is None
+        and M.METRICS["garbled"].score(dict(id="1"), None, "x") is None
+    )
+    page = dict(
+        text="x", lines=[dict(words=[dict(conf=90.0), dict(conf=30.0), dict(text="no conf")]), dict(text="no words")]
+    )
+    assert M.METRICS["unclear"].score(dict(id="1"), page, None) == (1, 2)
+    assert M.METRICS["unclear"].score(dict(id="1"), tx("a vision model's text"), None) is None
+    assert (
+        M.METRICS["unclear"].score(dict(id="1"), dict(lines=[dict(words=[])]), None) is None
+        and M.METRICS["unclear"].score(dict(id="1"), page, "x") is None
+    )
+
+
 def test_faces_found_missed_and_iou():
     assert M.iou([0, 0, 10, 10], [5, 0, 15, 10]) == pytest.approx(1 / 3) and M.iou([0, 0, 0, 0], [0, 0, 0, 0]) == 0
     it = dict(id="f", reference=dict(box=[10, 10, 50, 50], boxes=[[10, 10, 50, 50], [100, 100, 140, 140]]))

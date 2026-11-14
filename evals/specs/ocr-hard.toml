@@ -1,0 +1,90 @@
+name = "ocr-hard"
+question = "On the worst pages of the two books (picked with no reference, by the kinds of error Tesseract makes), how close does each reader get to a strong model's reading, and what does one page cost?"
+role = "ocr"
+dataset = "ocr-hard"             # scripts/evals/ocr_reference.py: Opus read each page once (ocr_hard/<item>.txt, SOURCES.json); ocr_pages.py --refs scripts/evals/ocr_hard --name ocr-hard
+metrics = ["cer_exact", "cer", "wer", "wer_bag", "garbled", "cost_usd", "latency_s", "failed"]
+judge = false
+
+[decision]
+primary = "cer_exact"            # case and punctuation count: small capitals, italics and stops are what these pages get wrong
+baseline = "tesseract"
+min_effect = 0.005
+guards = { failed = 1.0 }
+# The reference is a model's reading, not a person's: a reader that matches it closely may share its mistakes. SOURCES.json gives Opus's
+# cer_exact on hand-typed pages read the same way, which bounds how far to trust a difference smaller than that.
+
+# ---- local: what strata-scan does today, the best cleaning, and the vision-language readers (ocr-pages) ----------------------------------------
+[[candidates]]
+name = "tesseract"
+model = "tesseract-eng"
+
+[[candidates]]
+name = "flatten-psm4"
+model = "tesseract-eng"
+params = { clean = "flatten", psm = 4 }
+
+[[candidates]]
+name = "qwen-read"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096, temperature = 0.0 }
+
+[[candidates]]
+name = "gemma-read"
+model = "gemma-4-12b-vl"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096, temperature = 0.0 }
+
+[[candidates]]
+name = "tesseract-qwen-fix"
+model = "qwen3.5-9b-vl"
+params = { system_preset = "ocr-correct-v1", max_tokens = 4096, temperature = 0.0 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+input = "{image}"
+send = "image"
+into = "prompt"
+
+# ---- cloud: the same instructions; cost_usd is what one page cost (free keys and NIM count 0) --------------------------------------------------
+[[candidates]]
+name = "haiku-read"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "sonnet-read"
+model = "claude-sonnet-5-5-api"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "flash-read"
+model = "gemini-3.8-flash-api"   # the free key first
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "flash-lite-read"
+model = "gemini-3.5-flash-lite-api"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "nemotron-read"
+model = "nim-nemotron-3.5-super-vl"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "nim-gemma-read"
+model = "nim-gemma-4-31b"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "tesseract-haiku-fix"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v1", max_tokens = 4096 }
+note = "the correction pass on a cheap cloud model: keeps Tesseract's lines (and so its boxes)"
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+input = "{image}"
+send = "image"
+into = "prompt"

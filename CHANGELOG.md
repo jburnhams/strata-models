@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Better OCR scoring, and a harder OCR eval scored against Opus (branch `claude/project-thread-gl1u9l`)**
+The ocr-pages eval put qwen-read at 0.16 % CER, yet Jonathan saw unclear and plainly wrong text on most pages: `cer` ignores case and punctuation (small capitals typed as PUNCH, a stop read as a comma cost nothing) and the ten typed pages are not the worst ones. His plan: score the OCR better first, take the worst pages by kind of error as the test, and have a few strong-model calls (Opus) read them as the reference.
+
+- Metrics: `cer_exact` (case and punctuation kept, only curly quotes, dashes, whitespace and a space before a stop unified), `wer_bag` (word order ignored: separates misreads from lines read out of order, which is most of ward1874-p011's 47 %), and two that need no reference, for ranking pages nobody has typed: `garbled` (words that look like OCR junk: a stray symbol, a digit among letters, a capital inside a word, five consonants running, a lone letter) and `unclear` (words Tesseract gave a confidence under 60).
+- `scripts/evals/ocr_reference.py` (**new**): one strong model (default Opus 5.5 on the Claude API) reads each picked page once into `scripts/evals/ocr_hard/<item>.txt`; `SOURCES.json` keeps why the page was picked, the model, the cost, and on hand-typed pages its `cer_exact` against the typed text. A spend cap (`--max-usd`, default $1).
+- `ocr_pages.py`: `--refs` builds a dataset from another reference folder (`--refs scripts/evals/ocr_hard --name ocr-hard`), its tags from SOURCES.json.
+- `evals/specs/ocr-hard.toml` (**new**): Tesseract, the best cleaning, qwen and gemma (read and fix), and the cloud readers (Claude Haiku and Sonnet, Gemini Flash and Flash-Lite, NIM Nemotron and Gemma 4 31B, and Tesseract corrected by Haiku), on `cer_exact` with `cost_usd` per page.
+- `models.toml`: the cloud vision models also serve `ocr`, as eval candidates (they give no boxes).
+
 **Cloud API clients (Claude, Google AI Studio, NVIDIA NIM) with budgets and a Cloud page (branch `claude/project-thread-gl1u9l`)**
 Jonathan has a Claude API key, two Google AI Studio keys (free tier and a paid one) and an NVIDIA NIM key, and wants their spend watched closely so nothing is wasted. Checked 2026-11-14 with one tiny call each: none of the four shows its remaining credit to the key (the Claude key gets 401 on every Admin endpoint: usage, cost and spend limits need an Admin or organization-scoped key; NIM's credits endpoint is 403; Google's balance is only in Cloud Billing). So the service keeps its own ledger and budgets.
 
