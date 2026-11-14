@@ -88,6 +88,9 @@ BOUNDS = (
 )
 
 
+LITERAL = ("enum", "const", "default", "examples")
+
+
 def portable(schema):
     """`schema` without BOUNDS anywhere in it, and with minItems only where it is 0 or 1 (Claude takes no other), for a vendor's API."""
     if isinstance(schema, list):
@@ -97,6 +100,9 @@ def portable(schema):
     out = {}
     for k, v in schema.items():
         if k in BOUNDS or (k == "minItems" and v not in (0, 1)):
+            continue
+        if k in LITERAL:  # data, not a schema: {"enum": [{"format": "png"}]} keeps its "format"
+            out[k] = v
             continue
         out[k] = (
             {n: portable(x) for n, x in v.items()}

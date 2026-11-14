@@ -420,6 +420,8 @@ def test_schemas_sent_to_a_vendor_lose_their_bounds_but_keep_their_shape():
             minimum=dict(type="string", pattern="^a", maxLength=4),  # a field named like a keyword stays
             tags=dict(type="array", items=dict(type="string", format="x"), minItems=3, maxItems=8),
             one=dict(type="array", items=dict(type="string"), minItems=1),
+            kind={"enum": [{"format": "png"}, {"format": "jpeg"}]},  # literal values are data: their keys stay
+            fixed={"const": {"maxLength": 2}},
         ),
         required=["n", "minimum"],
         additionalProperties=False,
@@ -431,6 +433,8 @@ def test_schemas_sent_to_a_vendor_lose_their_bounds_but_keep_their_shape():
             minimum=dict(type="string"),
             tags=dict(type="array", items=dict(type="string")),
             one=dict(type="array", items=dict(type="string"), minItems=1),
+            kind={"enum": [{"format": "png"}, {"format": "jpeg"}]},
+            fixed={"const": {"maxLength": 2}},
         ),
         required=["n", "minimum"],
         additionalProperties=False,
