@@ -12,6 +12,20 @@ FlashVSR+ Turbo won every judged pair against lanczos but invents detail (Jonath
 - `models.toml`: `video-refine` (vram 0). `video-enhance-vhs`: candidates turbo+backproject, turbo-blend-x2, turbo-fallback-x2.
 - Review fixes: the refine engine fails the job when the tape or a source decoder stopped with an error (a decoder that errors part-way otherwise looked like a short clip); `forget(candidate=X)` also forgets the outputs of candidates made from X (a rerun gives X a new output under the same key, and its refinements would have stayed cached).
 
+**font-match: the first trial of the shortlists, and two fixes it found (branch `claude/project-thread-01gj43`)**
+Trial on omarchy (scripts/evals/font_match_trial.py, 36 real and 29 synthetic blocks, 2026-11-14). Real blocks: class right 19 % trying every face, 56 % with qwen's shortlist then the fit, 69 % gemma, 78 % Gemini Flash; ink_f1 0.85 / 0.82 / 0.82 / 0.83 (naive 0.58). Synthetic (face in the catalogue): every face wins, exact face 76 % (top 3 83 %) against Flash's 45 %, gemma 28 %, qwen 31 %. A shortlist decides the class; the fit adds about 0.1 ink_f1 and the size. Seconds a block: every face 19, gemma 6.5, qwen 8, Flash 22 (about $0.006 a call if charged).
+- `fetch` wrote every download to `<face>.ttf.part`, so parallel fits fetching the same face collided (52 failed fits at 6 jobs): each writer now has its own temporary name.
+- `parse_candidates` takes the closest id for a near miss (gemma wrote `libra-bodoni` for libre-bodoni in 26 of 65 answers).
+
+**page-layout: Tesseract's lines regrouped by a vision model (branch `claude/project-thread-dvu0cz`)**
+- `runtimes/pagebuild.py`: `list_lines` (Tesseract's lines numbered, in thousandths, split at wide gaps between words) and `groups` (a model's blocks named by those numbers, drawn with Tesseract's measured lines).
+- `evals/core.py`: a stage's `also` passes item fields as they are beside the one sent (the page image beside a text); kept out of the parsed stage when not given, so existing pipelines keep their result keys.
+- `runtimes/llama.py`, `runtimes/cloud.py`: a preset's `{context}` takes a text as it is (a dict is still JSON).
+- Preset `page-layout-fix-v1` (**new**, with a schema); candidates `qwen-fix`, `flash-fix`, `haiku-fix`, `sonnet-fix` in `evals/specs/page-layout.toml`. The labels' own grouping of Tesseract's lines scores block_f1 97.6 %, the approach's ceiling; OCR's best preprocessing (psm 4, flatten) finds fewer blocks than psm 3, so psm 3 stays.
+
+**page-layout: Sonnet as a candidate (branch `claude/project-thread-dvu0cz`)**
+Haiku found 24 % of the labelled blocks (Flash 83 %, Tesseract 77 %); `sonnet-layout` asks whether the larger Claude reads page layouts well enough. Only it runs on the next `eval run page-layout` (the others are cached).
+
 **cost_usd counts a pipeline's cloud steps (branch `claude/project-thread-dvu0cz`)**
 The page-layout run on omarchy (2026-11-14) showed cost_usd 0 for every candidate, though Gemini Flash's and Haiku's layout steps cost $0.088 and $0.011: the metric read only the last job's output (page-build, local). Each step in a pipeline's trace now keeps its answer's `cost_usd` (or the mark of a subscription CLI or recording), `cost_usd` adds the steps to the last job, and `outputs_for` fills the cost of steps saved before this from their own cached rows, so the existing run's report is right without running anything again. `runtimes/fake.py`'s text model takes a `cost_usd` param for the test (`test_eval_pipeline.py`).
 

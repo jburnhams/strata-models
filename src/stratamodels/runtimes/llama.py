@@ -175,6 +175,14 @@ def preset(name):
     return open(p, encoding="utf8").read(), (json.load(open(s, encoding="utf8")) if os.path.isfile(s) else None)
 
 
+def fill_context(text, context):
+    """A preset's {context}: a dict of facts as JSON, or a text as it is (a pipeline's earlier step, such as Tesseract's numbered lines for
+    page-layout-fix-v1, whose line breaks JSON would escape)."""
+    return text.replace(
+        "{context}", context if isinstance(context, str) else json.dumps(context or {}, ensure_ascii=False)
+    )
+
+
 def _image_part(path):
     if not isinstance(path, str) or not os.path.isfile(path):
         raise RunError(f"no such image: {path!r}")
@@ -211,7 +219,7 @@ def request(params):
             raise RunError("give a prompt or a preset, not both")
         text, pschema = preset(params["preset"])
         schema = pschema if schema is None else schema
-        text = text.replace("{context}", json.dumps(params.get("context") or {}, ensure_ascii=False))
+        text = fill_context(text, params.get("context"))
     else:
         text = params.get("prompt")
         if not isinstance(text, str) or not text.strip():

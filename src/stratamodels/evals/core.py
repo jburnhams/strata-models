@@ -27,6 +27,7 @@ An experiment is a TOML spec (`evals/specs/<name>.toml` in this repository for g
     input = "{prompt}"                # what the stage is given: a template over the item's input fields (default "{prompt}")
     send = "prompt"                   # the stage job's param that carries it (default "prompt")
     into = "prompt"                   # the next step's param that the stage's text replaces (default "prompt")
+    also = ["image"]                  # optional: input fields passed to the stage as they are, beside `send` (a vision model given a text)
 
 A pipeline candidate's output is its last job's, with every step kept under `pipeline` (role, model, what it was sent, what it answered, run
 time): hidden on the Judge tab (the pair shows only the end result), shown on the Outputs tab and in the write-up. Each stage's output is cached
@@ -286,7 +287,7 @@ class Candidate:
         return d
 
 
-STAGE_KEYS = {"role", "model", "params", "options", "input", "send", "into", "note"}
+STAGE_KEYS = {"role", "model", "params", "options", "input", "send", "into", "also", "note"}
 
 
 def parse_stage(d):
@@ -295,7 +296,7 @@ def parse_stage(d):
     extra = set(d) - STAGE_KEYS
     if extra:
         raise ValueError(f"a stage has unknown fields {sorted(extra)} (known: {', '.join(sorted(STAGE_KEYS))})")
-    return dict(
+    out = dict(
         role=str(d["role"]),
         model=str(d["model"]) if d.get("model") else None,
         params=dict(d.get("params") or {}),
@@ -305,6 +306,13 @@ def parse_stage(d):
         into=str(d.get("into", "prompt")),
         note=str(d.get("note", "")),
     )
+    also = d.get("also")
+    if also:
+        # only when given: the parsed stage is part of every result key, so a key it adds to all stages would re-run every pipeline
+        if not isinstance(also, list) or not all(isinstance(f, str) and f for f in also):
+            raise ValueError("a stage's also is a list of input field names")
+        out["also"] = list(also)
+    return out
 
 
 @dataclasses.dataclass
@@ -619,7 +627,8 @@ def stage_params(stage, inp):
         text = stage["input"].format_map(_Missing(dict(inp)))
     except (ValueError, IndexError) as e:
         raise EvalError(f"stage input {stage['input']!r}: {e}")
-    return {**stage["params"], stage["send"]: text}
+    also = {f: _Missing(dict(inp))[f] for f in stage.get("also") or []}
+    return {**stage["params"], **also, stage["send"]: text}
 
 
 def stage_key(stage, params, item):
