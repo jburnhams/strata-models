@@ -1,8 +1,13 @@
 # The database
 
 strata-models keeps everything it decides and does in its schema, `stratamodels`, of the shared `omarchy` PostgreSQL database, through the
-[jburnhams/database](https://github.com/jburnhams/database) library (`omarchy-db`): models in `src/stratamodels/db/models.py`, Alembic revisions in
-`migrations/` (`dbtool revision`, `dbtool check` on SQLite and Postgres), migrated by the service at start.
+`strata_python.db` (the `[db]` extra of [strata-python](https://github.com/jburnhams/strata-python), which replaced the git-pinned `omarchy-db` on
+2026-11-14 with the same naming convention, so no revision drifts): models in `src/stratamodels/db/models.py`, Alembic revisions in `migrations/`
+(`strata-db revision`, `strata-db check` on SQLite and Postgres), migrated by the service at start.
+
+**Service environment.** A real Postgres is opt-in: the service unit sets `STRATA_DB_LIVE=1` and `STRATA_DB_DATABASE` (the shared database's
+name; strata-python is public, so it has no built-in name). Without them the service refuses to start rather than guess. `STRATA_DB_URL` or
+`STRATAMODELS_DATABASE_URL` point it anywhere else (a path means SQLite).
 
 | Area | Tables | Filled by |
 |---|---|---|
@@ -17,6 +22,6 @@ here (`edited`) is no longer overwritten by its file: the choice made here stand
 `POST /api/registry/seed?follow=role:KEY`) hands a row back to its file. So a pull request that adds a model or an experiment still takes effect
 at the next start.
 
-**Never against the live database from a branch.** Tests pin `STRATAMODELS_DATABASE_URL` to a temporary SQLite file (`tests/conftest.py`). The CLI
+**Never against the live database from a branch.** Tests pin `STRATAMODELS_DATABASE_URL` to a temporary SQLite file (`strata_env` in `pyproject.toml`), and strata-python's guard refuses a real Postgres during tests. The CLI
 only creates the tables of an empty database and refuses one at another revision (`Store.connect(migrate='new')`); only the service migrates, at
 start, so the live schema changes when matching code is deployed.

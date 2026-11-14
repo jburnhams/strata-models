@@ -78,10 +78,10 @@ class Store:
 
     @classmethod
     def connect(cls, url_or_app="stratamodels", migrate=True):
-        """The service's database (omarchy-db: STRATAMODELS_DATABASE_URL, OMARCHY_DB_URL or the shared server). `migrate`: True brings it to
+        """The service's database (strata_python.db: STRATA_DB_URL, STRATAMODELS_DATABASE_URL, or schema `stratamodels` of the shared database named in STRATA_DB_DATABASE, which needs STRATA_DB_LIVE=1). `migrate`: True brings it to
         head (the service, at start); 'new' only creates the tables of a database that has none and refuses one at another revision (the CLI:
         a command run from a branch must never migrate the live database under the running service); False leaves it as it is."""
-        from omarchy_db import connect
+        from strata_python.db import connect
 
         e = connect(url_or_app)
         if e.dialect.name == "postgresql":
@@ -92,7 +92,7 @@ class Store:
                 project().upgrade(e)
             elif have != head:
                 raise StaleDatabase(
-                    f"the database is at revision {have}, this code expects {head}: deploy the matching service (it migrates at start) or run `dbtool migrate`"
+                    f"the database is at revision {have}, this code expects {head}: deploy the matching service (it migrates at start) or run `strata-db migrate --live`"
                 )
         elif migrate:
             project().upgrade(e)
@@ -381,7 +381,7 @@ class StaleDatabase(RuntimeError):
 def project():
     import os
 
-    from omarchy_db import Project
+    from strata_python.db import Project
 
     return Project.load(
         os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "pyproject.toml")
@@ -391,7 +391,7 @@ def project():
 def revisions(engine):
     """(the database's revision or None, this code's head)."""
     from alembic.script import ScriptDirectory
-    from omarchy_db.migrations import current, make_config
+    from strata_python.db.migrations import current, make_config
 
     p = project()
     head = ScriptDirectory.from_config(make_config(p.migrations_dir, p.metadata, None)).get_current_head()

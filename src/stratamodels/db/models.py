@@ -10,11 +10,18 @@ what the web app formats anyway.
 Files in the repository (models.toml, evals/specs/*.toml, dataset .jsonl files) are SEEDS: imported at start, and followed while the row has not
 been edited here (`edited`); see registry.seed and evals.core."""
 
-import sqlalchemy as sa
-from omarchy_db import make_base
-from sqlalchemy.orm import Mapped, mapped_column
+from typing import TYPE_CHECKING
 
-Base = make_base()
+import sqlalchemy as sa
+from sqlalchemy.orm import Mapped, mapped_column
+from strata_python.db import make_base
+
+if (
+    TYPE_CHECKING
+):  # ty refuses a base whose type is `type[...]` (what make_base() is annotated to return): give it the class itself
+    from strata_python.db.models import DataclassBase as Base
+else:
+    Base = make_base()
 
 
 class Job(Base):

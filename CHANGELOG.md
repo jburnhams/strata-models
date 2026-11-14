@@ -4,6 +4,18 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**strata-python 0.2.1 from PyPI: its database layer, test fakes, dev tools and web serving replace this repo's copies (branch `claude/project-thread-dvu0cz`)**
+strata-python is on PyPI now: the dependency is `strata-python[db]>=0.2.1,<0.3` instead of a git pin of its main, so a breaking change there reaches the service only through a deliberate edit of the range. **Deploy needs the service unit's environment changed first** (below).
+
+- Database: `strata_python.db` replaces the git-pinned `omarchy-db` (same naming convention, so no revision drifts; `strata-db check` passes from empty on SQLite). `db/models.py`, `store.py`, `test_database.py`, `test_cli.py` import from it; `[tool.omarchy-db]` is `[tool.strata-db]`. Both packages registered a pytest `--pg` option, so they could not be installed together. **The service now needs `STRATA_DB_LIVE=1` and `STRATA_DB_DATABASE=<the shared database>` in its unit** (strata-python is public, so the name is no longer built in); without them it refuses the shared database instead of guessing. Keep `OMARCHY_DB_LIVE=1` beside them until every app has moved. `STRATA_DB_URL` works like `OMARCHY_DB_URL` did. The README and docs/database.md say `strata-db` where they said `dbtool`.
+- `.github/workflows/database.yml`: its own job (Postgres 18 service container, `strata-db check`, the database tests on SQLite and with `--pg`) instead of jburnhams/database's reusable workflow, which installs omarchy-db.
+- Tests: `tests/utils/fakes.py` deleted and the `fake_urlopen` / `fake_popen` / `fake_run` fixtures and the integration marker hook dropped from `conftest.py`: strata-python's plugin provides them. The tmp SQLite URL is `strata_env` in `pyproject.toml` instead of an autouse fixture, and `STRATA_DB_URL`, `STRATA_DB_LIVE` and `STRATA_DB_DATABASE` are cleared for every test.
+- Dev group: `strata-python[dev]` (ruff, pyright, ty, httpx and the pytest plugins at the versions strata-check is tested with) instead of listing them here.
+- `server/app.py`: the page and assets come from `strata_python.web.add_web`. The built app (or the landing page) is now served at every path outside `/api` with a relative `<base href>`, so a reload or a shared link deep in the app opens it; unknown `/api/...` paths stay 404.
+- `runtimes/worker.py`: a worker venv's interpreter from `strata_python.oslib.venv_python`.
+- `upgrade-strata-python.yml`, `AGENTS.md`: the weekly upgrade moves to the newest release within the range; AGENTS.md says to use strata-python's modules before writing a copy and to file what is missing there.
+- Not adopted yet, filed on strata-python instead: settings stored in the database (#16), extra checks in `doctor` and extra health fields (#17), `strata-public-check` (#13: npm versions read as private IPs; it also found home-folder paths in the speak-* specs), the client moving there (#18), page rendering for the PDF rebuild (#9), the `--pg` clash (#11).
+
 **A resumed eval run waits on the jobs its lost run left queued (branch `claude/eval-resume-waits`)**
 After the 17:20 restart on 2026-11-14 the queue still held the lost FlashVSR+ Base run's jobs, nothing waited on them, and the resumed run (`recover`) queued copies: the same clip ran twice. `evals/core.py`: with `recover`, a queued or running job of the same role, model (or a variant of it) and params is waited on (`pending_job`), after a finished one is looked for (`done_job`), before a new job is queued.
 

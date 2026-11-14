@@ -1,7 +1,8 @@
 name: Database
 
-# Migrations (dbtool check) and the database tests on SQLite and on a throwaway PostgreSQL 18, through the shared workflow in
-# jburnhams/database. The unit workflow runs everything else.
+# Migrations (strata-db check: from empty, one head, drift, downgrade, stairway) and the database tests on SQLite and on a throwaway
+# PostgreSQL 18 service container, with strata_python.db (strata-python's [db] extra, at the version uv.lock pins). The unit workflow runs
+# everything else.
 on:
   push:
     branches: [main]
@@ -10,8 +11,28 @@ on:
 
 jobs:
   database:
-    uses: jburnhams/database/.github/workflows/app-db.yml@main
-    with:
-      # the versions uv.lock pins (strata-python too: `uv pip install -e .` would take its main, which may not match omarchy-db yet)
-      install: uv export --frozen --group dev --no-emit-project --no-hashes -o /tmp/locked.txt && uv pip install -r /tmp/locked.txt && uv pip install --no-deps -e .
-      tests: tests/unit/test_database.py tests/unit/test_store.py
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres  # throwaway CI container gitleaks:allow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      STRATA_DB_TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres  # throwaway CI container gitleaks:allow
+      STRATA_TEST_PG: "1"  # a Postgres that cannot be reached fails the job instead of skipping
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Migrations on SQLite and Postgres
+        run: uv run --locked strata-db check
+      - name: Database tests on SQLite
+        run: uv run --locked pytest tests/unit/test_database.py tests/unit/test_store.py -o addopts=
+      - name: Database tests on Postgres
+        run: uv run --locked pytest tests/unit/test_database.py tests/unit/test_store.py -o addopts= --pg
