@@ -9,6 +9,7 @@ Three shapes:
 `score(item, output)` returns what the shape needs, or None when the metric does not apply to that item (no reference, the job failed: a failed
 job counts as wrong for binary metrics and as all errors for ratios, never silently skipped)."""
 
+import collections
 import dataclasses
 import json
 import math
@@ -110,6 +111,94 @@ def _cer(item, output, error):
         return None
     r = list(" ".join(normalise(ref)))
     return (len(r) if error else edits(r, list(" ".join(normalise(transcript(output))))), len(r))
+
+
+def exact_chars(text):
+    """The characters of a transcription with case and punctuation kept (what `normalise` throws away: small capitals read as capitals, a full
+    stop read as a comma): only the typography that no reader can be held to is unified (curly quotes and apostrophes, the dashes, ligatures by
+    NFKC) and runs of whitespace, line breaks included, are one space."""
+    t = unicodedata.normalize("NFKC", text or "")
+    t = t.translate(
+        str.maketrans(
+            {
+                "\u2018": "'",
+                "\u2019": "'",
+                "\u201c": '"',
+                "\u201d": '"',
+                "\u2013": "-",
+                "\u2014": "-",
+                "\u2012": "-",
+                "\u00ad": None,
+            }
+        )
+    )
+    t = re.sub(r"\s+([.,;:!?)\]])", r"\1", " ".join(t.split()))  # "nose !" is how 1828 set it, not a reading error
+    return list(t)
+
+
+def _cer_exact(item, output, error):
+    ref = _ref_text(item)
+    if ref is None:
+        return None
+    r = exact_chars(ref)
+    return (len(r) if error else edits(r, exact_chars(transcript(output))), len(r))
+
+
+def _wer_bag(item, output, error):
+    """Word errors with the order ignored: the reference words a reading lacks or adds beyond it (whichever is more), over the reference words.
+    Beside `wer` it separates misread words from lines read in the wrong order (a title page read column by column)."""
+    ref = _ref_text(item)
+    if ref is None:
+        return None
+    r = collections.Counter(normalise(ref))
+    n = sum(r.values())
+    if error:
+        return (n, n)
+    h = collections.Counter(normalise(transcript(output)))
+    return (max(sum((r - h).values()), sum((h - r).values())), n)
+
+
+# OCR junk inside a word: a symbol no word holds, a digit among letters, a capital after a small letter, a run of five consonants, a letter
+# doubled three times. Old spellings and names pass all of these; "tbe", "wbich" (b for h) need a dictionary or the proofreading model.
+_JUNK = re.compile(
+    r"[|~^_<>{}\\»«¢§¥©®@#*=+\[\]]|\d\D*[^\W\d_]|[^\W\d_]\D*\d|[a-z][A-Z]|[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ]{5}|(\w)\1\1"
+)
+_LONE = re.compile(r"^[^\W\d_]$")
+_ORDINAL = re.compile(
+    r"^\d+(st|nd|rd|th|d)$", re.I
+)  # 3rd, 2d (old style), 21st: digits and letters that belong together
+
+
+def garbled_words(text):
+    """(junk words, words) in a reading: tokens on whitespace, outer punctuation stripped; junk is a word `_JUNK` matches, or a lone letter that
+    is not a, I, O or &."""
+    words = [w.strip(".,;:!?\"'()-\u2018\u2019\u201c\u201d") for w in (text or "").split()]
+    words = [w for w in words if w]
+    bad = sum(
+        1
+        for w in words
+        if (_JUNK.search(w) and not _ORDINAL.match(w)) or (_LONE.match(w) and w not in ("a", "A", "I", "O"))
+    )
+    return bad, len(words)
+
+
+def _garbled(item, output, error):
+    if error or not output:
+        return None
+    bad, n = garbled_words(transcript(output))
+    return (bad, n) if n else None
+
+
+UNCLEAR_CONF = 60.0  # Tesseract's word confidence (0-100) below which a word counts as unclear
+
+
+def _unclear(item, output, error):
+    """(words Tesseract was unsure of, words) on an `ocr` reading with word confidences; None for a reading without them (a vision-language
+    model's text)."""
+    if error or not isinstance(output, dict) or not output.get("lines"):
+        return None
+    confs = [w.get("conf") for ln in output["lines"] for w in (ln.get("words") or []) if w.get("conf") is not None]
+    return (sum(1 for c in confs if c < UNCLEAR_CONF), len(confs)) if confs else None
 
 
 # ---- speech (text to speech) -----------------------------------------------------------------------------------------------------------------
@@ -537,6 +626,38 @@ METRICS = {
             _wer,
         ),
         Metric("cer", "ratio", "lower", "Character error rate, the same on characters", "%", _cer),
+        Metric(
+            "cer_exact",
+            "ratio",
+            "lower",
+            "Character error rate with case and punctuation kept (only curly quotes, dashes and whitespace unified): small capitals, italics read as other letters, a wrong stop all count",
+            "%",
+            _cer_exact,
+        ),
+        Metric(
+            "wer_bag",
+            "ratio",
+            "lower",
+            "Word error rate with word order ignored: beside wer, what is left of it is misread or missing words, not lines in the wrong order",
+            "%",
+            _wer_bag,
+        ),
+        Metric(
+            "garbled",
+            "ratio",
+            "lower",
+            "Words that look like OCR junk (a stray symbol, a digit among letters, a capital inside a word, five consonants running, a lone letter): needs no reference",
+            "%",
+            _garbled,
+        ),
+        Metric(
+            "unclear",
+            "ratio",
+            "lower",
+            f"Words Tesseract itself was unsure of (confidence below {UNCLEAR_CONF:g}): needs no reference; none for a vision-language model's text",
+            "%",
+            _unclear,
+        ),
         Metric(
             "fidelity_ssim",
             "mean",

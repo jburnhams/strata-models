@@ -4,6 +4,17 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Better OCR scoring, and a harder OCR eval scored against Opus (branch `claude/project-thread-gl1u9l`)**
+The ocr-pages eval put qwen-read at 0.16 % CER, yet Jonathan saw unclear and plainly wrong text on most pages: `cer` ignores case and punctuation (small capitals typed as PUNCH, a stop read as a comma cost nothing) and the ten typed pages are not the worst ones. His plan: score the OCR better first, take the worst pages by kind of error as the test, and have a few strong-model calls (Opus) read them as the reference.
+
+- Metrics: `cer_exact` (case and punctuation kept, only curly quotes, dashes, whitespace and a space before a stop unified), `wer_bag` (word order ignored: separates misreads from lines read out of order, which is most of ward1874-p011's 47 %), and two that need no reference, for ranking pages nobody has typed: `garbled` (words that look like OCR junk: a stray symbol, a digit among letters, a capital inside a word, five consonants running, a lone letter) and `unclear` (words Tesseract gave a confidence under 60).
+- `scripts/evals/ocr_reference.py` (**new**): one strong model (default Opus 5.5 on the Claude API) reads each picked page once into `scripts/evals/ocr_hard/<item>.txt`; `SOURCES.json` keeps why the page was picked, the model, the cost, and on hand-typed pages its `cer_exact` against the typed text. A spend cap (`--max-usd`, default $1).
+- `ocr_pages.py`: `--refs` builds a dataset from another reference folder (`--refs scripts/evals/ocr_hard --name ocr-hard`), its tags from SOURCES.json.
+- `evals/specs/ocr-hard.toml` (**new**): Tesseract, the best cleaning, qwen and gemma (read and fix), and the cloud readers (Claude Haiku and Sonnet, Gemini Flash and Flash-Lite, NIM Nemotron and Gemma 4 31B, and Tesseract corrected by Haiku), on `cer_exact` with `cost_usd` per page.
+- `models.toml`: the cloud vision models also serve `ocr`, as eval candidates (they give no boxes).
+- `runtimes/cloud.py` `encode`: a picture over 5 MB (base64) is sent scaled to 2576 px on its long side, as PNG or else JPEG: a strata-scan page at full size is about 16 MB and the Claude API refuses one over 10 MB.
+- `scripts/evals/ocr_hard/` (**new**): Opus 5.5's readings of the ten worst pages, $0.28 in all; on the four of them that were hand-typed, `cer_exact` against the typing is 0.00 %.
+
 **Eval runs save each output as it finishes, and can recover a run lost to a restart (branch `claude/eval-save-each`)**
 A service restart at 12:26 on 2026-11-14 (a deploy) came in the middle of a 7-clip SeedVR2 batch: five clips had finished (about 32 min each) but none reached eval_results, because a batch of up to 32 jobs was saved only once all of them had been waited for.
 

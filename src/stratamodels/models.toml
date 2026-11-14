@@ -744,7 +744,7 @@ options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", timeo
 [models.claude-haiku-5-5-api]
 runtime = "claude-api"
 name = "Claude Haiku 5.5 (Claude API)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Anthropic commercial terms (paid per token)"
 source = "https://platform.claude.com/docs/en/about-claude/models/overview"
@@ -754,7 +754,7 @@ options = { model = "claude-haiku-5-5", price = { input = 0.10, output = 0.50, o
 [models.claude-sonnet-5-5-api]
 runtime = "claude-api"
 name = "Claude Sonnet 5.5 (Claude API)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Anthropic commercial terms (paid per token)"
 source = "https://platform.claude.com/docs/en/about-claude/models/overview"
@@ -764,7 +764,7 @@ options = { model = "claude-sonnet-5-5", price = { input = 2.00, output = 10.00,
 [models.claude-opus-5-5-api]
 runtime = "claude-api"
 name = "Claude Opus 5.5 (Claude API)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Anthropic commercial terms (paid per token)"
 source = "https://platform.claude.com/docs/en/about-claude/models/overview"
@@ -776,7 +776,7 @@ options = { model = "claude-opus-5-5", price = { input = 4.00, output = 20.00, c
 [models."gemini-3.8-flash-api"]
 runtime = "gemini-api"
 name = "Gemini 3.8 Flash (AI Studio API)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Google AI Studio terms (free tier, then paid per token)"
 source = "https://aistudio.google.com/docs/pricing"
@@ -786,7 +786,7 @@ options = { model = "gemini-3.8-flash", price = [{ input = 0.75, output = 3.75, 
 [models."gemini-3.5-flash-lite-api"]
 runtime = "gemini-api"
 name = "Gemini 3.5 Flash-Lite (AI Studio API)"
-roles = ["text", "vision-language", "judge-text"]
+roles = ["text", "vision-language", "judge-text", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Google AI Studio terms (free tier, then paid per token)"
 source = "https://aistudio.google.com/docs/pricing"
@@ -796,7 +796,7 @@ options = { model = "gemini-3.5-flash-lite", price = { input = 0.30, output = 2.
 [models.gemini-4-argon-api]
 runtime = "gemini-api"
 name = "Gemini 4 Argon (AI Studio API, paid key only: no free tier)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Google AI Studio terms (paid per token)"
 source = "https://aistudio.google.com/docs/pricing"
@@ -808,7 +808,7 @@ options = { model = "gemini-4-argon", keys = ["gemini"], price = [{ input = 2.00
 [models."nim-nemotron-3.5-super-vl"]
 runtime = "nvidia-nim"
 name = "Nemotron 3.5 Super VL 120B-A12B (NVIDIA NIM)"
-roles = ["text", "vision-language", "judge-text", "judge-vision"]
+roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "NVIDIA Open Model License (hosted, free tier)"
 source = "https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b"
@@ -828,7 +828,7 @@ options = { model = "mistralai/mistral-large-4-1t-a52b" }
 [models.nim-gemma-4-31b]
 runtime = "nvidia-nim"
 name = "Gemma 4 31B (NVIDIA NIM)"
-roles = ["text", "vision-language", "judge-text"]
+roles = ["text", "vision-language", "judge-text", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Gemma terms (hosted, free tier)"
 source = "https://build.nvidia.com/google/gemma-4-31b-it"

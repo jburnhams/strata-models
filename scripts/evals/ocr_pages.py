@@ -48,14 +48,16 @@ def get(url):
         return r.read()
 
 
-def from_strata_scan(base, books, out):
-    """{item: (png path, dpi)} for the items of the named books, fetched from strata-scan."""
+def from_strata_scan(base, books, out, items=None, refs=HERE):
+    """{item: (png path, dpi)} for the items of the named books, fetched from strata-scan: `items` (ids like ward1874-p019), else every item
+    with a reference in `refs`."""
     got = {}
+    if items is None:
+        items = [os.path.basename(r)[:-4] for r in sorted(glob.glob(os.path.join(refs, "*-p*.txt")))]
     for name, book_id in books.items():
         pages = json.loads(get(f"{base}/api/books/{book_id}/pages"))
         by_pos = {p["position"]: p["id"] for p in pages}
-        for ref in sorted(glob.glob(os.path.join(HERE, f"{name}-p*.txt"))):
-            item = os.path.basename(ref)[:-4]
+        for item in (i for i in items if i.startswith(f"{name}-p")):
             pos = int(re.sub(r"\D", "", item.rsplit("-p", 1)[1]))
             if pos not in by_pos:
                 continue
@@ -76,18 +78,27 @@ def main():
     ap.add_argument("--pages", help="or a folder of <item>.png")
     ap.add_argument("--dpi", type=float, help="the dpi of pictures in --pages that do not say")
     ap.add_argument("--name", default="ocr-pages")
+    ap.add_argument(
+        "--refs",
+        default=HERE,
+        help="the folder of <item>.txt references (default: the hand-typed ones; ocr_hard/ holds Opus's readings)",
+    )
     ap.add_argument("--seed", type=int, default=1)
     a = ap.parse_args()
     out = os.path.join(os.path.dirname(C.datasets_dir()), a.name)
     os.makedirs(out, exist_ok=True)
     if a.strata_scan:
-        found = from_strata_scan(a.strata_scan.rstrip("/"), dict(b.split("=", 1) for b in a.book), out)
+        found = from_strata_scan(a.strata_scan.rstrip("/"), dict(b.split("=", 1) for b in a.book), out, refs=a.refs)
     elif a.pages:
         found = {os.path.basename(p)[:-4]: (p, None) for p in glob.glob(os.path.join(a.pages, "*.png"))}
     else:
         sys.exit("give --strata-scan URL --book NAME=ID ... or --pages DIR")
     items, missing = [], []
-    for ref in sorted(glob.glob(os.path.join(HERE, "*.txt"))):
+    kinds = {}  # a reference folder's own tags: SOURCES.json {item: {kind, ...}} (ocr_hard: what the triage found wrong on the page)
+    if os.path.exists(os.path.join(a.refs, "SOURCES.json")):
+        with open(os.path.join(a.refs, "SOURCES.json"), encoding="utf8") as f:
+            kinds = {k: v.get("kind", "") for k, v in json.load(f).items()}
+    for ref in sorted(glob.glob(os.path.join(a.refs, "*.txt"))):
         item = os.path.basename(ref)[:-4]
         if item not in found:
             missing.append(item)
@@ -109,7 +120,7 @@ def main():
                 id=item,
                 input=dict(image=dest),
                 reference=dict(text=text),
-                tags=dict(book=book, hard=HARD.get(item, ""), dpi=round(dpi)),
+                tags=dict(book=book, hard=HARD.get(item) or kinds.get(item, ""), dpi=round(dpi)),
             )
         )
     if not items:
@@ -118,7 +129,7 @@ def main():
     ds = C.write_dataset(
         a.name,
         items,
-        description=f"Hard pages of two public-domain books (Ward 1874, Collier 1828) with hand-typed text; seed {a.seed}. Missing: {', '.join(missing) or 'none'}",
+        description=f"Hard pages of two public-domain books (Ward 1874, Collier 1828) with {'hand-typed text' if a.refs == HERE else 'reference text from ' + a.refs}; seed {a.seed}. Missing: {', '.join(missing) or 'none'}",
     )
     print(f"{len(ds.items)} items, version {ds.version}" + (f"; no page for {', '.join(missing)}" if missing else ""))
 

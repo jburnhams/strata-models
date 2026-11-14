@@ -1,0 +1,96 @@
+{
+ "collier1828-p024": {
+  "kind": "foreign",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.03266,
+  "tokens_in": 4945,
+  "tokens_out": 644,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ },
+ "collier1828-p041": {
+  "kind": "junk",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.030388,
+  "tokens_in": 4977,
+  "tokens_out": 524,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ },
+ "ward1874-p011": {
+  "kind": "order",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.031612,
+  "tokens_in": 4953,
+  "tokens_out": 590,
+  "date": "2026-11-14",
+  "cer_exact_vs_typed": 0.0,
+  "finish": "end_turn"
+ },
+ "ward1874-p012": {
+  "kind": "unclear",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.021032,
+  "tokens_in": 4923,
+  "tokens_out": 67,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ },
+ "ward1874-p017": {
+  "kind": "small-caps",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.034532,
+  "tokens_in": 4953,
+  "tokens_out": 736,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ },
+ "ward1874-p022": {
+  "kind": "small-caps",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.034252,
+  "tokens_in": 4923,
+  "tokens_out": 728,
+  "date": "2026-11-14",
+  "cer_exact_vs_typed": 0.0,
+  "finish": "end_turn"
+ },
+ "ward1874-p030": {
+  "kind": "display",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.025612,
+  "tokens_in": 4923,
+  "tokens_out": 296,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ },
+ "ward1874-p031": {
+  "kind": "dropped-lines",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.023332,
+  "tokens_in": 4953,
+  "tokens_out": 176,
+  "date": "2026-11-14",
+  "cer_exact_vs_typed": 0.0,
+  "finish": "end_turn"
+ },
+ "ward1874-p036": {
+  "kind": "display",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.028932,
+  "tokens_in": 4923,
+  "tokens_out": 462,
+  "date": "2026-11-14",
+  "cer_exact_vs_typed": 0.0,
+  "finish": "end_turn"
+ },
+ "ward1874-p042": {
+  "kind": "no-text",
+  "model": "claude-opus-5-5-api",
+  "cost_usd": 0.021072,
+  "tokens_in": 4953,
+  "tokens_out": 63,
+  "date": "2026-11-14",
+  "finish": "end_turn"
+ }
+}

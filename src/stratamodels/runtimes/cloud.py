@@ -39,6 +39,36 @@ PARAMS = {
 EFFORTS = ("low", "medium", "high")
 
 
+MAX_B64 = (
+    5 * 1024 * 1024
+)  # the largest picture sent as it is (base64): the Claude API refuses one over 10 MB, NIM's limits are lower still
+LONG_EDGE = 2576  # a bigger picture is scaled to this on its long side: the APIs scale it down anyway, so nothing they would read is lost
+
+
+def encode(path):
+    """(mime, base64) of a picture to send: as it is when it fits under MAX_B64, else a copy no longer than LONG_EDGE (a strata-scan page at
+    full size is about 16 MB), as PNG, or JPEG when the PNG is still too big."""
+    mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+    if os.path.getsize(path) * 4 / 3 < MAX_B64:
+        with open(path, "rb") as f:
+            return mime, base64.b64encode(f.read()).decode()
+    import io
+
+    from PIL import Image
+
+    with Image.open(path) as im:
+        im = im.convert("L" if im.mode in ("1", "L", "LA", "I", "I;16") else "RGB")
+        if max(im.size) > LONG_EDGE:
+            k = LONG_EDGE / max(im.size)
+            im = im.resize((round(im.width * k), round(im.height * k)), Image.Resampling.LANCZOS)
+        for fmt, kw in (("PNG", dict(optimize=True)), ("JPEG", dict(quality=90))):
+            buf = io.BytesIO()
+            im.save(buf, fmt, **kw)
+            if len(buf.getvalue()) * 4 / 3 < MAX_B64 or fmt == "JPEG":
+                return f"image/{fmt.lower()}", base64.b64encode(buf.getvalue()).decode()
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def parse(params):
     """{text, system, images: [(path, mime, base64)], schema, max_tokens, effort} from a job's params."""
     from stratamodels.runtimes import llama
@@ -69,8 +99,7 @@ def parse(params):
     for p in imgs:
         if not isinstance(p, str) or not os.path.isfile(p):
             raise RunError(f"no such image: {p!r}")
-        with open(p, "rb") as f:
-            images.append((p, mimetypes.guess_type(p)[0] or "image/jpeg", base64.b64encode(f.read()).decode()))
+        images.append((p, *encode(p)))
     effort = params.get("effort")
     if effort is not None and effort not in EFFORTS:
         raise RunError(f"effort is one of {', '.join(EFFORTS)}")
