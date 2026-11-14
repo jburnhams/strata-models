@@ -531,3 +531,19 @@ def test_allowances_default_to_the_cli_usage_readers(monkeypatch):
 
     monkeypatch.setitem(cloud.USAGE, "codex", lambda model: [("codex 5h", 0.5, None)])
     assert Allowances(cat()).left("codex", "sol")["left"] == 0.5
+
+
+def test_an_asked_tier_floor_holds_the_current_model_too():
+    o = by_key(ranked("cheapest", FakeAllowances(), min_tier=4))
+    assert o["qwen"]["reasons"] == ["tier 2 under 4 (asked)"] and o["qwen"]["current"]
+    assert by_key(ranked("cheapest", FakeAllowances()))["qwen"]["eligible"]
+
+
+def test_another_configuration_of_the_baselines_model_or_a_load_variant_is_not_its_verdict():
+    s = summary(
+        beam1=dict(model="qwen", verdict="reject", gain=-0.2, why="worse"),
+        int8=dict(model="gemma", verdict="reject", gain=-1.0),
+    )
+    s["experiment"]["candidates"][-3]["options"] = {"quant": "int8"}  # int8: gemma loaded another way
+    found = routing.evidence_from([s])
+    assert [f["verdict"] for f in found[("vl", "qwen")]] == ["baseline"] and ("vl", "gemma") not in found

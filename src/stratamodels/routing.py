@@ -190,12 +190,13 @@ def evidence_from(summaries):
         exp = (res or {}).get("experiment") or {}
         role, base = exp.get("role"), exp.get("baseline")
         per = ((res or {}).get("decision") or {}).get("per_candidate") or {}
+        base_model = next((c.get("model") for c in exp.get("candidates") or [] if c.get("name") == base), None)
         for c in exp.get("candidates") or []:
-            if c.get("stages"):
-                continue  # a pipeline: its verdict is the pipeline's, not the model's on its own
+            if c.get("stages") or c.get("options"):
+                continue  # a pipeline or a load variant: its verdict is that configuration's, not the model's as served
             name, model = c.get("name"), c.get("model")
-            if not model:
-                continue
+            if not model or (name != base and model == base_model):
+                continue  # no model, or the baseline's own model in another configuration (beam 1 against beam 5): tuning, not a model choice
             if name == base:
                 v = dict(experiment=exp.get("name"), candidate=name, verdict="baseline", why="")
             elif name in per:
@@ -486,7 +487,9 @@ def route(cat, opts, role, goal="cheapest", private=False, min_tier=None, allowa
                 + ", ".join(e["experiment"] for e in o["evals"]["found"] if e["verdict"] == "worse")
             )
         if (
-            not o["current"]
+            (
+                min_tier is not None or not o["current"]
+            )  # the current model sets the default floor; an asked one holds it too
             and floor is not None
             and o["tier"] is not None
             and o["tier"] < floor
