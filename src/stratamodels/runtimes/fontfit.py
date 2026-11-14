@@ -34,6 +34,7 @@ print is heavier than the font (ink spread; it is the fit's own unit, 0.5 less t
 stroke round the glyphs in ems of the size, what a renderer draws: measured on the word as rendered (the ink the lower threshold added, over
 the outline's length, both sides), 0 when the print is lighter, since a stroke cannot thin."""
 
+import difflib
 import json
 import os
 import re
@@ -173,12 +174,15 @@ def fetch(face_id, models_dir, get=_get):
         p = os.path.join(folder, f"{style}.ttf")
         if not os.path.isfile(p):
             data = get(url)
-            with open(p + ".part", "wb") as f:
+            part = f"{p}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part"  # a name of its own: parallel fits fetch the same face at once
+            with open(part, "wb") as f:
                 f.write(data)
-            os.replace(p + ".part", p)
+            os.replace(part, p)
         files[style] = p
-    with open(manifest, "w", encoding="utf8") as f:
+    part = f"{manifest}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part"
+    with open(part, "w", encoding="utf8") as f:
         json.dump(files, f, indent=1)
+    os.replace(part, manifest)
     return files
 
 
@@ -583,6 +587,13 @@ def parse_candidates(value):
         for name in (fid, e["family"].lower() + (" black" if fid.endswith("-black") else "")):
             for m in re.finditer(r"(?<![a-z0-9-])" + re.escape(name) + r"(?![a-z0-9-])", low):
                 hits.append((m.start(), -len(name), fid))
+    # a near miss of an id (gemma wrote "libra-bodoni" for libre-bodoni in 26 of 65 answers): the closest id, if it is close
+    ids = list(cat)
+    for m in re.finditer(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+", low):
+        if m.group(0) not in cat and not any(h[0] <= m.start() < h[0] - h[1] for h in hits):
+            near = difflib.get_close_matches(m.group(0), ids, n=1, cutoff=0.85)
+            if near:
+                hits.append((m.start(), -len(m.group(0)), near[0]))
     seen, out = set(), []
     for _, _, fid in sorted(hits):
         if fid not in seen:

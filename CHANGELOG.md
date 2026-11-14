@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**font-match: the first trial of the shortlists, and two fixes it found (branch `claude/project-thread-01gj43`)**
+Trial on omarchy (scripts/evals/font_match_trial.py, 36 real and 29 synthetic blocks, 2026-11-14). Real blocks: class right 19 % trying every face, 56 % with qwen's shortlist then the fit, 69 % gemma, 78 % Gemini Flash; ink_f1 0.85 / 0.82 / 0.82 / 0.83 (naive 0.58). Synthetic (face in the catalogue): every face wins, exact face 76 % (top 3 83 %) against Flash's 45 %, gemma 28 %, qwen 31 %. A shortlist decides the class; the fit adds about 0.1 ink_f1 and the size. Seconds a block: every face 19, gemma 6.5, qwen 8, Flash 22 (about $0.006 a call if charged).
+- `fetch` wrote every download to `<face>.ttf.part`, so parallel fits fetching the same face collided (52 failed fits at 6 jobs): each writer now has its own temporary name.
+- `parse_candidates` takes the closest id for a near miss (gemma wrote `libra-bodoni` for libre-bodoni in 26 of 65 answers).
+
 **page-layout: Tesseract's lines regrouped by a vision model (branch `claude/project-thread-dvu0cz`)**
 - `runtimes/pagebuild.py`: `list_lines` (Tesseract's lines numbered, in thousandths, split at wide gaps between words) and `groups` (a model's blocks named by those numbers, drawn with Tesseract's measured lines).
 - `evals/core.py`: a stage's `also` passes item fields as they are beside the one sent (the page image beside a text); kept out of the parsed stage when not given, so existing pipelines keep their result keys.
