@@ -144,6 +144,10 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         if steps:
             try:
                 with Image.open(path) as im:
+                    if (
+                        getattr(im, "n_frames", 1) > 1
+                    ):  # cleaning would keep the first frame only, and parse_tsv's refusal never sees the rest
+                        raise RunError(f"{path}: a picture with more than one page; give one page a job")
                     found = im.info.get("dpi")
                     dpi = dpi or (float(found[0]) if found and found[0] > 1 else None)
                     cleaned, dpi = pageclean.clean(im, steps, dpi)

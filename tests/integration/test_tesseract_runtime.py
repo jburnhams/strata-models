@@ -92,3 +92,7 @@ def test_cleans_a_shaded_page_before_reading_it(tmp_path):
         f.write("not a picture")
     with pytest.raises(RunError, match="not a picture"):
         tesseract.run(h, dict(image=str(tmp_path / "junk.png"), clean="flatten"))
+    with Image.open(p) as im:
+        im.save(tmp_path / "two.tif", save_all=True, append_images=[im.copy()])
+    with pytest.raises(RunError, match="more than one page"):
+        tesseract.run(h, dict(image=str(tmp_path / "two.tif"), clean="flatten"))
