@@ -248,3 +248,55 @@ def test_seedvr2_decodes_in_tiles_that_fit_the_12_gb_card():
 
     a = Registry.load().models["video-seedvr2-3b"].options["args"]
     assert a["vae_decode_tile_size"] <= 512 and a["vae_encode_tile_size"] <= 512 and a["vae_decode_tiled"] is True
+
+
+def test_flashvsr_reads_and_writes_in_segments():
+    # 2026-11-14: FlashVSR+ Base with decode-every "auto" held the whole 8 s clip, in and out, in RAM (20.6 GB): systemd-oomd killed the service
+    from stratamodels.registry import Registry
+
+    m = Registry.load().models
+    for k in ("video-flashvsr-plus-turbo", "video-flashvsr-plus-base"):
+        d = m[k].options["args"]["decode-every"]
+        assert isinstance(d, int) and d > 0 and d % 4 == 0
+
+
+def test_a_worker_can_be_capped_in_a_memory_scope_of_its_own(tmp_path):
+    # 2026-11-14: FlashVSR+ Base held 20+ GB of host RAM and systemd-oomd killed the whole service; a cap kills only the worker
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "bus").write_text("")
+    env = dict(XDG_RUNTIME_DIR=str(run))
+    cmd = ["/v/bin/python", "-u", "video.py"]
+    which = lambda name: "/usr/bin/systemd-run"
+    assert worker.capped(cmd, 16, env, which, "linux") == [
+        "/usr/bin/systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "-p",
+        "MemoryMax=16G",
+        "-p",
+        "MemorySwapMax=0",
+        "--",
+        *cmd,
+    ]
+    assert worker.capped(cmd, 7.5, env, which, "linux")[6] == "MemoryMax=7.5G"
+    assert worker.capped(cmd, None, env, which, "linux") == cmd  # no cap asked
+    assert worker.capped(cmd, 16, env, which, "darwin") == cmd  # no systemd
+    assert worker.capped(cmd, 16, env, lambda n: None, "linux") == cmd
+    assert worker.capped(cmd, 16, dict(XDG_RUNTIME_DIR=str(tmp_path / "none")), which, "linux") == cmd  # no user bus
+
+
+def test_the_heavy_video_models_are_capped():
+    from stratamodels.registry import Registry
+
+    m = Registry.load().models
+    for k in ("video-flashvsr-plus-turbo", "video-flashvsr-plus-base", "video-seedvr2-3b"):
+        assert 4 <= m[k].options["memory_max_gb"] <= 24
+
+
+def test_load_starts_a_capped_worker_through_systemd_run(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(worker, "capped", lambda cmd, gb, e=None: ["systemd-run", "--", *cmd] if gb else cmd)
+    _, procs = load(env, worker="echo", memory_max_gb=8)
+    assert procs[0].cmd[0] == "systemd-run" and procs[0].cmd[-1].endswith("echo.py")

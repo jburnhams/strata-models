@@ -88,3 +88,143 @@ model = "tesseract-eng"
 input = "{image}"
 send = "image"
 into = "prompt"
+
+# v2 presets add "plain text, no Markdown": haiku-read wrote italics as *asterisks* and flash-lite-read added table rules, which cer_exact counts
+# as wrong characters (2026-11-14). The v1 candidates stay for comparison.
+[[candidates]]
+name = "haiku-read-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-read-v2", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "flash-lite-read-v2"
+model = "gemini-3.5-flash-lite-api"
+params = { system_preset = "ocr-read-v2", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+[[candidates]]
+name = "tesseract-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+note = "the correction pass with the plain-text instruction"
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+input = "{image}"
+send = "image"
+into = "prompt"
+
+# ---- preprocessing: each Tesseract setting from ocr-pages, alone and under Haiku's correction pass (Jonathan, 2026-11-14: "what about
+# different amounts / types of preprocessing?"). Haiku sees the original page; the cleaning changes only the text Tesseract hands it. ----
+[[candidates]]
+name = "psm4"
+model = "tesseract-eng"
+params = { psm = 4 }
+
+[[candidates]]
+name = "flatten"
+model = "tesseract-eng"
+params = { clean = "flatten" }
+
+[[candidates]]
+name = "denoise"
+model = "tesseract-eng"
+params = { clean = "denoise" }
+
+[[candidates]]
+name = "adaptive"
+model = "tesseract-eng"
+params = { clean = "adaptive" }
+
+[[candidates]]
+name = "upscale"
+model = "tesseract-eng"
+params = { clean = "upscale" }
+
+[[candidates]]
+name = "flatten-sharpen"
+model = "tesseract-eng"
+params = { clean = "flatten,sharpen" }
+
+[[candidates]]
+name = "flatten-denoise-psm4"
+model = "tesseract-eng"
+params = { clean = "flatten,denoise", psm = 4 }
+
+[[candidates]]
+name = "psm4-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { psm = 4 }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "flatten-psm4-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "flatten", psm = 4 }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "flatten-sharpen-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "flatten,sharpen" }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "flatten-denoise-psm4-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "flatten,denoise", psm = 4 }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "upscale-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "upscale" }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "adaptive-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "tesseract-eng"
+params = { clean = "adaptive" }
+input = "{image}"
+send = "image"
+into = "prompt"
