@@ -592,3 +592,100 @@ def test_recover_waits_on_a_job_left_queued_by_a_run_a_restart_cut_short(setup, 
     finally:
         for st in started:
             st.set()
+
+
+MADE_FROM = """name = "made-from"
+question = "Does a refinement of an upscale beat it?"
+role = "echo"
+dataset = "speech"
+metrics = ["latency_s", "failed"]
+[decision]
+primary = "failed"
+baseline = "up"
+guards = {}
+[[candidates]]
+name = "up"
+model = "small"
+params = { speak = "an upscale" }
+[[candidates]]
+name = "other"
+model = "big"
+params = { speak = "another upscale" }
+[[candidates]]
+name = "refined"
+model = "small"
+from = ["up", "other"]
+params = { refine = { method = "blend", weight = 0.6 } }
+"""
+
+
+def _made_from_spec(text=MADE_FROM):
+    folder = os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs")
+    os.makedirs(folder, exist_ok=True)
+    open(os.path.join(folder, "made-from.toml"), "w").write(text)
+    return C.load_spec("made-from")
+
+
+def test_a_candidate_made_from_others_gets_their_outputs_and_runs_after_them(setup, scheduler, engine):
+    s = _made_from_spec()
+    assert s.candidate("refined").sources == ["up", "other"] and s.candidate("refined").to_json()["sources"] == [
+        "up",
+        "other",
+    ]
+    assert "sources" not in s.candidate("up").to_json()
+    stop = scheduler.start()
+    try:
+        r = C.run(s, engine, C.SchedulerExecutor(scheduler), limit=2, log=lambda m: None)
+        assert r == dict(ran=6, cached=0, failed=0)
+        ds = C.load_dataset(s.dataset)
+        jobs = [j for j in scheduler.store.list(limit=50) if (j.get("params") or {}).get("sources")]
+        assert len(jobs) == 2 and all(
+            j["params"]["sources"] == ["/fake/an_upscale.wav", "/fake/another_upscale.wav"] for j in jobs
+        )
+        assert jobs[0]["params"]["refine"] == dict(method="blend", weight=0.6)
+        it = ds.items[0]
+        before = C.result_key(s, s.candidate("refined"), it)
+        C.forget(
+            s, engine, candidate="up"
+        )  # a new output of a source makes the refinement anew: its key follows the source's
+        s2 = _made_from_spec(MADE_FROM.replace('speak = "an upscale"', 'speak = "a new upscale"'))
+        assert C.result_key(s2, s2.candidate("refined"), it) != before
+    finally:
+        stop.set()
+
+
+def test_a_made_from_candidate_waits_while_a_source_is_missing_or_failed(setup, scheduler, engine):
+    s = _made_from_spec(
+        MADE_FROM.replace('params = { speak = "another upscale" }', 'params = { fail = "out of memory" }')
+    )
+    stop = scheduler.start()
+    try:
+        log = []
+        r = C.run(s, engine, C.SchedulerExecutor(scheduler), limit=2, log=log.append)
+        assert r == dict(ran=4, cached=0, failed=2, waiting=2) and any(
+            "2 wait for the outputs they are made from" in m for m in log
+        )
+        assert not C.cached(
+            engine, {C.result_key(s, s.candidate("refined"), it): it for it in C.load_dataset(s.dataset).items[:2]}
+        )
+        assert C.sources_of(s, engine, s.candidate("refined"), C.load_dataset(s.dataset).items[0]) is None
+    finally:
+        stop.set()
+
+
+@pytest.mark.parametrize(
+    ("change", "match"),
+    [
+        ('from = ["up", "other"]', 'from = ["nobody"]'),
+        ('from = ["up", "other"]', 'from = ["refined"]'),
+    ],
+)
+def test_from_must_name_other_candidates(setup, change, match):
+    with pytest.raises(C.EvalError, match="from names no other candidate"):
+        C.parse_spec(__import__("tomllib").loads(MADE_FROM.replace(*((change, match)))))
+
+
+def test_a_candidate_cannot_be_made_from_one_that_is_itself_made_from_others(setup):
+    text = MADE_FROM + '[[candidates]]\nname = "twice"\nmodel = "small"\nfrom = ["refined"]\n'
+    with pytest.raises(C.EvalError, match="itself made from others"):
+        C.parse_spec(__import__("tomllib").loads(text))

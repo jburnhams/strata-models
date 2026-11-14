@@ -883,3 +883,98 @@ def test_a_reading_that_fails_never_fails_the_job(monkeypatch, tmp_path, clip, f
     assert M.METRICS["failed"].score({}, r, None) is False
     r2 = V.run(dict(path=clip, out_dir=str(tmp_path / "out"), quality=False), run_=FakeRun())
     assert r2["quality"] is None
+
+
+def test_refine_step_back_projection_blend_and_fallback():
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    lr = rng.random((12, 16, 3)).astype(np.float32)
+    exact = V._resize(lr, 32, 24)  # an upscale that agrees with the tape
+    invented = np.clip(
+        exact + 0.4 * (rng.random((24, 32, 3)).astype(np.float32) - 0.5), 0, 1
+    )  # one that adds what the tape lacks
+    err = lambda hr: float(np.abs(V._resize(hr, 16, 12) - lr).mean())
+    bp = V.refine_step("backproject", lr, [invented], dict(iterations=2, strength=1.0))
+    assert err(bp) < err(invented) / 2 and bp.min() >= 0 and bp.max() <= 1
+    half = V.refine_step("backproject", lr, [invented], {})  # default: one pass at half strength
+    assert err(bp) < err(half) < err(invented)
+    bl = V.refine_step(
+        "blend", lr, [np.ones((24, 32, 3), np.float32), np.zeros((24, 32, 3), np.float32)], dict(weight=0.25)
+    )
+    assert np.allclose(bl, 0.25)
+    fb = V.refine_step(
+        "fallback", lr, [invented, exact], dict(low=0.0, high=1e-6)
+    )  # every difference is "too much": all from the faithful one
+    assert np.allclose(fb, np.clip(exact, 0, 1), atol=1e-5)
+    keep = V.refine_step("fallback", lr, [invented], dict(low=10, high=20))  # nothing is: all the first source
+    assert np.allclose(keep, np.clip(invented, 0, 1), atol=1e-5)
+    assert V._box(np.arange(9, dtype=float).reshape(3, 3), 3)[1, 1] == 4.0
+
+
+def test_refine_engine_puts_the_tape_and_the_sources_through_refine_step(monkeypatch, tmp_path, clip, ffmpeg_on_path):
+    import numpy as np
+
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    a.write_bytes(b"x")
+    b.write_bytes(b"x")
+    V.load(dict(key="video-refine", vram_gb=0, options=dict(engine="refine")), str(tmp_path))
+    procs = []
+    lr = np.zeros((576, 768, 3), np.uint8).tobytes()
+    hr = np.full((1080, 1440, 3), 200, np.uint8).tobytes()
+
+    def popen(cmd, stdout=None, stdin=None, **kw):
+        data = lr * 2 if any("crop=" in str(c) for c in cmd) else hr * 3
+        p = types.SimpleNamespace(cmd=cmd, stdout=Pipe(data), stdin=Pipe(), wait=lambda: 0, kill=lambda: None, pid=1)
+        procs.append(p)
+        return p
+
+    seen = []
+    monkeypatch.setattr(
+        V,
+        "refine_step",
+        lambda method, lr_, hrs, r: seen.append((method, lr_.shape, [h.shape for h in hrs], r)) or hrs[0],
+    )
+    out = tmp_path / "out"
+    res = V.run(
+        dict(
+            path=clip,
+            crop=[14, 0, 692, 568],
+            out_dir=str(out),
+            sources=[str(a), str(b)],
+            refine=dict(method="blend", weight=0.6),
+        ),
+        run_=FakeRun(),
+        popen=popen,
+    )
+    assert (
+        seen == [("blend", (576, 768, 3), [(1080, 1440, 3)] * 2, dict(method="blend", weight=0.6))] * 2
+    )  # the tape had two frames
+    tape, *_ups, enc = procs
+    assert "hqdn3d" not in tape.cmd[tape.cmd.index("-vf") + 1] and enc.stdin.written == [1440 * 1080 * 3] * 2
+    assert res["engine"] == "refine" and res["peak_vram_mb"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("p", "match"),
+    [
+        (dict(refine=dict(method="sharpen")), "refine method"),
+        (dict(refine=dict(method="blend")), "needs the source outputs"),
+        (dict(refine=dict(method="blend"), sources=["/none.mp4"]), "needs the source outputs"),
+    ],
+)
+def test_refine_refuses_bad_params(tmp_path, clip, ffmpeg_on_path, p, match):
+    V.load(dict(key="video-refine", vram_gb=0, options=dict(engine="refine")), str(tmp_path))
+    with pytest.raises(protocol.ParamError, match=match):
+        V.run(dict(path=clip, out_dir=str(tmp_path / "o"), **p), run_=FakeRun())
+
+
+def test_blend_needs_two_sources(tmp_path, clip, ffmpeg_on_path):
+    a = tmp_path / "a.mp4"
+    a.write_bytes(b"x")
+    V.load(dict(key="video-refine", vram_gb=0, options=dict(engine="refine")), str(tmp_path))
+    with pytest.raises(protocol.ParamError, match="two sources"):
+        V.run(
+            dict(path=clip, out_dir=str(tmp_path / "o"), sources=[str(a)], refine=dict(method="blend")), run_=FakeRun()
+        )

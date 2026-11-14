@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**Refining an upscale toward the tape: candidates made from other candidates' outputs (branch `claude/video-refine`)**
+FlashVSR+ Turbo won every judged pair against lanczos but invents detail (Jonathan: "bad on the handwriting"), and its fidelity to the tape is the lowest of the candidates.
+
+- `evals/core.py`: a candidate's `from = [...]` names other candidates; its job params get their output paths as `sources`. It runs after them, waits while one is missing or failed (`waiting` in the result), and its result key includes theirs.
+- `workers/video.py`: engine `refine` (numpy and Pillow, CPU): `backproject` (correct by the difference between the tape and the result shrunk back, `iterations` x `strength`), `blend` (weight of the first source over the second), `fallback` (the second source where the first contradicts the tape locally). Measured on the title card: Turbo SSIM 0.938, one pass at half strength 0.970, full strength 0.990 (and back to lanczos's softness, with the tape's noise), a 60/40 blend with Real-ESRGAN x2 0.957.
+- `models.toml`: `video-refine` (vram 0). `video-enhance-vhs`: candidates turbo+backproject, turbo-blend-x2, turbo-fallback-x2.
+
 **strata-python 0.2.1 from PyPI: its database layer, test fakes, dev tools and web serving replace this repo's copies (branch `claude/project-thread-dvu0cz`)**
 strata-python is on PyPI now: the dependency is `strata-python[db]>=0.2.1,<0.3` instead of a git pin of its main, so a breaking change there reaches the service only through a deliberate edit of the range. **Deploy needs the service unit's environment changed first** (below).
 

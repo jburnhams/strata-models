@@ -120,6 +120,12 @@ A candidate's params may name a file under the service's data folder as `"{data}
 candidates, for one), so a spec in this public repository names no machine's paths. `{data}` is filled in when each job is made, so the
 result key, and with it every cached output, is the same as with the full path.
 
+## Made from other candidates
+A candidate may name `from = ["a", "b"]`: its job gets those candidates' output paths for the same item as `sources`, so a refinement of
+an upscale (back-projection, a blend) is judged like any candidate without running the upscalers again. It runs after them in the same run,
+waits (is not run, is not a failure) while any source is missing or failed, and its key includes theirs, so a new source output makes it
+anew. One level only: a source may not itself be made from others.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.
