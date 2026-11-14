@@ -248,3 +248,13 @@ def test_seedvr2_decodes_in_tiles_that_fit_the_12_gb_card():
 
     a = Registry.load().models["video-seedvr2-3b"].options["args"]
     assert a["vae_decode_tile_size"] <= 512 and a["vae_encode_tile_size"] <= 512 and a["vae_decode_tiled"] is True
+
+
+def test_flashvsr_reads_and_writes_in_segments():
+    # 2026-11-14: FlashVSR+ Base with decode-every "auto" held the whole 8 s clip, in and out, in RAM (20.6 GB): systemd-oomd killed the service
+    from stratamodels.registry import Registry
+
+    m = Registry.load().models
+    for k in ("video-flashvsr-plus-turbo", "video-flashvsr-plus-base"):
+        d = m[k].options["args"]["decode-every"]
+        assert isinstance(d, int) and d > 0 and d % 4 == 0

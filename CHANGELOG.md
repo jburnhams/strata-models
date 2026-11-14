@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-14
 
+**FlashVSR+ reads and writes in segments (branch `claude/flashvsr-decode-every`)**
+On 2026-11-14 at 17:20 systemd-oomd killed strata-models (29.1 GB memory peak, 27.1 GB swap) while FlashVSR+ Base ran: with `--decode-every auto` its CLI holds the whole input and the whole 1536 x 1152 output of an 8 s clip in RAM (20.6 GB for one process on a 46 GB machine). `models.toml`: Turbo and Base pass `decode-every = 28`, which reads, decodes and writes in segments (its IncrementalVideoWriter).
+
 **Cloud runtimes send a schema without its value bounds (branch `claude/project-thread-gl1u9l`)**
 The describe-photos stand-outs failed on every Claude model (400: "For 'integer' type, property 'minimum' is not supported") and on Gemini (400: "Request contains an invalid argument"): photo-describe-v1's schema bounds its integers and arrays, which llama.cpp's grammar takes and the vendors' structured outputs do not. `cloud.portable` drops `minimum`, `maximum`, `exclusive*`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `maxItems`, `uniqueItems`, `$schema` and a `minItems` above 1 before Claude, Gemini or NIM sees the schema; the shape (types, properties, required, enum, items, additionalProperties) stays enforced, and the bounds are in the preset's prompt as before.
 
