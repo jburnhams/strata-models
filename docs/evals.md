@@ -115,6 +115,16 @@ vision-language model read the same thing; `cer` decides, `wer` is context, and 
   pages nobody has typed.
 Ten items are few: expect "no clear difference" on small effects, and read the per-tag rows before changing strata-scan's defaults.
 
+## Page rebuild: how close a rebuilt PDF gets to the cleaned page
+The `page-build` role (`runtimes/pagebuild.py`, CPU) draws a page description (strata-python's `strata_python.pages`, the renderer
+strata-scan prints with) as a PDF with real text, plus its raster at the scan's dpi; it only draws, so every candidate of a page-rebuild
+eval differs in what fills the description (Tesseract's boxes, a layout model, a vision model's JSON, `font-match`'s fitted faces). The
+baseline is the plain overlay: `ocr` given instead of `page`, one block per Tesseract block, each line one roman span in Times.
+The reference is the cleaned page as a description (`reference.page`, boxes in scan pixels). Layout is scored by `block_f1` and
+`figure_f1` (parts matched at IoU 0.5, greedy, each once: a merged or split block matches nothing), `role_acc` (right role among the
+blocks found) and `order_tau` (Kendall's tau of the reading order of the blocks found); text by `cer_exact` on the text read back from the
+PDF. Separate evals per stage (layout, text, style, figures, whole page): see the tracking issue jburnhams/strata-models#67.
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.
