@@ -334,11 +334,11 @@ class Allowances:
 
 # ---- the options for a role -------------------------------------------------------------------------------------------------------------
 def _backend_of(cat, m):
-    """A registry model's backend: the one its options name (`backend`), else the first of its keys (`keys`: the gemini-api runtime tries
-    the free key, then the paid one, in the same call: it spends as the free one), else its runtime (claude-api, nvidia-nim, gemini-api);
+    """A registry model's backend: the one its options name (`backend`), else the first of its keys (`keys`: a gemini-api model uses the free key
+    alone unless its keys name the paid one, and spends as its first), else its runtime (claude-api, nvidia-nim, gemini-api);
     everything else runs here, on the GPU or, with no VRAM, the CPU."""
     opts = m.options or {}
-    keys = opts.get("keys") or (["gemini-free", "gemini"] if m.runtime == "gemini-api" else [])
+    keys = opts.get("keys") or (["gemini-free"] if m.runtime == "gemini-api" else [])
     first = {"gemini": "gemini-api"}.get(keys[0], keys[0]) if keys else None
     b = opts.get("backend") or (first if first in cat.backends else None) or m.runtime
     if b in cat.backends and cat.backends[b].kind != "local":
