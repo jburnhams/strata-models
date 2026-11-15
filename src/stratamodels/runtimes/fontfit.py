@@ -40,6 +40,7 @@ import os
 import re
 import time
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -187,11 +188,11 @@ def fetch(face_id, models_dir, get=_get):
             try:
                 data = get(url)
             except Exception as e:
-                if (
-                    style != "roman"
-                ):  # Fontsource's metadata lists every weight with every style, cuts the family lacks too (404)
+                # Fontsource's metadata lists every weight with every style, cuts the family lacks too: those answer 404 and are left out.
+                # Anything else (a timeout, a 5xx) fails the fetch, so no manifest records a style as missing that a retry would find.
+                if style != "roman" and isinstance(e, urllib.error.HTTPError) and e.code == 404:
                     continue
-                raise RunError(f"cannot download {face_id} from {url}: {e}") from e
+                raise RunError(f"cannot download {face_id} {style} from {url}: {e}") from e
             part = f"{p}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part"  # a name of its own: parallel fits fetch the same face at once
             with open(part, "wb") as f:
                 f.write(data)

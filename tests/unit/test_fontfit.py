@@ -4,6 +4,8 @@ catalogue's files, so nothing is downloaded."""
 
 import json
 import os
+import urllib.error
+from email.message import Message
 
 import numpy as np
 import pytest
@@ -157,8 +159,10 @@ def test_fetch_reads_fontsource_saves_each_style_and_reuses_it(tmp_path):
         calls.append(url)
         if url == F.FONTSOURCE + "old-standard-tt":
             return json.dumps(meta([400, 700], fam="os")).encode()
-        if url.startswith(F.FONTSOURCE) or "700-italic" in url:
-            raise OSError("404")  # a family that lacks the bold italic its metadata lists
+        if url.startswith(F.FONTSOURCE):
+            raise OSError("404")
+        if "700-italic" in url:  # a cut the metadata lists but the family lacks
+            raise urllib.error.HTTPError(url, 404, "Not Found", Message(), None)
         return url.encode()
 
     files = F.fetch("old-standard", str(tmp_path), get)
@@ -170,6 +174,19 @@ def test_fetch_reads_fontsource_saves_each_style_and_reuses_it(tmp_path):
         F.fetch("nonesuch", str(tmp_path), get)
     with pytest.raises(RunError, match="Fontsource has no"):
         F.fetch("tinos", str(tmp_path), get)
+
+
+def test_a_transient_failure_fails_the_fetch_and_records_nothing(tmp_path):
+    def get(url):
+        if url.startswith(F.FONTSOURCE):
+            return json.dumps(meta([400, 700])).encode()
+        if "italic" in url:
+            raise OSError("timed out")  # not a 404: the style may well exist
+        return b"ttf"
+
+    with pytest.raises(RunError, match="cannot download old-standard italic"):
+        F.fetch("old-standard", str(tmp_path), get)
+    assert not (tmp_path / "fonts" / "old-standard" / "manifest.json").exists()
 
 
 def test_fetch_takes_small_capitals_and_direct_files(tmp_path):
