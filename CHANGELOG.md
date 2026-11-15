@@ -2,6 +2,11 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-15
+
+**FlashVSR+ Turbo fits its memory cap again (branch `claude/project-thread-rea1ol`)**
+Since the 16 GB cap (#62) every Turbo job was OOM-killed at about 2 minutes. Measured on the title card under `systemd-run --scope -p MemoryMax=16G`: decode-every 12 killed at 16 GB, 8 completes (program memory ~14.4 GB at each segment's decode, 10.8 GB VRAM, 484 s a clip, as fast as before). `video-flashvsr-plus-turbo`: decode-every 8, memory_max_gb 20.
+
 ## 2026-11-14
 
 **The tape's horizontal smear: a cleanup step and the vhs-smear eval (branch `claude/vhs-smear`)**
