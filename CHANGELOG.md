@@ -7,6 +7,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 **FlashVSR+ Turbo fits its memory cap again (branch `claude/project-thread-rea1ol`)**
 Since the 16 GB cap (#62) every Turbo job was OOM-killed at about 2 minutes. Measured on the title card under `systemd-run --scope -p MemoryMax=16G`: decode-every 12 killed at 16 GB, 8 completes (program memory ~14.4 GB at each segment's decode, 10.8 GB VRAM, 484 s a clip, as fast as before). `video-flashvsr-plus-turbo`: decode-every 8, memory_max_gb 20.
 
+## 2026-11-15
+
+**page-layout: preset page-layout-fix-v2 for Claude (branch `claude/project-thread-dvu0cz`)**
+sonnet-fix (85.5 %) and haiku-fix (83.7 %) trailed flash-fix (95.5 %) by over-splitting: a play's speeches, a footnote's notes and a title page's byline each became several blocks, and a smudged running head was dropped. `page-layout-fix-v2` (**new**, same schema) says to split only by space or type size and to keep badly read lines; candidates `haiku-fix-v2`, `sonnet-fix-v2`, `opus-fix-v2` (Claude first: the larger budget). Tuned on these ten pages, so it needs pages it was not tuned on before it is adopted.
+
+**page-layout: ten more labelled pages, held out from the prompt tuning (branch `claude/project-thread-dvu0cz`)**
+`scripts/evals/page_layout/pages.toml` has ten more pages (Ward 1874 dialogue, songs and advertisements; Collier 1828 prose, verse, footnotes and a play), `set = "check"`: labelled after `page-layout-fix-v2` was written, so they test it on pages it was not tuned on (items carry the `set` tag: `tune` or `check`). They were grouped from Tesseract's numbered lines and fitted to the ink, so the fix approach's ceiling there is 99.8 % (97.6 % on the first ten) and the comparison between fix candidates is the fair one. Tesseract alone scores block_f1 53 % on them (77 % on the first ten). Rebuild the dataset on omarchy (`.venv/bin/python scripts/evals/page_layout.py`); only the new items run.
+
 ## 2026-11-14
 
 **The tape's horizontal smear: a cleanup step and the vhs-smear eval (branch `claude/vhs-smear`)**

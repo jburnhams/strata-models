@@ -8,6 +8,9 @@
 #   library stamp, a printer's signature mark or show-through
 # Labelled by Claude while building the eval (2026-11-14): rough boxes drawn from the page, then shrunk to the ink inside them. Check by
 # hand before trusting a small difference.
+# The pages with set = "check" (2026-11-15) were labelled after page-layout-fix-v2 was tuned on the first ten, to see whether it holds on
+# pages it was not tuned on. Their blocks were grouped by eye from Tesseract's numbered lines (or drawn by hand where Tesseract read the
+# display type badly: ward1874-leaf036), then fitted to the ink: shrunk to it, grown over ink that runs on past the lines' edge.
 
 [ward1874-leaf013]
 book = "ward1874"
@@ -190,5 +193,178 @@ blocks = [
   { role = "body", box = [201, 1094, 1268, 1411] },
   { role = "body", box = [97, 2543, 1422, 241] },
   { role = "footnote", box = [91, 2848, 1424, 272] },
+]
+figures = []
+
+[ward1874-leaf022]
+book = "ward1874"
+leaf = 22
+set = "check"
+kind = "dialogue"
+blocks = [
+  { role = "folio", box = [438, 409, 62, 47] },
+  { role = "running-head", box = [1154, 419, 492, 39] },
+  { role = "body", box = [435, 579, 1877, 3085] },
+]
+figures = []
+
+[ward1874-leaf026]
+book = "ward1874"
+leaf = 26
+set = "check"
+kind = "dialogue"
+blocks = [
+  { role = "folio", box = [369, 441, 63, 44] },
+  { role = "running-head", box = [1048, 453, 492, 35] },
+  { role = "body", box = [359, 608, 1863, 1068] },
+  { role = "body", box = [472, 1697, 1593, 165] },
+  { role = "body", box = [347, 1878, 1891, 1819] },
+]
+figures = []
+
+[ward1874-leaf028]
+book = "ward1874"
+leaf = 28
+set = "check"
+kind = "dialogue"
+blocks = [
+  { role = "folio", box = [408, 403, 63, 46] },
+  { role = "running-head", box = [1089, 420, 490, 36] },
+  { role = "body", box = [401, 577, 1861, 137] },
+  { role = "body", box = [680, 729, 1280, 229] },
+  { role = "body", box = [472, 970, 1373, 73] },
+  { role = "body", box = [678, 1054, 835, 164] },
+  { role = "body", box = [388, 1234, 1867, 2438] },
+]
+figures = []
+
+[ward1874-leaf033]
+book = "ward1874"
+leaf = 33
+set = "check"
+kind = "advert"
+blocks = [
+  { role = "running-head", box = [1087, 440, 473, 36] },
+  { role = "folio", box = [2164, 427, 85, 44] },
+  { role = "heading", box = [526, 621, 1635, 162] },
+  { role = "heading", box = [1119, 898, 439, 32] },
+  { role = "heading", box = [429, 1077, 1818, 150] },
+  { role = "heading", box = [1240, 1343, 193, 36] },
+  { role = "heading", box = [576, 1501, 1526, 124] },
+  { role = "body", box = [775, 1782, 1114, 80] },
+  { role = "heading", box = [589, 1994, 1497, 69] },
+  { role = "heading", box = [623, 2214, 1438, 132] },
+  { role = "heading", box = [996, 2423, 664, 36] },
+  { role = "heading", box = [560, 2570, 1538, 102] },
+  { role = "heading", box = [417, 2770, 1807, 197] },
+  { role = "heading", box = [939, 3016, 772, 68] },
+  { role = "heading", box = [490, 3171, 1679, 118] },
+  { role = "body", box = [949, 3363, 743, 68] },
+  { role = "heading", box = [747, 3554, 1144, 73] },
+]
+figures = [
+  { kind = "rule", box = [420, 2125, 1825, 29] },
+]
+
+[ward1874-leaf036]
+book = "ward1874"
+leaf = 36
+set = "check"
+kind = "advert"
+blocks = [
+  { role = "folio", box = [387, 409, 65, 46] },
+  { role = "running-head", box = [1085, 425, 482, 37] },
+  { role = "heading", box = [393, 582, 1844, 257] },
+  { role = "heading", box = [1098, 881, 425, 35] },
+  { role = "heading", box = [536, 979, 1547, 101] },
+  { role = "heading", box = [379, 1132, 1846, 338] },
+  { role = "heading", box = [1202, 1528, 208, 34] },
+  { role = "heading", box = [374, 1629, 1844, 198] },
+  { role = "heading", box = [921, 1870, 761, 78] },
+  { role = "heading", box = [366, 2014, 1861, 123] },
+  { role = "heading", box = [679, 2184, 1263, 83] },
+  { role = "heading", box = [367, 2306, 1849, 190] },
+  { role = "heading", box = [366, 2545, 1854, 133] },
+  { role = "heading", box = [702, 2726, 1182, 121] },
+  { role = "heading", box = [1201, 2901, 190, 32] },
+  { role = "heading", box = [564, 2941, 1455, 138] },
+  { role = "heading", box = [364, 3138, 1842, 81] },
+  { role = "heading", box = [1193, 3286, 192, 32] },
+  { role = "body", box = [575, 3388, 1416, 87] },
+  { role = "body", box = [1124, 3530, 918, 56] },
+  { role = "body", box = [1430, 3632, 737, 42] },
+]
+figures = []
+
+[collier1828-leaf045]
+book = "collier1828"
+leaf = 45
+set = "check"
+kind = "footnotes"
+blocks = [
+  { role = "running-head", box = [516, 857, 769, 33] },
+  { role = "folio", box = [1551, 845, 63, 46] },
+  { role = "body", box = [178, 991, 1440, 1534] },
+  { role = "footnote", box = [171, 2644, 1429, 483] },
+]
+figures = []
+
+[collier1828-leaf062]
+book = "collier1828"
+leaf = 62
+set = "check"
+kind = "prose"
+blocks = [
+  { role = "folio", box = [1005, 854, 62, 46] },
+  { role = "running-head", box = [1272, 864, 910, 34] },
+  { role = "body", box = [1007, 993, 1434, 2045] },
+]
+figures = []
+
+[collier1828-leaf080]
+book = "collier1828"
+leaf = 80
+set = "check"
+kind = "verse"
+blocks = [
+  { role = "folio", box = [978, 865, 61, 52] },
+  { role = "running-head", box = [1195, 867, 999, 49] },
+  { role = "body", box = [1131, 1007, 885, 550] },
+  { role = "body", box = [1131, 1596, 982, 545] },
+  { role = "body", box = [1132, 2195, 825, 548] },
+  { role = "footnote", box = [981, 2878, 1432, 348] },
+]
+figures = [
+  { kind = "rule", box = [1261, 2797, 842, 17] },
+]
+
+[collier1828-leaf121]
+book = "collier1828"
+leaf = 121
+set = "check"
+kind = "verse"
+blocks = [
+  { role = "running-head", box = [697, 866, 483, 34] },
+  { role = "folio", box = [1586, 859, 60, 43] },
+  { role = "body", box = [222, 995, 1421, 293] },
+  { role = "body", box = [215, 1467, 1425, 323] },
+  { role = "body", box = [367, 1845, 1228, 829] },
+  { role = "body", box = [211, 2731, 1426, 193] },
+  { role = "body", box = [369, 2986, 1032, 124] },
+]
+figures = []
+
+[collier1828-leaf150]
+book = "collier1828"
+leaf = 150
+set = "check"
+kind = "dialogue"
+blocks = [
+  { role = "folio", box = [1103, 838, 91, 45] },
+  { role = "running-head", box = [1463, 858, 717, 38] },
+  { role = "body", box = [1086, 980, 1430, 235] },
+  { role = "body", box = [1078, 1379, 1430, 201] },
+  { role = "heading", box = [1381, 1681, 811, 54] },
+  { role = "body", box = [1049, 1792, 1445, 1329] },
 ]
 figures = []
