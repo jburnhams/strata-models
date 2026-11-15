@@ -248,20 +248,21 @@ def test_gemini_load_checks(tmp_path, monkeypatch):
     with pytest.raises(RunError, match="keys are among"):
         gemini.load(model(model="g", keys=["other"]), "/m")
     with pytest.raises(RunError, match="no price"):
-        gemini.load(model(model="g"), "/m")
+        gemini.load(model(model="g", keys=["gemini-free", "gemini"]), "/m")
     with pytest.raises(RunError, match="no Google AI Studio key"):
         gemini.load(model(model="g", price=G), "/m")
     key_file(tmp_path, monkeypatch, GEMINI_FREE_API_KEY="free-0123456789")
-    h = gemini.load(model(model="g", keys=["gemini-free"]), "/m")
-    assert h["keys"] == ["gemini-free"] and h["price"] is None
+    h = gemini.load(model(model="g"), "/m")
+    assert h["keys"] == ["gemini-free"] and h["price"] is None  # the paid key only where a model names it
     gemini.unload(h)
     assert h == {}
 
 
 def test_gemini_free_first_then_paid(ledger, tmp_path, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(gemini, "_day_spent_until", {})
     key_file(tmp_path, monkeypatch, GEMINI_FREE_API_KEY="free-0123456789", GEMINI_API_KEY="paid-0123456789")
     settings.save(dict(gemini_budget_usd=1.0))
-    h = gemini.load(model("flash", model="gemini-3.8-flash", price=G), "/m")
+    h = gemini.load(model("flash", model="gemini-3.8-flash", price=G, keys=["gemini-free", "gemini"]), "/m")
     post = Post(reply('{"ok": 1}', cached=40))
     out = gemini.run(h, dict(prompt="hi", system="s", effort="low", schema={"type": "object"}), post=post)
     assert (out["text"], out["provider"], out["cost_usd"], out["tokens_in"], out["tokens_out"]) == (
@@ -301,7 +302,7 @@ def test_gemini_free_first_then_paid(ledger, tmp_path, monkeypatch):  # noqa: F8
 def test_gemini_budget_errors_and_blocks(ledger, tmp_path, monkeypatch):  # noqa: F811
     key_file(tmp_path, monkeypatch, GEMINI_API_KEY="paid-0123456789")
     settings.save(dict(gemini_budget_usd=0.001))
-    h = gemini.load(model(model="gemini-4-argon", price=G), "/m")
+    h = gemini.load(model(model="gemini-4-argon", price=G, keys=["gemini"]), "/m")
     with pytest.raises(spend.OverBudget):
         gemini.run(h, dict(prompt="hi"), post=Post({"totalTokens": 100}))  # 2048 tokens out at $10/M is $0.02
     with pytest.raises(RunError, match="refused to count the request \\(400\\)"):
@@ -319,10 +320,72 @@ def test_gemini_budget_errors_and_blocks(ledger, tmp_path, monkeypatch):  # noqa
 
 
 def test_gemini_free_only_runs_out(ledger, tmp_path, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(gemini, "_day_spent_until", {})
     key_file(tmp_path, monkeypatch, GEMINI_FREE_API_KEY="free-0123456789")
     h = gemini.load(model(model="g", keys=["gemini-free"]), "/m")
-    with pytest.raises(RunError, match="no Google AI Studio key could take this call: gemini-free: HTTP 503"):
+    with pytest.raises(RunError, match=r"free tier \(503\): HTTP 503: busy. The paid key is not tried for m: use agy"):
         gemini.run(h, dict(prompt="hi", image=None), post=Post(cloud.HttpError(503, "busy")))
+
+
+def per_minute(delay="7s"):
+    return cloud.HttpError(
+        429,
+        json.dumps(
+            {
+                "error": {
+                    "code": 429,
+                    "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": delay}],
+                }
+            }
+        ),
+    )
+
+
+DAILY = cloud.HttpError(
+    429,
+    '{"error": {"code": 429, "message": "Quota exceeded for metric: generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier."}}',
+)
+
+
+def test_gemini_never_falls_to_the_paid_key_unless_the_model_names_it(ledger, tmp_path, monkeypatch):  # noqa: F811
+    """2026-11-15: a font-match trial sent 62 of 64 calls to the paid key, each after the free tier's daily 429. Now the paid key is a last
+    resort a model chooses in models.toml; a per-minute 429 is waited out on the free key; a daily one is remembered until midnight Pacific."""
+    monkeypatch.setattr(gemini, "_day_spent_until", {})
+    key_file(tmp_path, monkeypatch, GEMINI_FREE_API_KEY="free-0123456789", GEMINI_API_KEY="paid-0123456789")
+    settings.save(dict(gemini_budget_usd=1.0))
+    slept = []
+    free = gemini.load(
+        model("flash", model="gemini-3.8-flash", price=G), "/m"
+    )  # both keys on file, the model names only the free one
+    post = Post(per_minute("7s"), per_minute("0.5s"), reply("ok"))
+    assert gemini.run(free, dict(prompt="hi"), post=post, sleep=slept.append)["provider"] == "gemini-free"
+    assert slept == [8.0, 1.5] and [c[2]["x-goog-api-key"] for c in post.calls] == ["free-0123456789"] * 3
+    post = Post(*[per_minute("1s")] * 4)
+    with pytest.raises(
+        RunError, match="free tier \\(429\\).*paid key is not tried"
+    ):  # three waits, then it gives up: never the paid key
+        gemini.run(free, dict(prompt="hi"), post=post, sleep=slept.append)
+    assert len(post.calls) == 4
+    with pytest.raises(RunError, match="free tier \\(429\\)"):  # a wait over a minute is not waited
+        gemini.run(free, dict(prompt="hi"), post=Post(per_minute("3600s")), sleep=slept.append)
+    post = Post(DAILY)
+    with pytest.raises(RunError, match="paid key is not tried"):
+        gemini.run(free, dict(prompt="hi"), post=post, sleep=slept.append)
+    with pytest.raises(RunError, match="daily quota is spent"):  # remembered: no call is sent until Google's day ends
+        gemini.run(free, dict(prompt="hi"), post=Post(), sleep=slept.append)
+    both = gemini.load(model("flash", model="gemini-3.8-flash", price=G, keys=["gemini-free", "gemini"]), "/m")
+    post = Post(
+        {"totalTokens": 10}, reply("paid")
+    )  # a model that names the paid key goes straight to it while the free day is spent
+    assert gemini.run(both, dict(prompt="hi"), post=post)["provider"] == "gemini"
+    assert [c[2]["x-goog-api-key"] for c in post.calls] == ["paid-0123456789"] * 2
+    t = 1_800_000_000.0
+    gemini._mark_day_spent("x", now=t)
+    assert gemini._day_spent("x", now=t) and not gemini._day_spent("x", now=t + 86_401)
+    assert (
+        gemini.free_wait(cloud.HttpError(503, "busy", retry_after=4.0)) == 4.0
+        and gemini.free_wait(cloud.HttpError(429, "not json")) is None
+    )
 
 
 # ---- nvidia-nim --------------------------------------------------------------------------------------------------------------------------

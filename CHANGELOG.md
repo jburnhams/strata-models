@@ -4,6 +4,16 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-15
 
+**The paid Gemini key is a deliberate last resort (branch `claude/project-thread-gl1u9l`)**
+A font-match trial sent 62 of 64 `gemini-3.8-flash-api` calls to the paid key (about $0.38). Each came after a free-tier 429 for the daily quota ("requests per day", limit 20 for gemini-3.8-flash), which the runtime turned into a silent fall-over to the paid key inside the same call.
+
+Now:
+- A `gemini-api` model uses the free key alone, unless its `keys` name the paid one. Argon keeps `keys = ["gemini"]`.
+- A free-tier 429 or 503 that names a wait of a minute or less is waited out and tried again on the free key, up to three times.
+- A daily-quota 429 is remembered per model until midnight Pacific, so later calls fail at once, without sending a request.
+- When the free tier refuses a call, the error names agy, or a model with the paid key, as the way forward.
+- `routing` ranks a Gemini model by its first key, with the free key as the default.
+
 **FlashVSR+ Turbo fits its memory cap again (branch `claude/project-thread-rea1ol`)**
 Since the 16 GB cap (#62) every Turbo job was OOM-killed at about 2 minutes. Measured on the title card under `systemd-run --scope -p MemoryMax=16G`: decode-every 12 killed at 16 GB, 8 completes (program memory ~14.4 GB at each segment's decode, 10.8 GB VRAM, 484 s a clip, as fast as before). `video-flashvsr-plus-turbo`: decode-every 8, memory_max_gb 20.
 

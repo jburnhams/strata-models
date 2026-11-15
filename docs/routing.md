@@ -22,7 +22,7 @@ curl http://omarchy:8366/api/allowances         # what is left on agy, codex and
 | `stratamodels.spend.per_task()` | what an API job really cost per role and model (the ledger, PR #57): replaces the tokens-times-price estimate once a model has jobs |
 | `evals.cloud.USAGE` / `stratamodels.spend.summary()` | what is left: agy and codex from their own CLIs (no model call), the API keys from their spend tracking |
 
-A `gemini-api` model spends as its first key (`options.keys`, default the free key then the paid one, falling over inside the call), so it ranks as the free offer; `keys = ["gemini"]` (Argon) ranks as the paid one.
+A `gemini-api` model spends as its first key (`options.keys`, default the free key alone), so it ranks as the free offer; `keys = ["gemini"]` (Argon) ranks as the paid one. The paid key is never a silent fall-over: a model reaches it only when its `keys` name it (2026-11-15).
 
 Costs stay in their own units: GPU seconds, a share of a subscription window, requests (NIM), dollars. `usd_equiv` puts all of them in dollars (electricity; the plan's price spread over its calls) only to read side by side.
 

@@ -3,7 +3,7 @@ the model's `price` in models.toml at the time of the call.
 
 Providers (one per key, see keys.py):
   claude        Claude API (paid): budget `claude_budget_usd`, rollover `claude_rollover`
-  gemini        Google AI Studio, the paid key: budget `gemini_budget_usd`, rollover `gemini_rollover`; only after gemini-free
+  gemini        Google AI Studio, the paid key: budget `gemini_budget_usd`, rollover `gemini_rollover`; only for a model whose keys name it
   gemini-free   Google AI Studio, the free tier: rate-limited, no budget
   nim           NVIDIA NIM (build.nvidia.com): free, rate-limited, no budget
 None of the vendors shows a key's remaining credit to that key (checked 2026-11-14), so the ledger is the only count: a budget is what the
