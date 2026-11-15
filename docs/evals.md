@@ -161,8 +161,8 @@ anew. One level only: a source may not itself be made from others.
 ## Fonts: which face a scanned block was printed in (`font-match`)
 The role (`runtimes/fontfit.py`, CPU) sets a block's words, from Tesseract's boxes, in a candidate face and searches size, width (hscale),
 tracking and weight to make the rendering's ink agree with the scan's (`evals/ink.py`: F1 with a pixel or two of tolerance); each word then
-keeps the style that fits it, and the face that agrees best wins. Faces are open period fonts from Google Fonts (`runtimes/fonts.toml`, 57 in
-10 classes after Vox-ATypI with the 19th-century display kinds apart: modern, fat face, Clarendon, slab, grotesque, decorated...).
+keeps the style that fits it, and the face that agrees best wins. Faces are open period fonts fetched from Fontsource (every Google Fonts family and more; a few, such as Century
+Schoolbook and Latin Modern, from CTAN), listed in `runtimes/fonts.toml` (74 in 10 classes after Vox-ATypI with the 19th-century display kinds apart: modern, fat face, Clarendon, slab, grotesque, decorated...).
 - **Dataset** (`scripts/evals/font_match.py`, from archive.org, no strata-scan needed): 38 real blocks of Ward 1874 and Collier 1828
   (`font_match/regions.toml`, class and style labelled by eye) and 30 synthetic blocks, the books' text set in a known catalogue face and
   printed badly (ink spread or starved, paper tone, noise, blur, tilt). Period type mostly exists in no font file, so real blocks are scored

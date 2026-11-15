@@ -82,7 +82,6 @@ STROKE_PER_WEIGHT = (
     20.0  # weight_delta per em of stroke: a coverage threshold 0.1 lower thickens a stem by about a 200th of the size
 )
 WORK_XH = 26.0  # the fit runs with the x-height scaled to about this many pixels: enough for serifs, fast enough for every face
-UA = "Mozilla/4.0"  # Google Fonts' CSS API answers an old browser with TrueType files, which FreeType and PDFs take
 
 
 def closeness(a, b):
@@ -105,34 +104,60 @@ def catalogue():
 
 
 # ---- fetching the files --------------------------------------------------------------------------------------------------------------------
+# Fontsource (fontsource.org) is the one source: every Google Fonts family and the other open fonts it hosts, each weight and style a TrueType
+# file at a versioned URL (its JSON API names them), so a fit is reproducible and nothing parses Google's CSS. The latin subset keeps the
+# kerning and the ligatures. A face that Fontsource lacks (the TeX Gyre and Latin Modern faces from CTAN) gives its files' URLs in fonts.toml.
+FONTSOURCE = "https://api.fontsource.org/v1/fonts/"
+BOLD = 700
+
+
 def _get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(url, headers={"User-Agent": "strata-models"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read()
 
 
-def _css(family, axes, get):
-    q = urllib.parse.quote_plus(family) + (f":{axes}" if axes else "")
-    try:
-        return get(f"https://fonts.googleapis.com/css2?family={q}").decode()
-    except Exception:
-        return None
+def fontsource_id(family):
+    return re.sub(r"[^a-z0-9]+", "-", family.lower()).strip("-")
 
 
-def parse_css(css):
-    """[(style 'normal'|'italic', weight int, url)] from a Google Fonts stylesheet."""
-    out = []
-    for block in re.findall(r"@font-face\s*{(.*?)}", css, re.S):
-        st = re.search(r"font-style:\s*(\w+)", block)
-        wt = re.search(r"font-weight:\s*(\d+)", block)
-        url = re.search(r"url\((https://[^)]+)\)", block)
-        if st and wt and url:
-            out.append((st.group(1), int(wt.group(1)), url.group(1)))
+def _nearest(weights, w):
+    return min(weights, key=lambda x: (abs(x - w), -x)) if weights else None
+
+
+def fontsource_urls(meta, weight=400, bold=True):
+    """{style: ttf url} from a Fontsource font's metadata: the roman and italic at `weight` (or the nearest it has), and at 700 as bold when
+    the face is not itself heavy and the family has a bold."""
+    variants = meta.get("variants") or {}
+    have = sorted(int(w) for w in variants)
+    w = _nearest(have, weight)
+    if w is None:
+        return {}
+    picks = {"roman": (w, "normal"), "italic": (w, "italic")}
+    if bold and weight < 600 and BOLD in have and w != BOLD:
+        picks.update({"bold": (BOLD, "normal"), "bold-italic": (BOLD, "italic")})
+    out = {}
+    for style, (wt, st) in picks.items():
+        subsets = variants.get(str(wt), {}).get(st) or {}
+        sub = subsets.get("latin") or subsets.get(meta.get("defSubset", "")) or next(iter(subsets.values()), None)
+        url = (sub or {}).get("url", {}).get("ttf")
+        if url:
+            out[style] = url
+    if "roman" not in out and "italic" in out:  # an italic-only family: its one cut is what it prints
+        out["roman"] = out.pop("italic")
     return out
 
 
+def _fontsource(family, get, **kw):
+    try:
+        meta = json.loads(get(FONTSOURCE + fontsource_id(family)).decode())
+    except Exception:
+        return {}
+    return fontsource_urls(meta, **kw) if isinstance(meta, dict) else {}
+
+
 def fetch(face_id, models_dir, get=_get):
-    """{style: ttf path} of a catalogue face, downloaded once into <models_dir>/fonts/<id>/ (a manifest.json records what the family has)."""
+    """{style: font path} of a catalogue face, downloaded once into <models_dir>/fonts/<id>/ (a manifest.json records what the family has)."""
     entry = catalogue().get(face_id)
     if entry is None:
         raise RunError(f"no face {face_id!r} in fonts.toml")
@@ -143,37 +168,30 @@ def fetch(face_id, models_dir, get=_get):
             files = json.load(f)
         if all(os.path.isfile(p) for p in files.values()):
             return files
-    w = int(entry.get("weight", 400))
-    bold = 700 if w < 600 else None
-    pairs = [(0, w), (1, w)] + ([(0, bold), (1, bold)] if bold else [])
-    ital = ";".join(f"{a},{b}" for a, b in sorted(pairs))  # the API refuses tuples out of order
-    tries = [f"ital,wght@{ital}", f"ital,wght@0,{w};1,{w}", f"wght@{w}" + (f";{bold}" if bold else ""), f"wght@{w}", ""]
-    found = []
-    for axes in tries:
-        css = _css(entry["family"], axes, get)
-        if css:
-            found = parse_css(css)
-            if found:
-                break
-    if not found:
-        raise RunError(f"Google Fonts has no {entry['family']!r} (face {face_id})")
-    want = {("normal", w): "roman", ("italic", w): "italic"}
-    if bold:
-        want.update({("normal", bold): "bold", ("italic", bold): "bold-italic"})
-    urls = {want[(s, wt)]: u for s, wt, u in found if (s, wt) in want}
-    if "roman" not in urls:  # a one-weight display face: its only cut is its roman
-        urls["roman"] = found[0][2]
-    if entry.get("sc"):
-        css = _css(entry["sc"], "", get)
-        sc = parse_css(css) if css else []
-        if sc:
-            urls["small-caps"] = sc[0][2]
+    if entry.get("files"):
+        urls = dict(entry["files"])
+    else:
+        urls = _fontsource(entry["family"], get, weight=int(entry.get("weight", 400)))
+        if not urls:
+            raise RunError(f"Fontsource has no {entry['family']!r} (face {face_id})")
+        if entry.get("sc"):
+            sc = _fontsource(entry["sc"], get, bold=False)
+            if sc.get("roman"):
+                urls["small-caps"] = sc["roman"]
     os.makedirs(folder, exist_ok=True)
     files = {}
     for style, url in urls.items():
-        p = os.path.join(folder, f"{style}.ttf")
+        ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+        p = os.path.join(folder, f"{style}{ext if ext in ('.otf', '.ttf') else '.ttf'}")
         if not os.path.isfile(p):
-            data = get(url)
+            try:
+                data = get(url)
+            except Exception as e:
+                if (
+                    style != "roman"
+                ):  # Fontsource's metadata lists every weight with every style, cuts the family lacks too (404)
+                    continue
+                raise RunError(f"cannot download {face_id} from {url}: {e}") from e
             part = f"{p}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part"  # a name of its own: parallel fits fetch the same face at once
             with open(part, "wb") as f:
                 f.write(data)

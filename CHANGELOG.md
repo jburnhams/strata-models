@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-15
 
+**font-match: fonts from Fontsource, 17 more period faces, Claude shortlists (branch `claude/project-thread-01gj43`)**
+Jonathan (2026-11-15): prefer Claude models (far more budget there); Fontsource as one list with one fetch method.
+- `runtimes/fontfit.py`: `fetch` reads Fontsource's JSON API (`api.fontsource.org/v1/fonts/<id>`): versioned latin-subset TrueType files (kerning and ligatures kept) instead of parsing Google's CSS; a face in `fonts.toml` may give its files' URLs instead. Cuts the metadata lists but the CDN lacks (a bold italic) are left out; only a missing roman fails.
+- `runtimes/fonts.toml`: 57 → 74 faces. From Fontsource: Besley (Clarendon), Goudy Bookletter 1911, Castoro, Source Serif 4, Newsreader, Unna, Antic Didone, Bigshot One, Bevan, Chunk Five, Wellfleet, Vast Shadow, Grenze Gotisch, Petit Formal Script. From CTAN (GUST licence): TeX Gyre Schola (Century Schoolbook: the Scotch/Century gap), TeX Gyre Bonum (Bookman, Old Style Antique 1858), Latin Modern (Modern Extended 1896). Preset `font-propose-v1` lists them.
+- Spec `font-match`: `haiku-fit` on every block, `sonnet-fit` and `opus-fit` (new), a Sonnet judge.
+
 **FlashVSR+ Turbo fits its memory cap again (branch `claude/project-thread-rea1ol`)**
 Since the 16 GB cap (#62) every Turbo job was OOM-killed at about 2 minutes. Measured on the title card under `systemd-run --scope -p MemoryMax=16G`: decode-every 12 killed at 16 GB, 8 completes (program memory ~14.4 GB at each segment's decode, 10.8 GB VRAM, 484 s a clip, as fast as before). `video-flashvsr-plus-turbo`: decode-every 8, memory_max_gb 20.
 

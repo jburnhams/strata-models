@@ -386,8 +386,8 @@ runtime = "fontfit"
 name = "fontfit"
 roles = ["font-match"]
 vram_gb = 0.0
-licence = "fonts: SIL Open Font License (each face's own, from Google Fonts)"
-source = "https://fonts.google.com (faces listed in runtimes/fonts.toml)"
+licence = "fonts: SIL Open Font License (Fontsource / Google Fonts faces) or GUST Font License (TeX Gyre, Latin Modern), each face's own"
+source = "https://fontsource.org and CTAN (faces listed in runtimes/fonts.toml)"
 used_by = []
 options = { top = 6 }
 
