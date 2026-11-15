@@ -174,3 +174,70 @@ input = "{context}"
 send = "context"
 also = ["image"]
 into = "groups"
+
+# ---- page-layout-fix-v2: v1 split blocks by meaning (a play's speeches, a footnote's notes, a byline's lines) where the print keeps them one,
+# and dropped a smudged running head (sonnet-fix, haiku-fix on 2026-11-14); v2 says to split only by space or type size, and to keep badly
+# read lines. Claude first (the larger budget); tuned on these pages, so check it on pages it was not tuned on before adopting
+
+[[candidates]]
+name = "haiku-fix-v2"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates]]
+name = "sonnet-fix-v2"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates]]
+name = "opus-fix-v2"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-opus-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
