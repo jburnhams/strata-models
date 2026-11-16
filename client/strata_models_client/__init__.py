@@ -144,7 +144,8 @@ def summarise(
     context = dict(title=title, purpose=purpose, audience=audience, target_size=target_size, inputs=list(inputs))
     params.setdefault("max_tokens", 1500)
     params.setdefault("effort", "low")
-    return run("summarise", dict(preset="summarise-v3-xml", context=context, **params), app, priority=priority, model=model, timeout=timeout)
+    params.setdefault("preset", "summarise-v3-xml")
+    return run("summarise", dict(params, context=context), app, priority=priority, model=model, timeout=timeout)
 
 
 def role_model(role):

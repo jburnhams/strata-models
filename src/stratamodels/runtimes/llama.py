@@ -58,6 +58,7 @@ PARAMS = {
     "temperature",
     "seed",
     "think",
+    "effort",
 }
 
 
