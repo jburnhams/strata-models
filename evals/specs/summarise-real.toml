@@ -1,0 +1,58 @@
+name = "summarise-real"
+question = "On real enriched Library books from strata-listory, which local or cloud model produces the clearest, most faithful one-paragraph summary of what each book is about and what listeners like and dislike?"
+role = "summarise"
+dataset = "book-summarise-real-10"
+metrics = ["judged", "latency_s", "cost_usd", "failed"]
+judge = true
+
+[decision]
+primary = "judged"
+baseline = "claude-opus-5-5"
+min_effect = 0.1
+guards = { failed = 1.0 }
+
+[[judges]]
+name = "sonnet"
+kind = "text"
+model = "claude-sonnet-5-5-api"
+pairs = "baseline"
+limit = 100
+criteria = "Which summary is clearer, more faithful to the provided synopsis and reviews (no invented facts), covers both what the book is about and what listeners like and dislike, and stays concise (3-4 sentences)?"
+
+[[candidates]]
+name = "qwen3.5-9b-vl"
+model = "qwen3.5-9b-vl"
+note = "Current default local 9B model"
+
+[[candidates]]
+name = "gemma-4-12b-vl"
+model = "gemma-4-12b-vl"
+note = "Local Gemma 4 12B QAT"
+
+[[candidates]]
+name = "gemma-4-26b-a4b-vl"
+model = "gemma-4-26b-a4b-vl"
+note = "Local Gemma 4 26B-A4B MoE"
+
+[[candidates]]
+name = "qwen3.8-27b-vl"
+model = "qwen3.8-27b-vl"
+note = "Local Qwen 3.8 27B"
+
+[[candidates]]
+name = "claude-haiku-5-5"
+model = "claude-haiku-5-5-api"
+note = "Cloud: Claude Haiku 5.5"
+
+[[candidates]]
+name = "claude-sonnet-5-5"
+model = "claude-sonnet-5-5-api"
+note = "Cloud: Claude Sonnet 5.5"
+
+[[candidates]]
+name = "claude-opus-5-5"
+model = "claude-opus-5-5-api"
+note = "Cloud: Claude Opus 5.5"
+
+# Excluded from re-runs after failing in round 1: gemini-3.8-flash-api (100% 503), nim-gemma-4-31b (70% 504 timeouts),
+# nim-nemotron-3.5-super-vl & nim-mistral-large-4 (empty text at max_tokens = 400).

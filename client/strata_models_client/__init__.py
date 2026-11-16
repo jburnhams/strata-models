@@ -127,6 +127,27 @@ def ocr(path, app, priority="normal", model=None, **params):
     return run("ocr", params, app, priority=priority, model=model)
 
 
+def summarise(
+    inputs,
+    app,
+    *,
+    purpose="",
+    audience="",
+    target_size="one short paragraph (3-4 sentences)",
+    title="",
+    priority="normal",
+    model=None,
+    timeout=None,
+    **params,
+):
+    """Distill a set of input texts (`inputs`) for a `purpose`, `audience`, and `target_size` using role `summarise`."""
+    context = dict(title=title, purpose=purpose, audience=audience, target_size=target_size, inputs=list(inputs))
+    params.setdefault("max_tokens", 1500)
+    params.setdefault("effort", "low")
+    params.setdefault("preset", "summarise-v3-xml")
+    return run("summarise", dict(params, context=context), app, priority=priority, model=model, timeout=timeout)
+
+
 def role_model(role):
     """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
     by an earlier model is made again when an eval changes the role's model."""

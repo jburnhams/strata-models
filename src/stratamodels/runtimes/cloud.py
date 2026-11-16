@@ -175,8 +175,10 @@ def logged(job):
 
 
 def answer(job, text, finish=None):
-    """{text, json?}: the JSON parsed when a schema was asked for. An answer that does not parse fails the job (RunError), so no caller (or
+    """{text, json?}: the JSON parsed when a schema was asked for. An empty answer or one that does not parse fails the job (RunError), so no caller (or
     eval) takes it for an answer; the call is already in the spend ledger by then."""
+    if not (text or "").strip():
+        raise RunError(f"empty response (finish {finish})")
     out = dict(text=text)
     if job["schema"]:
         try:

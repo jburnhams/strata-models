@@ -151,7 +151,7 @@ def test_requests_presets_and_refusals(setup):
         dict(image=str(img), preset="page-layout-fix-v1", context="1 b1 [0,0,9,9] PUNCH\n2 b2 [0,20,9,29] 17")
     )
     assert "PUNCH\n2 b2" in body["messages"][0]["content"][-1]["text"]
-    body, schema = llama.request(dict(prompt="what is it?", system="be brief", schema=False, think=True))
+    body, schema = llama.request(dict(prompt="what is it?", system="be brief", schema=False, think=True, effort="low"))
     assert (
         schema is False
         and "response_format" not in body
@@ -186,6 +186,19 @@ def test_requests_presets_and_refusals(setup):
         with pytest.raises(RunError, match=msg):
             llama.request(p)
 
+    import strata_models_client as sm
+
+    seen_runs = []
+    orig_run = sm.run
+    sm.run = lambda role, params, app, **kw: seen_runs.append((role, params, app, kw)) or {}
+    try:
+        sm.summarise([{"source": "s", "text": "t"}], "app")
+        sm.summarise([{"source": "s", "text": "t"}], "app", preset="summarise-v1", effort="medium")
+    finally:
+        sm.run = orig_run
+    assert seen_runs[0][1]["preset"] == "summarise-v3-xml" and seen_runs[0][1]["effort"] == "low"
+    assert seen_runs[1][1]["preset"] == "summarise-v1" and seen_runs[1][1]["effort"] == "medium"
+
 
 def test_run_parses_the_answer_and_measures_vram(setup):
     tmp, img = setup
@@ -215,6 +228,11 @@ def test_run_parses_the_answer_and_measures_vram(setup):
     )
     with pytest.raises(RunError, match="ran out of tokens .finish length, 8000 tokens out"):
         llama.run(h, dict(prompt="x", schema={"type": "object"}), probe=lambda: None, post=cut)
+    with pytest.raises(RunError, match="empty response: it ran out of tokens .finish length, 8000 tokens out"):
+        llama.run(h, dict(prompt="x"), probe=lambda: None, post=cut)
+    empty_stop = lambda url, body: dict(choices=[dict(message=dict(content="  "), finish_reason="stop")], usage={})
+    with pytest.raises(RunError, match="empty response .finish stop"):
+        llama.run(h, dict(prompt="x"), probe=lambda: None, post=empty_stop)
     assert "json" not in llama.run(h, dict(prompt="x"), probe=lambda: None, post=bad)
     h["vision"] = False
     with pytest.raises(RunError, match="no projector"):
@@ -240,6 +258,19 @@ def test_recordings_go_as_input_audio_after_the_pictures(setup):
     ]:
         with pytest.raises(RunError, match=msg):
             llama.request(p)
+
+    import strata_models_client as sm
+
+    seen_runs = []
+    orig_run = sm.run
+    sm.run = lambda role, params, app, **kw: seen_runs.append((role, params, app, kw)) or {}
+    try:
+        sm.summarise([{"source": "s", "text": "t"}], "app")
+        sm.summarise([{"source": "s", "text": "t"}], "app", preset="summarise-v1", effort="medium")
+    finally:
+        sm.run = orig_run
+    assert seen_runs[0][1]["preset"] == "summarise-v3-xml" and seen_runs[0][1]["effort"] == "low"
+    assert seen_runs[1][1]["preset"] == "summarise-v1" and seen_runs[1][1]["effort"] == "medium"
     h = llama.load(model(), str(tmp), popen=FakeProc)
     h["vision"] = False
     with pytest.raises(RunError, match="hear recordings"):
