@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["premise", "liked", "disliked", "summary"],
+  "properties": {
+    "premise": { "type": "string" },
+    "liked": { "type": "string" },
+    "disliked": { "type": "string" },
+    "summary": { "type": "string" }
+  }
+}

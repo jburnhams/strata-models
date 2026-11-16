@@ -215,6 +215,11 @@ def test_run_parses_the_answer_and_measures_vram(setup):
     )
     with pytest.raises(RunError, match="ran out of tokens .finish length, 8000 tokens out"):
         llama.run(h, dict(prompt="x", schema={"type": "object"}), probe=lambda: None, post=cut)
+    with pytest.raises(RunError, match="empty response: it ran out of tokens .finish length, 8000 tokens out"):
+        llama.run(h, dict(prompt="x"), probe=lambda: None, post=cut)
+    empty_stop = lambda url, body: dict(choices=[dict(message=dict(content="  "), finish_reason="stop")], usage={})
+    with pytest.raises(RunError, match="empty response .finish stop"):
+        llama.run(h, dict(prompt="x"), probe=lambda: None, post=empty_stop)
     assert "json" not in llama.run(h, dict(prompt="x"), probe=lambda: None, post=bad)
     h["vision"] = False
     with pytest.raises(RunError, match="no projector"):

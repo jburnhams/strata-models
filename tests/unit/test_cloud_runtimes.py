@@ -65,6 +65,9 @@ def test_answer_parses_json_only_with_a_schema():
     with pytest.raises(RunError, match="no JSON answer .finish max_tokens"):
         cloud.answer(dict(schema={"type": "object"}), '{"a": ', "max_tokens")
     assert cloud.answer(dict(schema=None), "plain") == {"text": "plain"}
+    for empty in ("", "   \n"):
+        with pytest.raises(RunError, match="empty response .finish max_tokens"):
+            cloud.answer(dict(schema=None), empty, "max_tokens")
 
 
 def test_post_success_http_error_and_unreachable(monkeypatch, tmp_path):

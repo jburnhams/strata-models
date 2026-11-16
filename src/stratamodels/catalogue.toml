@@ -31,7 +31,7 @@
 [defaults]
 min_left = 0.10
 # Tokens of a typical call per role, to price an API call before it is made (the API keys' spend tracking records the real ones).
-tokens = { text = { in = 1500, out = 500 }, vision-language = { in = 2500, out = 500 }, judge-text = { in = 3000, out = 300 }, judge-vision = { in = 4000, out = 300 }, ocr = { in = 2500, out = 1200 }, transcribe = { in = 2000, out = 600 } }
+tokens = { text = { in = 1500, out = 500 }, summarise = { in = 3000, out = 400 }, vision-language = { in = 2500, out = 500 }, judge-text = { in = 3000, out = 300 }, judge-vision = { in = 4000, out = 300 }, ocr = { in = 2500, out = 1200 }, transcribe = { in = 2000, out = 600 } }
 
 [backends.local-gpu]
 kind = "local"

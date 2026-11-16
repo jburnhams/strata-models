@@ -175,9 +175,34 @@ def preset(name):
     return open(p, encoding="utf8").read(), (json.load(open(s, encoding="utf8")) if os.path.isfile(s) else None)
 
 
+def _format_inputs(inputs, *, xml: bool = False) -> str:
+    parts = []
+    for i, item in enumerate(inputs or [], 1):
+        if isinstance(item, dict):
+            src = str(item.get("source") or f"source-{i}")
+            rating = f" (rating: {item['rating']})" if item.get("rating") is not None else ""
+            body = str(item.get("text") or "").strip()
+        else:
+            src, rating, body = f"source-{i}", "", str(item).strip()
+        if not body:
+            continue
+        if xml:
+            parts.append(f'<source name="{src}"{rating}>\n{body}\n</source>')
+        else:
+            parts.append(f"### {src}{rating}\n{body}")
+    return "\n\n".join(parts)
+
+
 def fill_context(text, context):
     """A preset's {context}: a dict of facts as JSON, or a text as it is (a pipeline's earlier step, such as Tesseract's numbered lines for
-    page-layout-fix-v1, whose line breaks JSON would escape)."""
+    page-layout-fix-v1, whose line breaks JSON would escape). Also expands {title}, {purpose}, {audience}, {target_size}, {inputs_text}, {inputs_xml} when `context` is a dict."""
+    if isinstance(context, dict):
+        for k in ("title", "purpose", "audience", "target_size"):
+            text = text.replace(f"{{{k}}}", str(context.get(k) or ""))
+        if "{inputs_text}" in text:
+            text = text.replace("{inputs_text}", _format_inputs(context.get("inputs")))
+        if "{inputs_xml}" in text:
+            text = text.replace("{inputs_xml}", _format_inputs(context.get("inputs"), xml=True))
     return text.replace(
         "{context}", context if isinstance(context, str) else json.dumps(context or {}, ensure_ascii=False)
     )
@@ -304,6 +329,9 @@ def run(handle, params, probe=gpu.query, post=None):
             raise RunError(
                 f"no JSON answer: {why} (finish {out['finish']}, {out['tokens_out']} tokens out, {len(text)} characters of text)"
             )
+    elif not text.strip():
+        why = ": it ran out of tokens" if out["finish"] == "length" else ""
+        raise RunError(f"empty response{why} (finish {out['finish']}, {out['tokens_out']} tokens out)")
     return out
 
 
