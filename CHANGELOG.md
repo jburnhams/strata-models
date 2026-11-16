@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-15
 
+**font-match: fonts from Fontsource, 17 more period faces, Claude shortlists (branch `claude/project-thread-01gj43`)**
+Jonathan (2026-11-15): prefer Claude models (far more budget there); Fontsource as one list with one fetch method.
+- `runtimes/fontfit.py`: `fetch` reads Fontsource's JSON API (`api.fontsource.org/v1/fonts/<id>`): versioned latin-subset TrueType files (kerning and ligatures kept) instead of parsing Google's CSS; a face in `fonts.toml` may give its files' URLs instead. Cuts the metadata lists but the CDN lacks (a bold italic) are left out; only a missing roman fails.
+- `runtimes/fonts.toml`: 57 → 74 faces. From Fontsource: Besley (Clarendon), Goudy Bookletter 1911, Castoro, Source Serif 4, Newsreader, Unna, Antic Didone, Bigshot One, Bevan, Chunk Five, Wellfleet, Vast Shadow, Grenze Gotisch, Petit Formal Script. From CTAN (GUST licence): TeX Gyre Schola (Century Schoolbook: the Scotch/Century gap), TeX Gyre Bonum (Bookman, Old Style Antique 1858), Latin Modern (Modern Extended 1896). Preset `font-propose-v1` lists them.
+- Spec `font-match`: `haiku-fit` on every block, `sonnet-fit` and `opus-fit` (new), a Sonnet judge; Claude shortlists get max_tokens 1500 (Haiku ran out at 600 once).
+- Trial (omarchy, 2026-11-15, dataset 5cbdb78d2f8d, 36 real / 29 synthetic). Real, class right: Flash 81 %, Sonnet 75 %, Opus 72 %, Haiku 56 %, every face 22 %; ink_f1 0.84 Sonnet and Opus, 0.81 Flash and Haiku, 0.86 every face, 0.58 naive. Synthetic, exact face top-1: every face 83 %, Opus 79 %, Sonnet 72 %, Haiku 66 %, Flash 52 %. Seconds a block: Sonnet 7.9, Haiku 8.6, Opus 9.1, Flash 27, every face 26. Claude spend $1.58 for all three over 65 blocks. Of the new faces TeX Gyre Schola (Century) matters: Sonnet's most frequent pick on real blocks (9 of 36); Latin Modern and Bonum never won.
 **The paid Gemini key is a deliberate last resort (branch `claude/project-thread-gl1u9l`)**
 A font-match trial sent 62 of 64 `gemini-3.8-flash-api` calls to the paid key (about $0.38). Each came after a free-tier 429 for the daily quota ("requests per day", limit 20 for gemini-3.8-flash), which the runtime turned into a silent fall-over to the paid key inside the same call.
 

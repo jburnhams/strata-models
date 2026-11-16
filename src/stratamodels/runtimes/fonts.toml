@@ -1,5 +1,6 @@
-# The faces the `font-match` role chooses from (runtimes/fontfit.py): open (OFL) fonts on Google Fonts, fetched into <models_dir>/fonts/ on
-# first use, so a rebuilt page can embed what was matched. Period type rarely survives as a font file, so each entry has a `class` (what kind
+# The faces the `font-match` role chooses from (runtimes/fontfit.py): open fonts, fetched into <models_dir>/fonts/ on first use from
+# Fontsource (every Google Fonts family, OFL, and the other open fonts it hosts; `family` is the Fontsource family name), or, for the few it
+# lacks, from the URLs in `files` (TeX Gyre and Latin Modern from CTAN, GUST Font License: free to use and embed), so a rebuilt page can embed what was matched. Period type rarely survives as a font file, so each entry has a `class` (what kind
 # of letter it is, after Vox-ATypI, with the 19th-century display kinds split out) and the eval scores closeness by class as well as exact
 # hits. `like` says what historical type it is close to, for the vision model that proposes candidates; `sc` names a true small-capitals
 # family where there is one (otherwise small capitals are made from the capitals at x-height). `weight` picks a heavier cut of the same family
@@ -303,3 +304,92 @@ like = "English roundhand copperplate"
 family = "Italianno"
 class = "script"
 like = "formal italic script"
+
+# ---- added 2026-11-15: period faces the first list missed, and three from CTAN that Fontsource lacks ---------------------------------------
+[faces.goudy-bookletter-1911]
+family = "Goudy Bookletter 1911"
+class = "old-style"
+like = "Goudy's Kennerley Old Style (1911), a sturdy American book old style"
+
+[faces.castoro]
+family = "Castoro"
+class = "old-style"
+like = "Dutch old style of the 17th century (van Dijck), book text"
+
+[faces.texgyre-bonum]
+family = "TeX Gyre Bonum"
+class = "old-style"
+like = "Bookman, from Miller & Richard's Old Style Antique (1858): a heavy, wide Victorian old style"
+files = { roman = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyrebonum-regular.otf", italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyrebonum-italic.otf", bold = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyrebonum-bold.otf", bold-italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyrebonum-bolditalic.otf" }
+
+[faces.source-serif-4]
+family = "Source Serif 4"
+class = "transitional"
+like = "Fournier's 18th-century French transitional types"
+
+[faces.newsreader]
+family = "Newsreader"
+class = "transitional"
+like = "transitional news text, Scotch-influenced"
+
+[faces.unna]
+family = "Unna"
+class = "transitional"
+like = "19th-century Peruvian book transitional, narrow with a modern touch"
+
+[faces.texgyre-schola]
+family = "TeX Gyre Schola"
+class = "modern"
+like = "Century Schoolbook (1919), after Century Roman (1894): the late 19th-century American Scotch modern"
+files = { roman = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyreschola-regular.otf", italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyreschola-italic.otf", bold = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyreschola-bold.otf", bold-italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/tex-gyre/opentype/texgyreschola-bolditalic.otf" }
+
+[faces.latin-modern]
+family = "Latin Modern Roman"
+class = "modern"
+like = "Monotype Modern Extended (1896) as Computer Modern: a 19th-century book modern, Scotch-like"
+files = { roman = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman10-regular.otf", italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman10-italic.otf", bold = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman10-bold.otf", bold-italic = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman10-bolditalic.otf", small-caps = "https://mirrors.ibiblio.org/pub/mirrors/CTAN/fonts/lm/fonts/opentype/public/lm/lmromancaps10-regular.otf" }
+
+[faces.antic-didone]
+family = "Antic Didone"
+class = "modern"
+like = "light Didone display, hairline serifs"
+
+[faces.bigshot-one]
+family = "Bigshot One"
+class = "fat-face"
+like = "fat face, Victorian heavy display modern"
+
+[faces.besley]
+family = "Besley"
+class = "clarendon"
+like = "Clarendon (Fann Street, 1845) and Ionic, the 19th-century bracketed slab"
+
+[faces.bevan]
+family = "Bevan"
+class = "slab"
+like = "heavy Egyptian display slab (19th-century poster)"
+
+[faces.chunk-five]
+family = "Chunk Five"
+class = "slab"
+like = "ultra-bold Egyptian, Victorian wood-type poster slab"
+
+[faces.wellfleet]
+family = "Wellfleet"
+class = "slab"
+like = "Egyptian slab with soft brackets, wood type"
+
+[faces.vast-shadow]
+family = "Vast Shadow"
+class = "decorated"
+like = "shaded Victorian wood-type slab (dropped shadow)"
+
+[faces.grenze-gotisch]
+family = "Grenze Gotisch"
+class = "blackletter"
+like = "Gothic textura / Old English display"
+
+[faces.petit-formal-script]
+family = "Petit Formal Script"
+class = "script"
+like = "English roundhand copperplate, formal"

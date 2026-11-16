@@ -4,6 +4,8 @@ catalogue's files, so nothing is downloaded."""
 
 import json
 import os
+import urllib.error
+from email.message import Message
 
 import numpy as np
 import pytest
@@ -119,40 +121,88 @@ def test_a_class_without_faces_proposes_the_class():
     assert got and all(F.catalogue()[f]["class"] == "blackletter" for f in got)
 
 
-def test_fetch_reads_the_css_saves_each_style_and_reuses_it(tmp_path):
+def meta(weights, styles=("normal", "italic"), fam="x"):
+    """Fontsource's metadata for a family with these weights and styles (each a latin TrueType file)."""
+    return {
+        "defSubset": "latin",
+        "variants": {
+            str(w): {st: {"latin": {"url": {"ttf": f"https://cdn/{fam}/latin-{w}-{st}.ttf"}}} for st in styles}
+            for w in weights
+        },
+    }
+
+
+def test_fontsource_urls_pick_the_weight_its_italic_and_a_bold():
+    m = meta([300, 400, 700])
+    assert F.fontsource_urls(m) == {
+        "roman": "https://cdn/x/latin-400-normal.ttf",
+        "italic": "https://cdn/x/latin-400-italic.ttf",
+        "bold": "https://cdn/x/latin-700-normal.ttf",
+        "bold-italic": "https://cdn/x/latin-700-italic.ttf",
+    }
+    assert set(F.fontsource_urls(m, weight=900)) == {
+        "roman",
+        "italic",
+    }  # a heavy face is its own bold: the nearest weight, no bold
+    assert F.fontsource_urls(meta([700], styles=("normal",)))["roman"].endswith(
+        "700-normal.ttf"
+    )  # one weight only (UnifrakturCook)
+    assert F.fontsource_urls(meta([400], styles=("italic",))) == {"roman": "https://cdn/x/latin-400-italic.ttf"}
+    assert F.fontsource_urls({}) == {}
+    assert F.fontsource_id("IM Fell DW Pica SC") == "im-fell-dw-pica-sc"
+
+
+def test_fetch_reads_fontsource_saves_each_style_and_reuses_it(tmp_path):
     calls = []
-    css = """@font-face { font-family: 'Old Standard TT'; font-style: italic; font-weight: 400; src: url(https://fonts.gstatic.com/i.ttf) format('truetype'); }
-@font-face { font-family: 'Old Standard TT'; font-style: normal; font-weight: 400; src: url(https://fonts.gstatic.com/r.ttf) format('truetype'); }
-@font-face { font-family: 'Old Standard TT'; font-style: normal; font-weight: 700; src: url(https://fonts.gstatic.com/b.ttf) format('truetype'); }"""
 
     def get(url):
         calls.append(url)
-        if "googleapis" in url:
-            if "ital,wght@0,400;0,700;1,400;1,700" in url:
-                return css.encode()
-            raise OSError("400")
+        if url == F.FONTSOURCE + "old-standard-tt":
+            return json.dumps(meta([400, 700], fam="os")).encode()
+        if url.startswith(F.FONTSOURCE):
+            raise OSError("404")
+        if "700-italic" in url:  # a cut the metadata lists but the family lacks
+            raise urllib.error.HTTPError(url, 404, "Not Found", Message(), None)
         return url.encode()
 
     files = F.fetch("old-standard", str(tmp_path), get)
     assert sorted(files) == ["bold", "italic", "roman"]
-    assert open(files["bold"], "rb").read() == b"https://fonts.gstatic.com/b.ttf"
+    assert open(files["bold"], "rb").read() == b"https://cdn/os/latin-700-normal.ttf"
     n = len(calls)
     assert F.fetch("old-standard", str(tmp_path), get) == files and len(calls) == n  # the manifest is reused
     with pytest.raises(RunError, match="no face"):
         F.fetch("nonesuch", str(tmp_path), get)
-    with pytest.raises(RunError, match="Google Fonts has no"):
-        F.fetch("tinos", str(tmp_path), lambda url: b"")
+    with pytest.raises(RunError, match="Fontsource has no"):
+        F.fetch("tinos", str(tmp_path), get)
 
 
-def test_fetch_takes_small_capitals_and_a_one_weight_face(tmp_path):
+def test_a_transient_failure_fails_the_fetch_and_records_nothing(tmp_path):
     def get(url):
-        if "googleapis" in url:
-            fam = "SC" if "SC" in url else "R"
-            return f"@font-face {{ font-style: normal; font-weight: 400; src: url(https://x/{fam}.ttf) }}".encode()
+        if url.startswith(F.FONTSOURCE):
+            return json.dumps(meta([400, 700])).encode()
+        if "italic" in url:
+            raise OSError("timed out")  # not a 404: the style may well exist
         return b"ttf"
 
-    files = F.fetch("playfair-display", str(tmp_path), get)
-    assert set(files) == {"roman", "small-caps"}
+    with pytest.raises(RunError, match="cannot download old-standard italic"):
+        F.fetch("old-standard", str(tmp_path), get)
+    assert not (tmp_path / "fonts" / "old-standard" / "manifest.json").exists()
+
+
+def test_fetch_takes_small_capitals_and_direct_files(tmp_path):
+    def get(url):
+        if url.startswith(F.FONTSOURCE):
+            sc = url.endswith("-sc")
+            return json.dumps(meta([400], styles=("normal",), fam="SC" if sc else "R")).encode()
+        return b"font"
+
+    files = F.fetch("im-fell-english", str(tmp_path), get)
+    assert set(files) == {"roman", "small-caps"} and files["small-caps"].endswith("small-caps.ttf")
+    direct = next(
+        k for k, v in F.catalogue().items() if v.get("files")
+    )  # a CTAN face: its own URLs, OpenType kept as .otf
+    files = F.fetch(direct, str(tmp_path), get)
+    assert set(files) == set(F.catalogue()[direct]["files"]) and files["roman"].endswith(".otf")
 
 
 def test_fit_recovers_the_size_and_width_of_a_known_setting(tmp_path, ttf, models):

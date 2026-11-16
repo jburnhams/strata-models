@@ -67,16 +67,45 @@ input = "{image}"
 send = "image"
 into = "candidates"
 
+# Claude first among the cloud models (Jonathan, 2026-11-15: far more Claude budget than Gemini's).
 [[candidates]]
 name = "haiku-fit"
 model = "fontfit"
 params = { mode = "fit" }
-items = 20                       # a cheap cloud model on a sample (well under a cent a block)
+note = "well under a cent a block"
 
 [[candidates.stages]]
 role = "vision-language"
 model = "claude-haiku-5-5-api"
-params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 400 }
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 1500 }   # at 600 one answer (ward1874-ad17) ran out with no JSON
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "sonnet-fit"
+model = "fontfit"
+params = { mode = "fit" }
+note = "about a cent a block"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 1500 }
+input = "{image}"
+send = "image"
+into = "candidates"
+
+[[candidates]]
+name = "opus-fit"
+model = "fontfit"
+params = { mode = "fit" }
+note = "about two cents a block"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-opus-5-5-api"
+params = { system_preset = "font-propose-v1", prompt = "Identify the typeface of the printed text in this picture.", max_tokens = 1500 }
 input = "{image}"
 send = "image"
 into = "candidates"
@@ -131,6 +160,15 @@ name = "gemini-flash"
 cli = "agy"
 model = "gemini-3.8-flash-low"
 kind = "vision"
+pairs = "baseline"
+reference = false
+limit = 60
+criteria = "Picture 1 is a block of old printed type. X and Y are the same words re-set in a modern font, to rebuild the page. Prefer the one whose typeface looks more like the printed one: the letter shapes, the contrast between thick and thin strokes, the serifs, the width, the weight, and the size and position of the letters. Ignore paper colour, specks and stains."
+
+[[judges]]
+name = "sonnet"
+kind = "vision"
+model = "claude-sonnet-5-5-api"
 pairs = "baseline"
 reference = false
 limit = 60

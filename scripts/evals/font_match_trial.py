@@ -21,12 +21,16 @@ from stratamodels import settings
 from stratamodels.evals import core as C
 from stratamodels.evals import metrics as M
 from stratamodels.runtimes import fontfit as F
+from stratamodels.runtimes import llama
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
 
 def stage_answer(stage, item, cache, sm):
     params = C.stage_params(stage, dict(item["input"]))
+    # this checkout's preset, sent as text: the service's own copy may be older (a catalogue that grew)
+    if params.get("system_preset"):
+        params["system"] = llama.preset(params.pop("system_preset"))[0].strip()
     key = C.stage_key(stage, params, item)
     path = os.path.join(cache, f"stage-{key}.json")
     if os.path.isfile(path):
