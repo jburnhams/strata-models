@@ -251,17 +251,19 @@ def test_the_layout_preset_carries_its_schema_and_the_spec_sends_it():
     with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-layout.toml"), "rb") as f:
         spec = tomllib.load(f)
     stages = [s for c in spec["candidates"] for s in c.get("stages", []) if s["role"] == "vision-language"]
-    assert len(stages) == 9
+    assert len(stages) == 12
     assert all(
-        s["params"].get("preset") in ("page-layout-v1", "page-layout-fix-v1") and "prompt" not in s["params"]
+        s["params"].get("preset") in ("page-layout-v1", "page-layout-fix-v1", "page-layout-fix-v2")
+        and "prompt" not in s["params"]
         for s in stages
     )
-    fix = [s for s in stages if s["params"]["preset"] == "page-layout-fix-v1"]
-    assert len(fix) == 4 and all(
+    fix = [s for s in stages if s["params"]["preset"].startswith("page-layout-fix-")]
+    assert len(fix) == 7 and all(
         s["send"] == "context" and s["also"] == ["image"] and s["into"] == "groups" for s in fix
     )
-    text, schema = llama.preset("page-layout-fix-v1")
-    assert "{context}" in text and schema["properties"]["blocks"]["items"]["required"] == ["lines", "role"]
+    for name in ("page-layout-fix-v1", "page-layout-fix-v2"):
+        text, schema = llama.preset(name)
+        assert "{context}" in text and schema["properties"]["blocks"]["items"]["required"] == ["lines", "role"]
 
 
 # ---- Tesseract's lines regrouped by a vision model (preset page-layout-fix-v1): list_lines numbers them, groups names them by number ------

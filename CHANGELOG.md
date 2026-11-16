@@ -10,9 +10,26 @@ Jonathan (2026-11-15): prefer Claude models (far more budget there); Fontsource 
 - `runtimes/fonts.toml`: 57 → 74 faces. From Fontsource: Besley (Clarendon), Goudy Bookletter 1911, Castoro, Source Serif 4, Newsreader, Unna, Antic Didone, Bigshot One, Bevan, Chunk Five, Wellfleet, Vast Shadow, Grenze Gotisch, Petit Formal Script. From CTAN (GUST licence): TeX Gyre Schola (Century Schoolbook: the Scotch/Century gap), TeX Gyre Bonum (Bookman, Old Style Antique 1858), Latin Modern (Modern Extended 1896). Preset `font-propose-v1` lists them.
 - Spec `font-match`: `haiku-fit` on every block, `sonnet-fit` and `opus-fit` (new), a Sonnet judge; Claude shortlists get max_tokens 1500 (Haiku ran out at 600 once).
 - Trial (omarchy, 2026-11-15, dataset 5cbdb78d2f8d, 36 real / 29 synthetic). Real, class right: Flash 81 %, Sonnet 75 %, Opus 72 %, Haiku 56 %, every face 22 %; ink_f1 0.84 Sonnet and Opus, 0.81 Flash and Haiku, 0.86 every face, 0.58 naive. Synthetic, exact face top-1: every face 83 %, Opus 79 %, Sonnet 72 %, Haiku 66 %, Flash 52 %. Seconds a block: Sonnet 7.9, Haiku 8.6, Opus 9.1, Flash 27, every face 26. Claude spend $1.58 for all three over 65 blocks. Of the new faces TeX Gyre Schola (Century) matters: Sonnet's most frequent pick on real blocks (9 of 36); Latin Modern and Bonum never won.
+**The paid Gemini key is a deliberate last resort (branch `claude/project-thread-gl1u9l`)**
+A font-match trial sent 62 of 64 `gemini-3.8-flash-api` calls to the paid key (about $0.38). Each came after a free-tier 429 for the daily quota ("requests per day", limit 20 for gemini-3.8-flash), which the runtime turned into a silent fall-over to the paid key inside the same call.
+
+Now:
+- A `gemini-api` model uses the free key alone, unless its `keys` name the paid one. Argon keeps `keys = ["gemini"]`.
+- A free-tier 429 or 503 that names a wait of a minute or less is waited out and tried again on the free key, up to three times.
+- A daily-quota 429 is remembered per model until midnight Pacific, so later calls fail at once, without sending a request.
+- When the free tier refuses a call, the error names agy, or a model with the paid key, as the way forward.
+- `routing` ranks a Gemini model by its first key, with the free key as the default.
 
 **FlashVSR+ Turbo fits its memory cap again (branch `claude/project-thread-rea1ol`)**
 Since the 16 GB cap (#62) every Turbo job was OOM-killed at about 2 minutes. Measured on the title card under `systemd-run --scope -p MemoryMax=16G`: decode-every 12 killed at 16 GB, 8 completes (program memory ~14.4 GB at each segment's decode, 10.8 GB VRAM, 484 s a clip, as fast as before). `video-flashvsr-plus-turbo`: decode-every 8, memory_max_gb 20.
+
+## 2026-11-15
+
+**page-layout: preset page-layout-fix-v2 for Claude (branch `claude/project-thread-dvu0cz`)**
+sonnet-fix (85.5 %) and haiku-fix (83.7 %) trailed flash-fix (95.5 %) by over-splitting: a play's speeches, a footnote's notes and a title page's byline each became several blocks, and a smudged running head was dropped. `page-layout-fix-v2` (**new**, same schema) says to split only by space or type size and to keep badly read lines; candidates `haiku-fix-v2`, `sonnet-fix-v2`, `opus-fix-v2` (Claude first: the larger budget). Tuned on these ten pages, so it needs pages it was not tuned on before it is adopted.
+
+**page-layout: ten more labelled pages, held out from the prompt tuning (branch `claude/project-thread-dvu0cz`)**
+`scripts/evals/page_layout/pages.toml` has ten more pages (Ward 1874 dialogue, songs and advertisements; Collier 1828 prose, verse, footnotes and a play), `set = "check"`: labelled after `page-layout-fix-v2` was written, so they test it on pages it was not tuned on (items carry the `set` tag: `tune` or `check`). They were grouped from Tesseract's numbered lines and fitted to the ink, so the fix approach's ceiling there is 99.8 % (97.6 % on the first ten) and the comparison between fix candidates is the fair one. Tesseract alone scores block_f1 53 % on them (77 % on the first ten). Rebuild the dataset on omarchy (`.venv/bin/python scripts/evals/page_layout.py`); only the new items run.
 
 ## 2026-11-14
 

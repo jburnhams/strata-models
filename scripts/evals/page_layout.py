@@ -66,7 +66,7 @@ def items(out, cache, get=FM.get):
                 id=pid,
                 input=dict(image=png, ocr=ocr(png, dpi)),
                 reference=dict(page=reference(p, page.width, page.height, dpi)),
-                tags=dict(book=p["book"], kind=p["kind"]),
+                tags=dict(book=p["book"], kind=p["kind"], set=p.get("set", "tune")),
             )
         )
     return got

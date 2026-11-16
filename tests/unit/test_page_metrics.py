@@ -138,7 +138,7 @@ def test_the_labelled_pages_are_drawable_and_consistent():
         import page_layout as PL
     finally:
         sys.path.remove(here)
-    assert len(pages) == 10
+    assert len(pages) == 20 and sum(p.get("set") == "check" for p in pages.values()) == 10
     for pid, p in pages.items():
         ref = PL.reference(p, 2700, 4300, 500)
         Page.from_dict(ref)  # roles and kinds are the renderer's

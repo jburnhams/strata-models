@@ -808,14 +808,15 @@ source = "https://platform.claude.com/docs/en/about-claude/models/overview"
 used_by = []
 options = { model = "claude-opus-5-5", price = { input = 4.00, output = 20.00, cache_read = 0.20 } }
 
-# Google AI Studio: the free-tier key first, the paid key after (runtimes/gemini.py). For Gemini work agy (the AI Pro subscription,
-# scripts/evals/record_cloud.py) comes before both. Free-tier prompts may be used by Google: private pictures want keys = ["gemini"].
+# Google AI Studio (runtimes/gemini.py): the free-tier key alone unless `keys` names the paid one ("gemini"), which is a deliberate last
+# resort (Jonathan, 2026-11-15). For Gemini work agy (the AI Pro subscription, scripts/evals/record_cloud.py) comes before both. The free
+# tier allows few calls a day on the bigger models (gemini-3.8-flash: 20). Free-tier prompts may be used by Google: private pictures want keys = ["gemini"].
 [models."gemini-3.8-flash-api"]
 runtime = "gemini-api"
 name = "Gemini 3.8 Flash (AI Studio API)"
 roles = ["text", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
-licence = "Google AI Studio terms (free tier, then paid per token)"
+licence = "Google AI Studio terms (free tier)"
 source = "https://aistudio.google.com/docs/pricing"
 used_by = []
 options = { model = "gemini-3.8-flash", price = [{ input = 0.75, output = 3.75, cache_read = 0.075 }, { from = "2027-01-01", input = 1.50, output = 7.50, cache_read = 0.15 }] }
@@ -825,7 +826,7 @@ runtime = "gemini-api"
 name = "Gemini 3.5 Flash-Lite (AI Studio API)"
 roles = ["text", "vision-language", "judge-text", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
-licence = "Google AI Studio terms (free tier, then paid per token)"
+licence = "Google AI Studio terms (free tier)"
 source = "https://aistudio.google.com/docs/pricing"
 used_by = []
 options = { model = "gemini-3.5-flash-lite", price = { input = 0.30, output = 2.50, cache_read = 0.03 } }
