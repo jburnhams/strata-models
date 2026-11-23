@@ -603,3 +603,37 @@ def test_pairs_must_be_baseline_or_all():
                 candidates=[dict(name="a", model="m"), dict(name="b", model="m")],
             )
         )
+
+
+def test_a_candidate_culled_from_judging_is_in_no_new_pair(client):
+    import os
+
+    from stratamodels.evals import core as C
+
+    client.post("/api/evals/fake-asr/run")
+    wait_run(client, "fake-asr")
+    path = os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", "fake-asr.toml")
+    text = open(path).read()
+    open(path, "w").write(text.replace("options = { tweak = 1 }", "options = { tweak = 1 }\njudge = false"))
+    assert (
+        C.load_spec("fake-asr").candidate("same").judge is False
+        and "judge" not in C.load_spec("fake-asr").candidate("base").to_json()
+    )
+    for _ in range(8):
+        p = client.get("/api/evals/fake-asr/pair").json()["pair"]
+        j = client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="tie")).json()
+        assert {j["x"], j["y"]} == {"base", "better"}
+    assert (
+        client.get("/api/evals/fake-asr").json()["candidates"]["same"]["metrics"]["wer"]["value"] is not None
+    )  # its results still count
+    with pytest.raises(C.EvalError, match="true or false"):
+        C.parse_spec(
+            dict(
+                name="x",
+                question="q",
+                role="r",
+                dataset="d",
+                metrics=["failed"],
+                candidates=[dict(name="a", model="m", judge="no")],
+            )
+        )

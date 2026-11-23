@@ -39,6 +39,7 @@ into = "layout"
 [[candidates]]
 name = "gemma-layout"
 model = "pagebuild"
+judge = false  # culled from judging: 2 wins, 4 losses in blind judging (2026-11-23), every loss to a fix candidate; block_f1 12 %
 
 [[candidates.stages]]
 role = "vision-language"
@@ -77,6 +78,7 @@ into = "layout"
 [[candidates]]
 name = "sonnet-layout"
 model = "pagebuild"
+judge = false  # culled from judging: lost all 12 of its blind pairs (2026-11-23, sign test p = 0.0002); block_f1 38 %
 note = "Haiku found a quarter of the blocks (2026-11-14): does the larger Claude manage it? A few cents a page"
 
 [[candidates.stages]]

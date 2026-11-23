@@ -339,6 +339,18 @@ def test_every_pair_mode_skips_identical_outputs_and_keeps_to_its_limit(ran, sch
     assert J.todo(ran, engine, ran.judges[0])[3] == []  # every pair with the baseline is judged
 
 
+def test_a_candidate_culled_from_judging_is_in_no_pair_for_a_judge(ran, scheduler):
+    engine = scheduler.store.engine
+    person(engine, ran, "better", "base", "better", 3)
+    person(engine, ran, "better", "same", "better", 3)  # people judged these before "same" was culled
+    ran.candidate("same").judge = False
+    for pairs in ("judged", "all"):
+        ran.judges = [judge_spec(pairs=pairs)]
+        got = J.todo(ran, engine, ran.judges[0])[3]
+        assert got and all("same" not in (a, b) for _, a, b in got), pairs
+    assert J.todo(ran, engine, ran.judges[0], only=("u0", "better", "same"))[3] == []
+
+
 def test_baseline_pairs_and_agreement_with_the_metric(ran, scheduler):
     """pairs = baseline judges each candidate against the baseline only; with no people at all, the judge is still measured against the
     spec's scored primary metric (better keeps "fox", which base drops, so the fox-favouring judge sides with the metric)."""
