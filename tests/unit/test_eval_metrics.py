@@ -443,7 +443,9 @@ def test_shot_cut_metrics_match_one_to_one_within_the_tolerance():
     assert M.METRICS["cut_f1"].score(item, None, "boom") == 0.0
     # one shot, nothing claimed: right; no reference: the metric does not apply
     assert M.METRICS["cut_f1"].score({"reference": {"cuts": []}}, {"cuts": []}, None) == 1.0
-    assert M.METRICS["cut_f1"].score({"reference": {"cuts": []}}, None, "boom") == 0.0  # failing is not finding one shot
+    assert (
+        M.METRICS["cut_f1"].score({"reference": {"cuts": []}}, None, "boom") == 0.0
+    )  # failing is not finding one shot
     # the most pairs, not nearest first: (1.0, 1.25) would strand both others
     assert M.match_cuts([1.65, 1.0], [0.6, 1.25]) == 2
     assert M.METRICS["cut_miss"].score({"reference": {}}, out, None) is None

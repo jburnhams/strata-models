@@ -49,8 +49,8 @@ def test_black_marks_pair_into_stretches_and_one_still_open_ends_with_the_video(
         {"time": 3, "black_start": 5.0},
     ]
     assert scenes.black_stretches(frames, 7.0) == [{"start": 1.0, "end": 2.0}, {"start": 5.0, "end": 7.0}]
-    # blackdetect marks a flash shorter than its d= too, so the minimum is applied here, to the open one at the end as well
-    assert scenes.black_stretches(frames, 5.5, 0.8) == [{"start": 1.0, "end": 2.0}]
+    # blackdetect marks a flash shorter than its d= too, so the minimum is applied here; one still open at the end may go on, so it stays
+    assert scenes.black_stretches(frames, 5.5, 1.5) == [{"start": 5.0, "end": 5.5}]
 
 
 def test_load_needs_ffmpeg_and_reads_the_options(monkeypatch, tmp_path):

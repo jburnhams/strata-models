@@ -100,7 +100,8 @@ def pick_cuts(scores: list[float], times: list[float], threshold: float, min_sho
 
 def black_stretches(frames: list[dict[str, Any]], end: float, min_s: float = 0.0) -> list[dict[str, float]]:
     """Pairs blackdetect's start and end marks into stretches; one still open when the video ends closes at `end`. Stretches shorter than
-    `min_s` are dropped here: blackdetect's own `d` does not filter the frame metadata ("added regardless of the minimum duration")."""
+    `min_s` are dropped here: blackdetect's own `d` does not filter the frame metadata ("added regardless of the minimum duration"). One
+    still black when the part looked at ends is kept whatever its length: it may go on past the clip, so how long it is is not known."""
     out: list[dict[str, float]] = []
     open_at: float | None = None
     for f in frames:
@@ -109,9 +110,10 @@ def black_stretches(frames: list[dict[str, Any]], end: float, min_s: float = 0.0
         if "black_end" in f and open_at is not None:
             out.append({"start": round(open_at, 3), "end": round(f["black_end"], 3)})
             open_at = None
+    out = [s for s in out if s["end"] - s["start"] >= min_s - 1e-9]
     if open_at is not None:
         out.append({"start": round(open_at, 3), "end": round(end, 3)})
-    return [s for s in out if s["end"] - s["start"] >= min_s - 1e-9]
+    return out
 
 
 def _number(params: dict[str, Any], key: str, default: float, low: float, high: float) -> float:
