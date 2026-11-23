@@ -8,6 +8,9 @@ POST /api/evals/{name}/run                   run what is missing, in the backgro
      ?candidate=&limit=&recover=1            recover: take the outputs of jobs that already finished with the same params (a run lost to a restart)
 POST /api/evals/{name}/refresh                work the kept analysis out again (outputs changed from outside the service)
 GET  /api/evals/{name}/status
+GET  /api/evals/{name}/progress              where a run stands, however it was started (the CLI too): per candidate its outputs in and failed,
+                                             per pipeline step how many items have it; the queue's eval jobs on this dataset's items (running
+                                             and queued, what each runs); and what the analysis is doing while it is worked out
 GET  /api/evals/{name}/report                the standard write-up, as Markdown
 GET  /api/evals/{name}/pair                  a blind pair to judge: one item, two candidates' outputs as X and Y (a token says which is which);
                                              end results only: a pipeline's intermediate steps are left out
@@ -265,10 +268,88 @@ def mount(app, scheduler):
     def get_run_status(name: str):
         return runs.get(name, dict(state="idle", log=[]))
 
+    @app.get("/api/evals/{name}/progress")
+    def get_progress(name: str):
+        s = spec_or_404(name)
+        ds = C.load_dataset(s.dataset, engine=engine())
+        eng = engine()
+        cands = []
+        for c in s.candidates:
+            items = C.sample(c, ds.items, eng)  # what a run runs: a sampled candidate's total is its sample
+            rows = C.cached(eng, [C.result_key(s, c, it) for it in items])
+            steps = []
+            if c.stages and len(rows) < len(
+                items
+            ):  # each step's answers in, read from the cache as a run would (stops at a missing one)
+                got = [0] * len(c.stages)
+                bad = [0] * len(c.stages)
+                for it in items:
+                    keys = C.stage_keys(eng, c, it)
+                    have = C.cached(eng, keys)
+                    for lvl, k in enumerate(keys):
+                        r = have.get(k)
+                        if r is not None:
+                            got[lvl] += 1
+                            bad[lvl] += bool(r.error)
+                steps = [
+                    dict(role=st["role"], model=st["model"], done=got[i], failed=bad[i])
+                    for i, st in enumerate(c.stages)
+                ]
+            cands.append(
+                dict(
+                    name=c.name,
+                    total=len(items),
+                    done=len(rows),
+                    failed=sum(1 for r in rows.values() if r.error),
+                    steps=steps,
+                )
+            )
+        # the queue's jobs for this dataset's items: an eval job names its item's files in its params (several experiments may share them)
+        files = {v for it in ds.items for v in (it.get("input") or {}).values() if isinstance(v, str)}
+        ids = {v: it["id"] for it in ds.items for v in (it.get("input") or {}).values() if isinstance(v, str)}
+        jobs = []
+        st = scheduler.store
+        for j in [*st.running(), *st.queued()]:
+            if j.get("app") != "evals" or j.get("kind") == "lease":
+                continue
+            p = j.get("params") or {}
+            hit = next((v for v in p.values() if isinstance(v, str) and v in files), None)
+            if hit is None:
+                continue
+            jobs.append(
+                dict(
+                    id=j["id"],
+                    status=j["status"],
+                    role=j.get("role"),
+                    model=j.get("model"),
+                    item=ids.get(hit),
+                    submitted_at=j.get("submitted_at"),
+                    started_at=j.get("started_at"),
+                )
+            )
+        run = runs.get(name)
+        return finite(
+            dict(
+                candidates=cands,
+                jobs=jobs,
+                run=dict(state=run["state"], log=run["log"][-5:]) if run else None,
+                analysis=summaries.working.get(name),
+                now=time.time(),
+            )
+        )
+
     @app.get("/api/evals/{name}/report", response_class=PlainTextResponse)
     def get_report(name: str):
         s = spec_or_404(name)
         res = analysis(s)
+        if (res.get("summary") or {}).get(
+            "pending"
+        ):  # the first analysis is still being worked out: say so rather than wait for it
+            step = (res["summary"].get("progress") or {}).get("step") or "starting"
+            return PlainTextResponse(
+                f"# {name}\n\nThe results are still being worked out ({step}); the write-up follows once they are.\n",
+                status_code=202,
+            )
         ds, outs, _ = C.outputs_for(s, engine())
         return R.render(
             res,

@@ -57,6 +57,45 @@ describe('An experiment', () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     expect(await screen.findByText(/Updating: these results are from/)).toBeInTheDocument()
   })
+  it('shows where a run stands while the first analysis is worked out, instead of hanging', async () => {
+    mock.analysis = { experiment: evalFixtures.analysis().experiment, summary: { stale: false, pending: true, progress: { step: 'scoring full (page_ink_all)', done: 3, total: 12, started_at: 90 } } } as unknown as typeof mock.analysis
+    mock.progress = {
+      candidates: [
+        { name: 'tesseract', total: 20, done: 20, failed: 0, steps: [] },
+        { name: 'full', total: 20, done: 4, failed: 1, steps: [{ role: 'page-build', model: 'pagebuild', done: 20, failed: 0 }, { role: 'font-match', model: 'fontfit', done: 6, failed: 1 }] },
+      ],
+      jobs: [
+        { id: 7, status: 'running', role: 'font-match', model: 'fontfit', item: 'ward1874-leaf026', submitted_at: 10, started_at: 40 },
+        { id: 8, status: 'queued', role: 'font-match', model: 'fontfit', item: 'ward1874-leaf028', submitted_at: 50, started_at: null },
+      ],
+      run: null,
+      analysis: { step: 'scoring full (page_ink_all)', done: 3, total: 12, started_at: 90 },
+      now: 100,
+    }
+    setup(<App />, { route: '/evals/transcribe-en' })
+    expect(await screen.findByText(/Working out the results: the first analysis/)).toBeInTheDocument()
+    expect(await screen.findByText(/Progress: 24 of 40 outputs in · 1 job running · 1 queued · analysis: scoring full \(page_ink_all\) \(step 4 of 12\)/)).toBeInTheDocument()
+    expect(screen.getByText('4 of 20 (1 failed)')).toBeInTheDocument()
+    expect(screen.getByText(/2\. fontfit: 6 \(1 failed\)/)).toBeInTheDocument()
+    expect(screen.getByText('ward1874-leaf026')).toBeInTheDocument()
+    expect(screen.getByText('60 s')).toBeInTheDocument()
+    expect(screen.getByText('waiting 50 s')).toBeInTheDocument()
+    expect(screen.getByText('Working out the results')).toBeInTheDocument()
+  })
+  it('waits for the analysis before the write-up, then shows it', async () => {
+    mock.analysis = { experiment: evalFixtures.analysis().experiment, summary: { stale: false, pending: true, progress: null } } as unknown as typeof mock.analysis
+    setup(<App />, { route: '/evals/transcribe-en?tab=writeup' })
+    expect(await screen.findByText('Working out the results')).toBeInTheDocument()
+    expect(screen.queryByText(/## Answer/)).not.toBeInTheDocument()
+    mock.analysis = { ...evalFixtures.analysis(), summary: { computed_at: 1_700_000_100, seconds: 90, stale: false } }
+    await waitFor(() => expect(screen.queryByText('Working out the results')).not.toBeInTheDocument(), { timeout: 6000 })
+    expect(await screen.findByText(/## Answer/)).toBeInTheDocument()
+  }, 10_000)
+  it('shows no progress once every output is in and nothing is running', async () => {
+    setup(<App />, { route: '/evals/transcribe-en' })
+    await screen.findByText(/Keep large-v3/)
+    expect(screen.queryByText(/Progress:/)).not.toBeInTheDocument()
+  })
   it('runs the missing outputs and shows the progress', async () => {
     const { user } = setup(<App />, { route: '/evals/transcribe-en' })
     await user.click(await screen.findByRole('button', { name: 'Run missing outputs' }))

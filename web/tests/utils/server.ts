@@ -1,7 +1,7 @@
 // The service as the web app sees it: fixtures plus msw handlers for every endpoint the app calls (one without a handler fails the test).
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import type { Analysis, ApiCall, Evals, Job, Model, Pair, ProviderState, Registry, RunStatus, Settings, Spend, SpendSeries, Status, Usage } from '../../src/api'
+import type { Analysis, ApiCall, Evals, Job, Model, Pair, Progress, ProviderState, Registry, RunStatus, Settings, Spend, SpendSeries, Status, Usage } from '../../src/api'
 
 export const NOW = 1_800_000_000
 const job = (o: Partial<Job>): Job => ({ id: 1, kind: 'run', app: 'bright-horizons', priority: 'batch', status: 'done', submitted_at: NOW - 60, role: 'faces', model: 'buffalo_l', note: null, params: { path: '/p/a.jpg' }, error: null, vram_gb: null, ttl_s: null, started_at: NOW - 59, finished_at: NOW - 58, heartbeat_at: null, load_s: 0.7, run_s: 0.05, wait_s: 1, ...o })
@@ -85,8 +85,8 @@ export const evalFixtures = {
 
 const defaultSettings: Settings = { data_dir: '/srv/sm', models_dir: '/home/j/models', vram_reserve_gb: 1, gpu_jobs: 2, cpu_jobs: 4, whole_card_gb: 10 }
 
-export const mock = { spend: spendFixtures.spend(), callPages: 1, settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[] }
-export const resetMock = () => { mock.spend = spendFixtures.spend(); mock.callPages = 1; mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = [] }
+export const mock = { spend: spendFixtures.spend(), callPages: 1, settings: { ...defaultSettings }, calls: [] as string[], status: fixtures.status(), pageSize: 100, run: { state: 'idle', log: [] } as RunStatus, analysis: evalFixtures.analysis(), images: [] as unknown[], progress: { candidates: [{ name: 'large-v3', total: 400, done: 400, failed: 0, steps: [] }], jobs: [], run: null, analysis: null, now: 100 } as Progress }
+export const resetMock = () => { mock.spend = spendFixtures.spend(); mock.callPages = 1; mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.images = []; mock.progress = { candidates: [{ name: 'large-v3', total: 400, done: 400, failed: 0, steps: [] }], jobs: [], run: null, analysis: null, now: 100 } as Progress }
 
 export const handlers = [
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0', gpu: true })),
@@ -112,6 +112,7 @@ export const handlers = [
   http.get('/api/evals', () => HttpResponse.json(evalFixtures.list())),
   http.get('/api/evals/:name/status', () => HttpResponse.json(mock.run)),
   http.post('/api/evals/:name/run', ({ params }) => { mock.calls.push(`run ${params.name}`); mock.run = { state: 'running', log: ['transcribe-en: 0 of 400 outputs cached, 400 to run'] }; return HttpResponse.json(mock.run, { status: 202 }) }),
+  http.get('/api/evals/:name/progress', () => HttpResponse.json(mock.progress)),
   http.get('/api/evals/:name/report', () => HttpResponse.text('# transcribe-en: Which Whisper model for English?\n\n## Answer\n')),
   http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: evalFixtures.pair(), remaining: 12 })),
   http.get('/api/evals/:name/outputs', ({ request }) => { const item = new URL(request.url).searchParams.get('item_id'); const d = evalFixtures.outputs(); return HttpResponse.json(item ? { ...d, items: d.items.filter(i => i.id === item) } : d) }),

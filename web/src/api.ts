@@ -123,7 +123,17 @@ export interface Analysis {
   decision: { per_candidate: Record<string, Verdict>; recommendation: string; change: boolean }
   judgments?: { n: number; strength: Record<string, [number, number, number]> }
   judges?: Record<string, JudgeSummary> // model judges beside the people (evals.judges): agreement with people's judgments on the same pairs
-  summary?: { computed_at: number; seconds: number; stale: boolean } // worked out ahead and kept; stale: a fresh one is on its way
+  summary?: { computed_at?: number; seconds?: number; stale: boolean; pending?: boolean; progress?: AnalysisStep | null } // worked out ahead and kept; stale: a fresh one is on its way; pending: none yet (only `experiment` is filled in)
+}
+/** What an analysis under way is doing: the step, and how far through its steps it is. */
+export interface AnalysisStep { step: string; done: number; total: number; started_at: number }
+/** Where a run stands (GET /api/evals/{name}/progress), however it was started. */
+export interface Progress {
+  candidates: { name: string; total: number; done: number; failed: number; steps: { role: string; model: string | null; done: number; failed: number }[] }[]
+  jobs: { id: number; status: string; role: string | null; model: string | null; item: string | null; submitted_at: number; started_at: number | null }[]
+  run: { state: string; log: string[] } | null
+  analysis: AnalysisStep | null
+  now: number
 }
 export interface Share { value: number | null; low: number | null; high: number | null; n: number; k?: number }
 export interface JudgeSummary {
@@ -140,6 +150,7 @@ export const evalsApi = {
   list: () => get<Evals>('/api/evals'),
   analysis: (name: string) => get<Analysis>(`/api/evals/${encodeURIComponent(name)}`),
   status: (name: string) => get<RunStatus>(`/api/evals/${encodeURIComponent(name)}/status`),
+  progress: (name: string) => get<Progress>(`/api/evals/${encodeURIComponent(name)}/progress`),
   run: (name: string) => send<RunStatus>('POST', `/api/evals/${encodeURIComponent(name)}/run`),
   report: async (name: string) => { const r = await fetch(withBase(`/api/evals/${encodeURIComponent(name)}/report`)); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text() },
   pair: (name: string) => get<{ pair: Pair | null; remaining?: number }>(`/api/evals/${encodeURIComponent(name)}/pair`),

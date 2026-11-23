@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**An eval page never hangs on its first analysis, and shows where a run stands (branch `claude/project-thread-dvu0cz`)**
+Jonathan: the page-rebuild page hung on open. Its first analysis worked out while the request waited, and page_ink_all and page_ink_f1 each binarised every scan (seconds a page, for every candidate).
+- `evals/summaries.py`: an experiment with no kept analysis (or a quick one) is worked out beside the request, which waits QUICK_S; past that the page gets a stub marked `pending` with what the analysis is doing (`progress`: step, done, total), and the same work is joined, not started again, when it asks again. Errors still answer the request.
+- `evals/core.py`: `analyse(..., progress=)` says which candidate it is scoring or comparing.
+- `evals/metrics.py`: one binarised scan a page (`_page_binarised`, cached) for both page ink metrics; masks are made per call, so only the ink is held.
+- `evals/api.py`: `GET /api/evals/{name}/progress`: per candidate its outputs in and failed and, for a pipeline, how many items have each step; the queue's eval jobs on the dataset's items (running and queued, model, item, how long); the run started here; the analysis step. It works for runs started from the CLI too.
+- Web: a Progress panel on the experiment page (outputs per candidate, pipeline steps, the jobs running and queued with their items and times, the analysis step), polled while there is work; the Results and Write-up tabs say the results are being worked out instead of waiting (the write-up is fetched again once the analysis is in, keyed by when it was worked out); progress counts a sampled candidate over its sample. Static build updated.
+- Tests in `test_eval_api.py` and `web/tests/integration/Evals.test.tsx`.
+
 **End-to-end page rebuild eval: layout, corrected text, fitted type, pictures and borders (branch `claude/project-thread-dvu0cz`)**
 Jonathan asked for the full page rebuild once the stage evals had winners. Spec `page-rebuild` is a ladder over the page-layout pages, Tesseract up to the full recipe, so the report says what each step is worth; `full-every-face` tries every face instead of Sonnet's shortlist (the font-match run's ink winner, wrong class half the time), for the judge to settle (docs/evals.md "Page rebuild").
 - `runtimes/pagebuild.py`: with `ocr` and `groups`, `texts` (a model's corrections of the numbered lines; an empty text drops a line), `font_fit` (a font-match answer: each word in its fitted face, cut, size and place; the answer's font files drawn with), `styles` (fitted styles to keep), `snap` (sizes near the block's median take it, widths kept), `crop` (figures cut from the scan, paper whitened) and `rules` (the scan's ruled lines near the print, the border among them, cut from the scan as figures of kind rule).
