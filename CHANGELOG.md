@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**speak: `phonemes`, IPA said as written, for the sounds of phonics (branch `claude/project-thread-8d9l62`)**
+Flashtap asks for recorded clips of its prompts and of each phonics sound (/iː/, /ʃ/...) in a UK voice. A word goes through Kokoro's own phonemizer, but a sound on its own has no spelling to give it, so the role takes IPA too. Tried on all 44 sounds of Letters and Sounds with kokoro-v1 (bf_emma): vowels and diphthongs come out as themselves; a lone consonant does not. /ʃ/ and /s/ come back as 20 ms of hiss and then a vowel (87 % of the energy under 1 kHz, where a fricative has most of it above 2.5 kHz), and lengthening it (`ʃːː`) gives vowel, hiss, vowel. So pure consonant sounds still need a person's recording; Flashtap records them in its own app.
+- `workers/tts.py`: param `phonemes` (Kokoro only, `is_phonemes=True` in kokoro-onnx, no phonemizer); `text` becomes optional and is only the label when phonemes are given; `wpm` and `fit_s` are refused with phonemes (they count syllables in text); another engine refuses phonemes by name.
+- `workers/tts.py`, fixed: with `tries` and a target, once a later take was kept, the next one was that seed plus k (0, 1, 3 when the second take won), not the docstring's seed..seed+tries-1. Now base + k.
+- `client/strata_models_client`: `speak` says so.
+- Tests: `tests/unit/test_tts_worker.py` (**new**: fake Kokoro, Chatterbox and Qwen3-TTS models record what they were fed; phonemes, every refusal, the pace target, the best of several takes, a stretch), `tests/gpu/test_real_runtimes.py` (`test_speak_ipa_on_kokoro`).
+
 **Page rebuilds draw the CFF faces (TeX Gyre, Latin Modern) through a TrueType copy (branch `claude/project-thread-dvu0cz`)**
 The page-rebuild run failed every page fitted in TeX Gyre Schola (24 failures, 7 of 20 pages for each fitted candidate): the CTAN faces of `runtimes/fonts.toml` are CFF OpenType, which fontfit reads through FreeType but ReportLab refuses ("postscript outlines are not supported").
 - `runtimes/pagebuild.py`: `truetype(path)`: a CFF font is converted once to `<stem>.truetype.ttf` beside it (fontTools' otf2ttf recipe: cubic outlines to quadratic within a thousandth of an em) and drawn from that; TrueType fonts are used as they are. Every font a job draws with goes through it.

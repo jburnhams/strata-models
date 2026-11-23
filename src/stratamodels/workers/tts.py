@@ -9,7 +9,8 @@ Engines (models.toml options.engine):
   qwen3-design       Qwen3-TTS VoiceDesign: the voice is described in words (instruct)
   qwen3-clone        Qwen3-TTS Base: clones a reference recording (with its transcript, voice_text, it imitates it more closely)
 
-params (every engine): text (required); voice (a preset name, or the path of a reference recording for the cloning engines); voice_text (the
+params (every engine): text (required unless phonemes is given); phonemes (Kokoro only: IPA in its own symbols, said as written, with no
+spelling-to-sound step: a sound such as /ɔɪ/ (the oi in coin) that no word spells alone; `text` is then only the label, and wpm and fit_s are refused); voice (a preset name, or the path of a reference recording for the cloning engines); voice_text (the
 reference's words, or voice_text_file); instruct (how to speak, or for qwen3-design what the voice is); speed (1.0 = the model's own pace; native on kokoro, else a
 pitch-keeping time stretch after); language (kokoro: en-gb / en-us, qwen3: English...); seed (default 0: the same params give the same
 audio); temperature, top_p, exaggeration, cfg_weight (engine knobs; ignored where they do not apply); out_dir (added by the runtime).
@@ -116,13 +117,19 @@ def speak(p):
     """(float32 mono samples, sample rate, voice used, whether `speed` was applied natively)."""
     import numpy as np
 
-    eng, m, text = E["engine"], E["m"], p["text"]
+    eng, m, text, phon = E["engine"], E["m"], p["text"], p.get("phonemes")
+    if phon and eng != "kokoro":
+        raise ParamError(f"phonemes: only the kokoro engine takes IPA, not {eng!r}")
     if eng == "kokoro":
         v = p.get("voice") or "bm_lewis"
         if v not in m.get_voices():
             raise ParamError(f"no Kokoro voice {v!r}")
         lang = p.get("language") or ("en-gb" if v[0] == "b" else "en-us")
-        x, sr = m.create(text, voice=v, speed=float(p.get("speed") or 1.0), lang=lang)
+        speed = float(p.get("speed") or 1.0)
+        if phon:  # kokoro-onnx skips its phonemizer: what is given is what the model is fed
+            x, sr = m.create(phon, voice=v, speed=speed, lang=lang, is_phonemes=True)
+        else:
+            x, sr = m.create(text, voice=v, speed=speed, lang=lang)
         return np.asarray(x, np.float32), sr, v, True
     if eng == "chatterbox":
         ref = _ref(p, need=False)
@@ -196,10 +203,14 @@ def run(p):
         **(E["options"].get("defaults") or {}),
         **p,
     }  # a model entry's own voice and settings (models.toml options.defaults); the job's win
-    text = p.get("text")
-    if not isinstance(text, str) or not text.strip():
+    text, phon = p.get("text"), p.get("phonemes")
+    if phon is not None and (not isinstance(phon, str) or not phon.strip()):
+        raise ParamError("phonemes is a string of IPA")
+    if not phon and (not isinstance(text, str) or not text.strip()):
         raise ParamError("give text")
-    text = text.strip()
+    text = (text if isinstance(text, str) else "").strip() or phon.strip()
+    if phon and (p.get("wpm") is not None or p.get("fit_s") is not None):
+        raise ParamError("wpm and fit_s count syllables in text: give them without phonemes")
     speed = float(p.get("speed") or 1.0)
     if not 0.5 <= speed <= 2.0:
         raise ParamError("speed is between 0.5 and 2.0")
@@ -242,11 +253,14 @@ def run(p):
     elif (
         target is not None
     ):  # sampled models: their timing differs by seed; keep the take nearest the target, stretch the rest
+        base = (
+            seed  # takes are seeds base..base+tries-1; adding k to the kept seed skipped some and repeated none it said
+        )
         for k in range(1, tries):
-            cand = once(p, seed + k)
+            cand = once(p, base + k)
             if abs(np.log(cand[4] / target)) < abs(np.log(got / target)):
                 x, sr, voice, native, got = cand
-                seed = seed + k
+                seed = base + k
     out_dir = p.get("out_dir") or "."
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"tts-{uuid.uuid4().hex[:12]}.wav")
