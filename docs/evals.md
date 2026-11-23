@@ -67,6 +67,13 @@ use people only. What the judges are for, for now, is measuring them: the analys
 judge's agreement with people on the pairs both judged (tie included), the same-winner share where both picked one, Cohen's kappa (agreement
 beyond chance) and how often it gave the same answer with X and Y swapped. A judge that agrees well across experiments is the one to trust with
 more later (pairs nobody has time for, or a first pass before people).
+- **Ranking agreement**: many pairs are close calls where any answer is fair, so each judge also gets how alike it *orders* the candidates:
+  Bradley-Terry strengths from the person's answers and from the judge's on the same pairs, compared by Spearman's rho (with a bootstrap
+  interval over pairs), Kendall's tau-b and the places a candidate moves. A judge can differ on many close calls and still rank alike.
+- **Looking at the differences**: on the Results tab, Model judges, *Show* lists every pair a judge answered differently from the person, with
+  both outputs, each side's pick and the judge's reason. **Borderline: either is fine** marks the person's judgment (kept in its `detail`;
+  POST `/api/evals/{name}/judgments/{id}/borderline`): that pair leaves the judge's agreement figures and counts as a tie in the ranking
+  comparison. The person's own choice still counts in the experiment's results.
 - **Kinds**, by what a judge must read: `text` (transcripts, captions, JSON) and `vision` (photo descriptions, generated pictures: it sees the
   item's pictures and the candidates'). Each kind is a registry role (`judge-text`, `judge-vision`) with its chosen model, picked like any model:
   by an eval, here on agreement with people. A judge may name another model serving the role to trial it. `audio` (`judge-audio`: cleaned

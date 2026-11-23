@@ -22,6 +22,8 @@ GET  /api/evals/{name}/media/{item_id}       the item's input file (`path`: audi
 GET  /api/evals/{name}/verdicts/{item_id}    every judgment of an item, people's and model judges' (shown once a person has judged it)
 POST /api/evals/{name}/judges/{judge}/run    a model judge judges what it has still to judge (?limit=N), in the background (evals.judges)
 GET  /api/evals/{name}/judges/status         those runs' progress
+GET  /api/evals/{name}/judges/{judge}/disagreements   the pairs a judge answered differently from a person, with both outputs, and those marked borderline
+POST /api/evals/{name}/judgments/{id}/borderline      {borderline: bool} mark a person's judgment as borderline (either answer fine): left out of judge agreement
 A person's judgment also starts every judge with `auto = true` on that pair, in the background."""
 
 import base64
@@ -49,6 +51,10 @@ from stratamodels.evals.summaries import Summaries, finite
 SECRET = secrets.token_bytes(
     16
 )  # signs judging tokens for this process's life: a token says which output was X without the page knowing
+
+
+class BorderlineIn(BaseModel):
+    borderline: bool = True
 
 
 class JudgmentIn(BaseModel):
@@ -456,6 +462,27 @@ def mount(app, scheduler):
                 ),
             ),
         )
+
+    @app.get("/api/evals/{name}/judges/{judge}/disagreements")
+    def get_disagreements(name: str, judge: str):
+        from stratamodels.evals import judges as J
+
+        s = spec_or_404(name)
+        if not any(j["name"] == judge for j in s.judges):
+            raise HTTPException(404, f"no judge {judge!r} in {name}")
+        return finite(dict(judge=judge, pairs=J.disagreements(s, engine(), judge)))
+
+    @app.post("/api/evals/{name}/judgments/{judgment_id}/borderline")
+    def post_borderline(name: str, judgment_id: int, b: BorderlineIn):
+        from stratamodels.evals import judges as J
+
+        spec_or_404(name)
+        try:
+            out = J.mark_borderline(engine(), name, judgment_id, b.borderline)
+        except KeyError:
+            raise HTTPException(404, f"no judgment {judgment_id} by a person in {name}")
+        summaries.refresh(name)  # the signature reads the marks: the kept analysis goes stale and is worked out again
+        return out
 
     @app.post("/api/evals/{name}/judgments", status_code=201)
     def post_judgment(name: str, b: JudgmentIn):
