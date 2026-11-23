@@ -1,6 +1,7 @@
 """Pipeline candidates (stages before a candidate's own job, stratamodels.evals.core): each stage cached on its own, the trace kept with the end
 result, a failed stage fails the output, judges see only the end result, the Outputs API and the write-up show every step."""
 
+import json
 import os
 
 import pytest
@@ -90,6 +91,22 @@ def test_stages_are_parsed_and_checked(pipe):
         C.stage_params(st, dict(context="x"))
     with pytest.raises(C.EvalError, match="list of input field names"):
         C.parse_spec(dict(base, candidates=[dict(name="a", model="m", stages=[dict(role="r", also="image")])]))
+
+
+def test_a_stage_can_hand_on_its_whole_answer_as_json():
+    """answer = "json": a role whose answer is data (font-match's fitted words), passed on as JSON text, which page-build reads; only kept
+    when given, so no existing stage's key changes."""
+    st = C.parse_stage(
+        dict(role="font-match", input="{ocr}", send="ocr", also=["image"], answer="json", into="font_fit")
+    )
+    assert st["answer"] == "json" and "answer" not in C.parse_stage(dict(role="r", answer="text"))
+    got = C.stage_answer(st, dict(face="caslon", seconds=3))
+    assert json.loads(got) == dict(face="caslon", seconds=3)
+    assert C.stage_answer(dict(role="r"), dict(text=" x ")) == "x"
+    with pytest.raises(C.EvalError, match="no JSON"):
+        C.stage_answer(st, "plain")
+    with pytest.raises(ValueError, match="text or json"):
+        C.parse_stage(dict(role="r", answer="xml"))
 
 
 def test_a_stageless_candidate_keeps_its_key(pipe):

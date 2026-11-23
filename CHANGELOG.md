@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**End-to-end page rebuild eval: layout, corrected text, fitted type, pictures and borders (branch `claude/project-thread-dvu0cz`)**
+Jonathan asked for the full page rebuild once the stage evals had winners. Spec `page-rebuild` is a ladder over the page-layout pages, Tesseract up to the full recipe, so the report says what each step is worth (docs/evals.md "Page rebuild").
+- `runtimes/pagebuild.py`: with `ocr` and `groups`, `texts` (a model's corrections of the numbered lines; an empty text drops a line), `font_fit` (a font-match answer: each word in its fitted face, cut, size and place; the answer's font files drawn with), `styles` (fitted styles to keep), `snap` (sizes near the block's median take it, widths kept), `crop` (figures cut from the scan, paper whitened) and `rules` (the scan's ruled lines near the print, the border among them, cut from the scan as figures of kind rule).
+- Preset `page-text-fix-v1` (+ schema): Haiku corrects Tesseract's numbered lines one by one, answering only those it changes.
+- `evals/core.py`: a stage may set `answer = "json"` to hand on its whole answer (font-match's) instead of its text; only kept in the stage when given, so no key changes. A stage's cost and `cost_usd` count a runtime's own cloud call (font-match's `proposer.cost_usd`).
+- `evals/metrics.py`: `page_ink_all`, the rebuilt page's ink against the scan's over the whole printed area, border included.
+- `scripts/evals/ocr_reference.py --pages DIR` reads local pictures (the page-layout pages, into `DIR/text/`); `page_layout.py` adds a reading as the item's `reference.text`, for the rebuild's cer_exact.
+- Tests in `test_pagebuild.py`, `test_eval_pipeline.py`, `test_page_metrics.py`, `test_ocr_reference.py`.
+
 **Cull a candidate from blind judging (branch `claude/project-thread-dvu0cz`)**
 A candidate with `judge = false` is in no new pair on the Judge tab or for a model judge; its outputs, metrics and judgments made already still count (`evals/core.py`, `evals/api.py`, `evals/judges.py`, docs/evals.md "Judged experiments"). page-layout culls `sonnet-layout` (lost all 12 of its pairs) and `gemma-layout` (2 wins, 4 losses, block_f1 12 %), so judging time goes to the candidates still in contention. Test in `test_eval_api.py`.
 

@@ -13,6 +13,20 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   groups      with `ocr`: a vision model's regrouping of Tesseract's lines (preset page-layout-fix-v1, which is shown them numbered by
               `list_lines`): blocks in reading order, each the numbers of its lines and a role, and figures as boxes in thousandths. The
               lines keep Tesseract's measured boxes and text; a line in no block is left out (a stain, a stamp, the next page showing through)
+  texts       with `ocr` and `groups`: a model's corrections of Tesseract's text (preset page-text-fix-v1, shown the same numbered lines):
+              {lines: [{n, text}]}, each replacing line n's text (an empty text drops the line: not print); lines it leaves out keep
+              Tesseract's text
+  font_fit    with `ocr`: a `font-match` answer for the page (its words are Tesseract's, matched here by their boxes): each line set in the
+              fitted face, each word in its own style, size, scale, tracking and weight where it was measured. A line whose corrected text
+              has another number of words keeps the face, style and size of its words and is spaced to its box. Its `fonts` files are
+              the faces drawn with (`fonts` and `font_dir` add to them)
+  styles      with `font_fit`: the fitted word styles to keep (default all: roman, italic, bold, small-caps); a word fitted in another is
+              set in roman. A fit word by word to worn print calls a heavy word bold and a line's last word small capitals now and then
+  snap        with `font_fit`: sizes within this fraction of their block's median size take the median (default 0: as fitted), so a block of
+              one type size is drawn in one size, not the word-by-word scatter of a fit to worn print
+  crop        cut each figure's picture out of the scan (`image`), its paper whitened, rather than leave its box empty
+  rules       find the ruled lines the scan's ink holds (the border round the page, the rule under a running head) and draw each as a
+              figure of kind rule cut from the scan: no reader is asked for them (page-layout-fix-v2 leaves the border out)
   list_lines  with `ocr`: draw nothing, answer {text: Tesseract's lines numbered for page-layout-fix-v1, one a line: number, Tesseract's
               block, box [x0, y0, x1, y1] in thousandths, text; lines}
   image       the page picture: its size and dpi for `layout`, its dpi for `ocr` (the boxes stay in the ocr answer's pixels; an upscaled read
@@ -30,10 +44,12 @@ import hashlib
 import itertools
 import json
 import os
+import statistics
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
+import numpy as np
 from PIL import Image
 from strata_python.pages import Block, Figure, Line, Page, PageError, Span
 from strata_python.pages.render import rasterise, read_text, render
@@ -134,10 +150,164 @@ def list_lines(ocr: Mapping[str, Any]) -> str:
     return "\n".join(out)
 
 
-def from_groups(ocr: Mapping[str, Any], groups: Mapping[str, Any], dpi: float, w: float, h: float) -> Page:
+MakeLine = Callable[[int, Mapping[str, Any]], "Line | None"]
+
+
+def _plain(n: int, ln: Mapping[str, Any]) -> Line | None:
+    return Line(box=cast("Any", tuple(float(v) for v in ln["box"])), spans=[Span(str(ln["text"]))])
+
+
+def _texts(texts: Mapping[str, Any]) -> dict[int, str]:
+    """{line number: corrected text} from a page-text-fix answer; numbers that are not whole numbers are skipped (the first answer wins)."""
+    out: dict[int, str] = {}
+    for c in cast("list[Any]", texts.get("lines") or []):
+        if not isinstance(c, Mapping):
+            continue
+        c = cast("Mapping[str, Any]", c)
+        try:
+            n = int(cast("Any", c.get("n")))
+        except (TypeError, ValueError):
+            continue
+        out.setdefault(n, " ".join(str(c.get("text") or "").split()))
+    return out
+
+
+def _wkey(box: object) -> tuple[int, ...]:
+    return tuple(round(float(v)) for v in cast("Sequence[Any]", box))
+
+
+def _fitted(fit: Mapping[str, Any]) -> tuple[str, dict[tuple[int, ...], Mapping[str, Any]], dict[str, str], list[str]]:
+    """(face, {Tesseract word box: fitted word}, {face key: font file}, small-caps cuts) from a font-match answer. A face key is the face and
+    a style (`caslon:italic`): the renderer picks a file by face only, so each cut is a face of its own."""
+    face = str(fit.get("face") or "")
+    words: dict[tuple[int, ...], Mapping[str, Any]] = {}
+    for b in cast("list[Mapping[str, Any]]", fit.get("blocks") or []):
+        for ln in cast("list[Mapping[str, Any]]", b.get("lines") or []):
+            for wd in cast("list[Mapping[str, Any]]", ln.get("words") or []):
+                if wd.get("box") is not None:
+                    words.setdefault(_wkey(wd["box"]), wd)
+    fonts: dict[str, str] = {}
+    small_caps: list[str] = []
+    for fid, entry in cast("Mapping[str, Mapping[str, Any]]", fit.get("fonts") or {}).items():
+        for style, path in cast("Mapping[str, Any]", entry.get("files") or {}).items():
+            fonts[f"{fid}:{style}"] = str(path)
+            if style == "small-caps":
+                small_caps.append(f"{fid}:{style}")
+    if not face or f"{face}:roman" not in fonts:
+        raise RunError(f"the font-match answer names no face with a roman file: {face!r}")
+    return face, words, fonts, small_caps
+
+
+FIT_STYLES = ("roman", "italic", "bold", "small-caps")
+
+
+def _styled(
+    face: str, fonts: Mapping[str, str], wd: Mapping[str, Any], keep: Sequence[str] = FIT_STYLES
+) -> tuple[str, str]:
+    """(span style, face key) of a fitted word: its own cut when the face has one; a small-caps word without a cut is synthesised from the
+    roman by the renderer. A style not in `keep` is set in roman."""
+    style = str(wd.get("style") or "roman")
+    if style not in FIT_STYLES or style not in keep:
+        style = "roman"
+    if f"{face}:{style}" in fonts:
+        return style, f"{face}:{style}"
+    return (style if style == "small-caps" else "roman"), f"{face}:roman"
+
+
+def line_maker(
+    texts: Mapping[int, str] | None = None,
+    fit: tuple[str, Mapping[tuple[int, ...], Mapping[str, Any]], Mapping[str, str]] | None = None,
+    keep: Sequence[str] = FIT_STYLES,
+) -> MakeLine:
+    """How each Tesseract line (numbered as list_lines numbers it) becomes a drawn line: its text corrected (`texts`), its words set as the
+    font fit placed them (`fit`), in the fitted styles named in `keep` (others in roman). A corrected line whose words no longer pair one for
+    one with Tesseract's keeps the fit's face, style and size and is spaced to its box: the words it changed were never measured."""
+
+    def make(n: int, ln: Mapping[str, Any]) -> Line | None:
+        box = cast("Any", tuple(float(v) for v in ln["box"]))
+        text = texts.get(n, str(ln["text"])) if texts is not None else str(ln["text"])
+        if not text.strip():
+            return None
+        if fit is None:
+            return Line(box=box, spans=[Span(text)])
+        face, fwords, fonts = fit
+        own = [w for w in cast("list[Mapping[str, Any]]", ln.get("words") or []) if str(w.get("text") or "").strip()]
+        got = [fwords.get(_wkey(w["box"])) for w in own]
+        known = [g for g in got if g is not None]
+        if not known:
+            return Line(box=box, spans=[Span(text)])
+        parts = text.split()
+        if len(parts) == len(own) and len(known) == len(got):
+            spans: list[Span] = []
+            for i, (t, wd) in enumerate(zip(parts, known, strict=True)):
+                style, key = _styled(face, fonts, wd, keep)
+                spans.append(
+                    Span(
+                        t + (" " if i < len(parts) - 1 else ""),
+                        style=style,
+                        face=key,
+                        size_pt=float(wd["size_pt"]),
+                        tracking_em=float(wd.get("tracking_em") or 0.0),
+                        hscale=float(wd.get("hscale") or 1.0),
+                        stroke_em=float(wd.get("stroke_em") or 0.0),
+                        x=float(wd["x"]),
+                        baseline_y=float(wd["baseline_y"]),
+                    )
+                )
+            return Line(box=box, spans=spans)
+        styles = [str(k.get("style") or "roman") for k in known]
+        style, key = _styled(face, fonts, {"style": max(set(styles), key=styles.count)}, keep)
+        return Line(
+            box=box,
+            spans=[
+                Span(
+                    text,
+                    style=style,
+                    hscale=statistics.median(float(k.get("hscale") or 1.0) for k in known),
+                    stroke_em=statistics.median(float(k.get("stroke_em") or 0.0) for k in known),
+                )
+            ],
+            face=key,
+            size_pt=statistics.median(float(k["size_pt"]) for k in known),
+            baseline_y=statistics.median(float(k["baseline_y"]) for k in known),
+        )
+
+    return make
+
+
+def snap_sizes(page: Page, within: float) -> None:
+    """Sizes within `within` of their block's median (over its words) set to that median: a block is mostly one type size, and a fit to worn
+    print scatters it word by word. The width each word was fitted to is kept (its scale and tracking scaled by the change), so only the
+    letters' height changes. Headings, small capitals and other sizes further off keep their own."""
+    for b in page.blocks:
+        sizes = [s.size_pt for ln in b.lines for s in ln.spans if s.size_pt] + [
+            ln.size_pt for ln in b.lines if ln.size_pt and not any(s.size_pt for s in ln.spans)
+        ]
+        if not sizes:
+            continue
+        m = statistics.median(sizes)
+        for ln in b.lines:
+            if ln.size_pt and abs(ln.size_pt - m) <= within * m:
+                for s in ln.spans:
+                    if not s.size_pt:
+                        s.hscale *= ln.size_pt / m
+                ln.size_pt = m
+            for s in ln.spans:
+                if s.size_pt and abs(s.size_pt - m) <= within * m:
+                    # the fit trades size against width (a larger size, narrower): keep the word's width and its spacing, change its height
+                    k = s.size_pt / m
+                    s.hscale *= k
+                    s.tracking_em *= k
+                    s.size_pt = m
+
+
+def from_groups(
+    ocr: Mapping[str, Any], groups: Mapping[str, Any], dpi: float, w: float, h: float, make: MakeLine = _plain
+) -> Page:
     """Tesseract's lines regrouped by a vision model: each block the lines it names (in Tesseract's order within the block, which reads them
     top to bottom; a line named twice stays in its first block), its box their union, its role the model's; figures in thousandths of the
-    page. A block naming no line there is dropped, so a model that numbers wrongly loses blocks rather than inventing them."""
+    page. A block naming no line there is dropped, so a model that numbers wrongly loses blocks rather than inventing them. `make` draws each
+    line (line_maker: corrected text, fitted type)."""
     lines = ocr_lines(ocr)
     taken: set[int] = set()
     blocks: list[Block] = []
@@ -153,10 +323,9 @@ def from_groups(ocr: Mapping[str, Any], groups: Mapping[str, Any], dpi: float, w
                 nums.append(n)
         if not nums:
             continue
-        mine = [
-            Line(box=cast("Any", tuple(float(v) for v in lines[n - 1]["box"])), spans=[Span(str(lines[n - 1]["text"]))])
-            for n in sorted(nums)
-        ]
+        mine = [ln for ln in (make(n, lines[n - 1]) for n in sorted(nums)) if ln is not None]
+        if not mine:
+            continue
         try:
             blocks.append(
                 Block(
@@ -180,6 +349,140 @@ def from_groups(ocr: Mapping[str, Any], groups: Mapping[str, Any], dpi: float, w
         return Page(width=w, height=h, dpi=dpi, blocks=blocks, figures=figures)
     except PageError as e:
         raise RunError(f"ocr answer has no page size: {e}") from e
+
+
+def _paper(path: str) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    """The scan in grey with its paper made white (each pixel over the paper's brightness, the 90th percentile): a crop of a yellowed page
+    drawn on a white PDF page would show as a tinted patch."""
+    with Image.open(path) as im:
+        g = np.asarray(im.convert("L"), dtype=np.float32)
+    npa: Any = np  # numpy's percentile and clip overloads are partially unknown to pyright
+    paper = max(float(npa.percentile(g, 90)), 1.0)
+    return npa.clip(g * (255.0 / paper), 0, 255).astype(np.uint8)
+
+
+def _crop_folder() -> str:
+    folder = os.path.join(str(cast("object", settings.data_dir())), "pages", "crops")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def _save_crop(arr: np.ndarray[Any, np.dtype[np.uint8]], what: object) -> str:
+    """A crop written once under <data>/pages/crops, named by what it is cut from (so a rebuild is cached by it too)."""
+    p = os.path.join(
+        _crop_folder(), hashlib.sha256(json.dumps(what, sort_keys=True).encode()).hexdigest()[:16] + ".png"
+    )
+    if not os.path.isfile(p):
+        part = f"{p}.{os.getpid()}.part.png"
+        Image.fromarray(arr).save(part)
+        os.replace(part, p)
+    return p
+
+
+def _stamp(path: str) -> list[object]:
+    st = os.stat(path)
+    return [os.path.abspath(path), st.st_size, int(st.st_mtime)]
+
+
+def crop_figures(page: Page, image: str) -> None:
+    """Each figure with no picture gets its box cut from the scan (paper whitened). The page may be in the pixels of an upscaled reading:
+    boxes are scaled to the picture's."""
+    todo = [f for f in page.figures if f.image is None]
+    if not todo:
+        return
+    g = _paper(image)
+    kx, ky = g.shape[1] / page.width, g.shape[0] / page.height
+    for f in todo:
+        x, y, w, h = f.box
+        x0, y0 = max(0, int(x * kx)), max(0, int(y * ky))
+        x1, y1 = min(g.shape[1], int(round((x + w) * kx))), min(g.shape[0], int(round((y + h) * ky)))
+        if x1 > x0 and y1 > y0:
+            f.image = _save_crop(g[y0:y1, x0:x1], ["figure", _stamp(image), [x0, y0, x1, y1]])
+
+
+RULE_MIN = 0.12  # a ruled line runs at least this fraction of the page's shorter side: a border or a running head's rule, not a dash
+RULE_MAX_MM = 1.2  # and is at most this thick on average (thicker is a black bar, the binding's shadow, a picture)
+RULE_REACH = 0.06  # and lies within this fraction of the page's size around the text: a border, not the book's edge beside the leaf
+
+
+def _overlap(a: tuple[float, float, float, float], b: Sequence[float]) -> float:
+    """The area two boxes share: `a` as [x0, y0, x1, y1], `b` as [x, y, w, h]."""
+    w = min(a[2], b[0] + b[2]) - max(a[0], b[0])
+    h = min(a[3], b[1] + b[3]) - max(a[1], b[1])
+    return max(w, 0.0) * max(h, 0.0)
+
+
+def find_rules(image: str, dpi: float) -> list[tuple[int, int, int, int, np.ndarray[Any, np.dtype[np.bool_]]]]:
+    """The ruled lines in a scan: [(x0, y0, x1, y1, its ink inside that box)] in the picture's pixels. Ink that stays after an opening by a
+    long line (a minimum then a maximum filter, linear in the page's size) along rows, and along columns, after a short closing that
+    bridges worn gaps; each connected piece whose mean thickness is a rule's, away from the picture's edge (the dark edge of the leaf)."""
+    from scipy import ndimage  # pyright: ignore[reportMissingTypeStubs]  (scipy ships no stubs)
+
+    from stratamodels.evals import ink as INK  # pyright: ignore[reportMissingTypeStubs]
+
+    with Image.open(image) as im:
+        ink = cast("np.ndarray[Any, np.dtype[np.bool_]]", cast("Any", INK).binarise(im, dpi, deskew=False)[0])
+    hgt, wid = ink.shape
+    length = max(20, int(RULE_MIN * min(hgt, wid)))
+    thick = max(2.0, RULE_MAX_MM * dpi / 25.4)
+    edge = max(4, int(0.01 * min(hgt, wid)))
+    across = max(3, round(dpi / 50))
+    nd: Any = ndimage
+    out: list[tuple[int, int, int, int, np.ndarray[Any, np.dtype[np.bool_]]]] = []
+    for axis in (1, 0):
+        m = ink.astype(np.uint8)
+        # a printed rule is rarely level on the scan: thickened across (a few pixels) a slightly skewed rule's rows overlap into long runs,
+        # then gaps of a few pixels along it (worn print) are closed
+        m = nd.maximum_filter1d(m, across, axis=1 - axis)
+        m = nd.minimum_filter1d(nd.maximum_filter1d(m, 5, axis=axis), 5, axis=axis)
+        m = nd.maximum_filter1d(nd.minimum_filter1d(m, length, axis=axis), length, axis=axis).astype(bool) & ink
+        lab, _n = nd.label(m, structure=np.ones((3, 3), dtype=bool))
+        for i, sl in enumerate(cast("list[Any]", nd.find_objects(lab)), 1):
+            if sl is None:
+                continue
+            ys, xs = cast("slice", sl[0]), cast("slice", sl[1])
+            y0, y1, x0, x1 = int(ys.start), int(ys.stop), int(xs.start), int(xs.stop)
+            piece = lab[ys, xs] == i
+            run = (x1 - x0) if axis == 1 else (y1 - y0)
+            if run < length or float(piece.sum()) / run > thick:
+                continue
+            if x0 < edge or y0 < edge or x1 > wid - edge or y1 > hgt - edge:
+                continue
+            out.append((x0, y0, x1, y1, piece))
+    return out
+
+
+def add_rules(page: Page, image: str) -> None:
+    """The scan's ruled lines (find_rules) as figures of kind rule, each its own ink cut from the scan (paper whitened, everything else in its
+    box white, so no letter near a skewed border comes with it)."""
+    if not page.blocks:
+        return
+    g = _paper(image)
+    kx, ky = page.width / g.shape[1], page.height / g.shape[0]
+    pad = 2
+    # only near the print: a scan often holds the book's edge and cover round the leaf, whose edges are long straight lines too
+    tx, ty, tw, th = _union([b.box for b in page.blocks])
+    rx, ry = RULE_REACH * page.width, RULE_REACH * page.height
+    lines = [ln.box for b in page.blocks for ln in b.lines]
+    for x0, y0, x1, y1, piece in find_rules(image, page.dpi / kx):
+        bx0, by0, bx1, by1 = x0 * kx, y0 * ky, x1 * kx, y1 * ky
+        if bx0 < tx - rx or by0 < ty - ry or bx1 > tx + tw + rx or by1 > ty + th + ry:
+            continue
+        area = max((bx1 - bx0) * (by1 - by0), 1e-9)
+        if sum(_overlap((bx0, by0, bx1, by1), b) for b in lines) > 0.5 * area:
+            continue  # a stroke of display type (the stems of a condensed letter are long and thin too), not a rule
+        a0, b0 = max(0, x0 - pad), max(0, y0 - pad)
+        a1, b1 = min(g.shape[1], x1 + pad), min(g.shape[0], y1 + pad)
+        keep = np.zeros((b1 - b0, a1 - a0), dtype=bool)
+        keep[y0 - b0 : y1 - b0, x0 - a0 : x1 - a0] = piece
+        from scipy import ndimage  # pyright: ignore[reportMissingTypeStubs]
+
+        keep = cast("np.ndarray[Any, np.dtype[np.bool_]]", cast("Any", ndimage).binary_dilation(keep, iterations=pad))
+        crop = cast(
+            "np.ndarray[Any, np.dtype[np.uint8]]", cast("Any", np).where(keep, g[b0:b1, a0:a1], 255).astype(np.uint8)
+        )
+        path = _save_crop(crop, ["rule", _stamp(image), [a0, b0, a1, b1]])
+        page.figures.append(Figure(box=(a0 * kx, b0 * ky, (a1 - a0) * kx, (b1 - b0) * ky), image=path, kind="rule"))
 
 
 def _picture(path: object, dpi: object) -> tuple[int, int, float]:
@@ -290,8 +593,20 @@ def page_of(params: Mapping[str, Any]) -> Page:
             if not dpi:
                 raise RunError("give the page picture (image) or its dpi with an ocr answer")
         groups = _json(params.get("groups"), "groups")
+        texts = _json(params.get("texts"), "texts") if params.get("texts") else None
+        fit = _json(params.get("font_fit"), "font fit") if params.get("font_fit") else None
         if isinstance(groups, Mapping):
-            return from_groups(o, cast("Mapping[str, Any]", groups), dpi, float(w or 0), float(h or 0))
+            keep = params.get("styles") or FIT_STYLES
+            if not isinstance(keep, (list, tuple)) or not all(st in FIT_STYLES for st in cast("Sequence[Any]", keep)):
+                raise RunError(f"styles is a list of {', '.join(FIT_STYLES)}, not {keep!r}")
+            make = line_maker(
+                _texts(cast("Mapping[str, Any]", texts)) if isinstance(texts, Mapping) else None,
+                _fitted(cast("Mapping[str, Any]", fit))[:3] if isinstance(fit, Mapping) else None,
+                [str(st) for st in cast("Sequence[Any]", keep)],
+            )
+            return from_groups(o, cast("Mapping[str, Any]", groups), dpi, float(w or 0), float(h or 0), make)
+        if texts is not None or fit is not None:
+            raise RunError("texts and font_fit name Tesseract's lines by number: give groups too")
         return from_ocr(o, dpi, w, h)
     raise RunError("give a page description (page), an ocr answer (ocr) or a layout (layout)")
 
@@ -305,9 +620,25 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         text = list_lines(cast("Mapping[str, Any]", ocr))
         return dict(text=text, lines=text.count("\n") + 1 if text else 0, model=handle.get("key"))
     page = page_of(params)
-    fonts = _fonts(params)
-    fit = params.get("fit", True) is not False
+    fonts: dict[str, str] = {}
     small_caps = [str(s) for s in cast("Sequence[Any]", params.get("small_caps_faces") or [])]
+    ff = _json(params.get("font_fit"), "font fit") if params.get("font_fit") and params.get("groups") else None
+    if isinstance(ff, Mapping):
+        _face, _words, ffonts, fsc = _fitted(cast("Mapping[str, Any]", ff))
+        fonts.update(ffonts)
+        small_caps += fsc
+        if params.get("snap"):
+            snap_sizes(page, float(params["snap"]))
+    fonts.update(_fonts(params))
+    image = params.get("image")
+    if params.get("crop") or params.get("rules"):
+        if not isinstance(image, str) or not os.path.isfile(image):
+            raise RunError("crop and rules cut from the scan: give its picture (image)")
+        if params.get("crop"):
+            crop_figures(page, image)
+        if params.get("rules"):
+            add_rules(page, image)
+    fit = params.get("fit", True) is not False
     try:
         pdf = render(page, fonts, small_caps_faces=small_caps, fit=fit)
     except PageError as e:

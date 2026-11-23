@@ -291,7 +291,7 @@ class Candidate:
         return d
 
 
-STAGE_KEYS = {"role", "model", "params", "options", "input", "send", "into", "also", "note"}
+STAGE_KEYS = {"role", "model", "params", "options", "input", "send", "into", "also", "answer", "note"}
 
 
 def parse_stage(d):
@@ -316,6 +316,11 @@ def parse_stage(d):
         if not isinstance(also, list) or not all(isinstance(f, str) and f for f in also):
             raise ValueError("a stage's also is a list of input field names")
         out["also"] = list(also)
+    answer = d.get("answer")
+    if answer not in (None, "text", "json"):
+        raise ValueError(f"a stage's answer is text or json, not {answer!r}")
+    if answer == "json":  # only when given, as with also
+        out["answer"] = "json"
     return out
 
 
@@ -663,6 +668,16 @@ def stage_key(stage, params, item):
     )
 
 
+def stage_answer(stage, output):
+    """What a stage hands on: its answer as text (stage_text), or with `answer = "json"` the whole answer as JSON text, for a role whose
+    answer is data rather than text (font-match's fitted words, which page-build reads)."""
+    if stage.get("answer") == "json":
+        if not isinstance(output, dict) or not output:
+            raise EvalError(f"a stage answered no JSON: {str(output)[:200]}")
+        return json.dumps(output, sort_keys=True)
+    return stage_text(output)
+
+
 def stage_text(output):
     """What a stage answered, as text: a text model's `text` (outer quotes and whitespace trimmed), a transcription's words."""
     if isinstance(output, str):
@@ -695,7 +710,7 @@ def stage_keys(engine, cand, item):
         if r is None or r.error:
             break
         try:
-            inp[stage["into"]] = stage_text(r.output)
+            inp[stage["into"]] = stage_answer(stage, r.output)
         except EvalError:
             break
     return out
@@ -770,7 +785,7 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
                     )
                     continue
                 try:
-                    text = stage_text(r.output)
+                    text = stage_answer(stage, r.output)
                 except EvalError as e:
                     st["err"] = f"stage {level + 1} ({stage['model'] or stage['role']}): {e}"
                     continue
@@ -796,7 +811,11 @@ def _stage_cost(output):
     """What a stage's answer says it cost, kept in the pipeline's trace so cost_usd adds every step: a cloud API's `cost_usd`, or the mark of a
     subscription CLI or a recording (paid in quota, not dollars)."""
     o = output if isinstance(output, dict) else {}
-    return {k: o[k] for k in ("cost_usd", "cli", "recorded") if o.get(k) is not None}
+    c = M.own_cost(o)
+    return {
+        **({"cost_usd": c} if c is not None else {}),
+        **{k: o[k] for k in ("cli", "recorded") if o.get(k) is not None},
+    }
 
 
 def _with_stage_costs(engine, outputs):

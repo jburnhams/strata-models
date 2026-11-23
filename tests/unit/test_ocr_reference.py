@@ -61,3 +61,36 @@ def test_reads_each_page_once_records_its_source_and_stops_at_the_cap(tmp_path, 
         "cer_exact_vs_typed" not in src["ward1874-p040"]
         and (tmp_path / "ward1874-p040.txt").read_text() == "Punch and Judy.\n"
     )
+
+
+def test_pages_reads_local_pictures_into_their_text_folder(tmp_path, monkeypatch, capsys):
+    """--pages: the page-layout pictures read where they lie (no strata-scan), each reading beside them in text/, every picture unless
+    --item names some; a page's other files (its .ocr.json) are not pages."""
+    for name in ("ward1874-leaf013.png", "collier1828-leaf080.png", "collier1828-leaf080.ocr.json"):
+        (tmp_path / name).write_bytes(b"x")
+    sent = []
+    monkeypatch.setattr(
+        R.sm,
+        "run",
+        lambda role, params, app, priority, model: (
+            sent.append(params["image"]) or dict(text="Punch", cost_usd=0.03, finish="end_turn")
+        ),
+    )
+    assert R.main(["--pages", str(tmp_path)]) == 0
+    assert sorted(os.path.basename(p) for p in sent) == ["collier1828-leaf080.png", "ward1874-leaf013.png"]
+    assert (tmp_path / "text" / "ward1874-leaf013.txt").read_text() == "Punch\n"
+    assert set(json.loads((tmp_path / "text" / "SOURCES.json").read_text())) == {
+        "collier1828-leaf080",
+        "ward1874-leaf013",
+    }
+    sent.clear()
+    assert R.main(["--pages", str(tmp_path), "--item", "ward1874-leaf999"]) == 0
+    assert sent == [] and "no such page in" in capsys.readouterr().err
+
+
+def test_one_source_of_pages(tmp_path):
+    import pytest
+
+    for args in ([], ["--pages", str(tmp_path), "--strata-scan", "http://x/"]):
+        with pytest.raises(SystemExit):
+            R.main(args)

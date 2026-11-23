@@ -1,0 +1,208 @@
+name = "page-rebuild"
+question = "How close to the scanned page does each step of the rebuild bring the PDF: the layout winner's blocks, the text corrected line by line, the fitted type, then the pictures and rules cut from the scan?"
+role = "page-build"
+dataset = "page-layout"          # the same 20 pages (scripts/evals/page_layout.py); `text` once ocr_reference.py --pages has read them
+metrics = ["page_ink_all", "page_ink_f1", "cer_exact", "wer_bag", "block_f1", "figure_f1", "latency_s", "cost_usd", "failed"]
+judge = true                     # blind: which rebuilt page looks more like the scan (the Judge tab shows the scan first)
+similarity = "image"
+
+[decision]
+primary = "page_ink_all"
+baseline = "tesseract"
+min_effect = 0.03
+guards = { failed = 1.0 }
+pairs = "all"                    # judge the steps against each other, not only against Tesseract
+# A ladder: each candidate adds one step to the one before, so the report says what each step is worth. Layout is page-layout's winners
+# (2026-11-15: sonnet-fix-v2 94 % block_f1 at $0.017 a page, opus-fix-v2 96.5 % at $0.033 with the better figures); text is Haiku correcting
+# Tesseract's lines (ocr-hard: Tesseract corrected by Haiku, 0.3 % cer_exact at $0.0007 a page; here line by line, page-text-fix-v1, so each
+# line keeps its measured box); type is font-match with Sonnet's shortlist (the font-match eval's pick, Jonathan 2026-11-23), one face for
+# the page, each word in its fitted style, size and place. Stages with the same model, params and input are cached once and shared, so the
+# ladder costs about one full candidate. page_ink_all reads the whole printed area (border, rules, pictures); page_ink_f1 the text blocks.
+# cer_exact and wer_bag need the pages' reference text (a strong model's reading, ocr_reference.py --pages), else they show nothing.
+
+[[candidates]]
+name = "tesseract"
+model = "pagebuild"
+note = "today's overlay: Tesseract's blocks and lines in Times at their boxes"
+
+# ---- 1. layout: Tesseract's lines regrouped by Sonnet ---------------------------------------------------------------------------------
+[[candidates]]
+name = "layout"
+model = "pagebuild"
+note = "page-layout's sonnet-fix-v2: Tesseract's lines in Sonnet's blocks, Times"
+judge = false                    # looks like layout-text to the eye (a few letters differ): the metrics compare them
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+# ---- 2. + text corrected line by line by Haiku ----------------------------------------------------------------------------------------
+[[candidates]]
+name = "layout-text"
+model = "pagebuild"
+judge = false
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-text-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "texts"
+
+# ---- 3. + the page's type fitted (font-match, Sonnet's shortlist) ---------------------------------------------------------------------
+[[candidates]]
+name = "layout-text-type"
+model = "pagebuild"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-text-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "texts"
+
+[[candidates.stages]]
+role = "font-match"
+model = "fontfit"
+params = { mode = "fit" }
+input = "{ocr}"
+send = "ocr"
+also = ["image"]
+answer = "json"
+into = "font_fit"
+
+# ---- 4. + one size per block, pictures and rules cut from the scan: the full recipe ----------------------------------------------------
+[[candidates]]
+name = "full"
+model = "pagebuild"
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+note = "sizes within 10 % of their block's median set to it, words fitted bold or small capitals set in roman, figures and the scan's ruled lines (the border) cut from the scan"
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-text-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "texts"
+
+[[candidates.stages]]
+role = "font-match"
+model = "fontfit"
+params = { mode = "fit" }
+input = "{ocr}"
+send = "ocr"
+also = ["image"]
+answer = "json"
+into = "font_fit"
+
+# ---- the full recipe on Opus's layout (better figures, twice the price) ----------------------------------------------------------------
+[[candidates]]
+name = "full-opus"
+model = "pagebuild"
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-opus-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-text-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "texts"
+
+[[candidates.stages]]
+role = "font-match"
+model = "fontfit"
+params = { mode = "fit" }
+input = "{ocr}"
+send = "ocr"
+also = ["image"]
+answer = "json"
+into = "font_fit"

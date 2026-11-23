@@ -10,7 +10,12 @@ Each page is fetched from strata-scan, read through strata-models (role vision-l
 and written to scripts/evals/ocr_hard/<item>.txt; SOURCES.json keeps, per item, the kind of error that got it picked, the model, its cost and
 the date. A page that already has a reading is not read again; a reading cut off at max_tokens is not saved, so it is tried again next time. An empty
 reading is kept: the right answer for a page of ornaments read as text is no text. Stops before the next call once --max-usd has been spent. Then build the
-dataset with `ocr_pages.py --refs scripts/evals/ocr_hard --name ocr-hard` (evals/specs/ocr-hard.toml)."""
+dataset with `ocr_pages.py --refs scripts/evals/ocr_hard --name ocr-hard` (evals/specs/ocr-hard.toml).
+
+The page-rebuild eval's text reference is read the same way from the page-layout pictures, kept beside them (not in git: build the dataset
+again after it, and page_layout.py adds each reading as the item's `text`):
+
+    uv run python scripts/evals/ocr_reference.py --pages <data>/evals/page-layout --max-usd 1.0 && uv run python scripts/evals/page_layout.py"""
 
 import argparse
 import datetime
@@ -45,7 +50,12 @@ def exact_cer(ref, hyp):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--strata-scan", required=True)
+    ap.add_argument("--strata-scan", help="where the pages come from, with --book")
+    ap.add_argument(
+        "--pages",
+        help="or a folder of page pictures (<item>.png, as scripts/evals/page_layout.py writes them): every one unless --item names some; "
+        "the readings go to <pages>/text/ unless --out says",
+    )
     ap.add_argument(
         "--book", action="append", default=[], help="NAME=ID: which strata-scan book is ward1874 / collier1828"
     )
@@ -56,8 +66,13 @@ def main(argv=None):
     ap.add_argument(
         "--max-usd", type=float, default=1.0, help="stop before the next call once this much has been spent"
     )
-    ap.add_argument("--out", default=OUT)
+    ap.add_argument("--out")
     a = ap.parse_args(argv)
+    if bool(a.strata_scan) == bool(a.pages):
+        ap.error("give --strata-scan (with --book) or --pages")
+    a.out = a.out or (os.path.join(a.pages, "text") if a.pages else OUT)
+    if a.pages and not a.item:
+        a.item = sorted(f[:-4] for f in os.listdir(a.pages) if f.endswith(".png") and "." not in f[:-4])
     os.makedirs(a.out, exist_ok=True)
     src_path = os.path.join(a.out, "SOURCES.json")
     sources = json.load(open(src_path, encoding="utf8")) if os.path.exists(src_path) else {}
@@ -65,10 +80,17 @@ def main(argv=None):
     todo = [i for i in want if not os.path.exists(os.path.join(a.out, f"{i}.txt"))]
     spent = 0.0
     with tempfile.TemporaryDirectory() as tmp:
-        pages = from_strata_scan(a.strata_scan.rstrip("/"), dict(b.split("=", 1) for b in a.book), tmp, items=todo)
+        if a.pages:
+            pages = {
+                i: (os.path.join(a.pages, f"{i}.png"), None)
+                for i in todo
+                if os.path.isfile(os.path.join(a.pages, f"{i}.png"))
+            }
+        else:
+            pages = from_strata_scan(a.strata_scan.rstrip("/"), dict(b.split("=", 1) for b in a.book), tmp, items=todo)
         for item in todo:
             if item not in pages:
-                print(f"{item}: no such page in strata-scan", file=sys.stderr)
+                print(f"{item}: no such page in {a.pages or 'strata-scan'}", file=sys.stderr)
                 continue
             if spent >= a.max_usd:
                 print(f"stopping: ${spent:.4f} spent, the cap is ${a.max_usd:.2f}", file=sys.stderr)

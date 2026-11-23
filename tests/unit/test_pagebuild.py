@@ -6,7 +6,7 @@ import os
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from stratamodels import settings
 from stratamodels.runtimes import RunError, pagebuild
@@ -342,3 +342,207 @@ def test_groups_keep_tesseracts_lines_in_the_models_blocks(tmp_path):
     assert page["figures"] == [dict(box=[100, 250, 800, 200], kind="engraving")] and page["dpi"] == 200
     with pytest.raises(RunError, match="bad groups"):
         pagebuild.page_of(dict(ocr=SPLIT, groups=dict(blocks=[dict(lines=[1], role="nonsense")]), dpi=200))
+
+
+# ---- the full rebuild: corrected text (texts), fitted type (font_fit), sizes snapped, pictures and rules cut from the scan --------------
+@pytest.fixture
+def ttf(tmp_path):
+    p = tmp_path / "aileron.ttf"
+    p.write_bytes(
+        ImageFont.load_default(20).path.getvalue()
+    )  # Pillow's bundled TrueType: a real font file, no download
+    return str(p)
+
+
+def _word(text, box, style="roman", size=10.0, x=None):
+    return dict(
+        text=text,
+        box=box,
+        style=style,
+        size_pt=size,
+        x=x if x is not None else box[0],
+        baseline_y=box[1] + box[3] - 2,
+        hscale=1.05,
+        tracking_em=0.01,
+        stroke_em=0.0,
+    )
+
+
+TWO = dict(
+    width=1000,
+    height=500,
+    lines=[
+        dict(
+            text="Tbe Punch",
+            box=[100, 100, 300, 30],
+            block=1,
+            words=[dict(text="Tbe", box=[100, 100, 90, 30]), dict(text="Punch", box=[200, 100, 200, 30])],
+        ),
+        dict(
+            text="and Jndy",
+            box=[100, 140, 300, 30],
+            block=1,
+            words=[dict(text="and", box=[100, 140, 90, 30]), dict(text="Jndy", box=[200, 140, 200, 30])],
+        ),
+        dict(text="%%", box=[900, 450, 30, 20], block=2, words=[dict(text="%%", box=[900, 450, 30, 20])]),
+    ],
+)
+
+
+def _fit(ttf, styles=("roman", "italic", "small-caps")):
+    return dict(
+        face="caslon",
+        fonts={"caslon": dict(family="Caslon", files=dict.fromkeys(styles, ttf))},
+        blocks=[
+            dict(
+                lines=[
+                    dict(
+                        words=[
+                            _word("Tbe", [100, 100, 90, 30], size=10.0),
+                            _word("Punch", [200, 100, 200, 30], "bold", 10.6),
+                        ]
+                    ),
+                    dict(
+                        words=[
+                            _word("and", [100, 140, 90, 30], "italic", 13.0),
+                            _word("Jndy", [200, 140, 200, 30], "small-caps", 9.8),
+                        ]
+                    ),
+                ]
+            )
+        ],
+    )
+
+
+GROUPS = dict(blocks=[dict(lines=[1, 2, 3], role="body")], figures=[])
+
+
+def test_texts_correct_lines_by_number_and_an_empty_text_drops_one(tmp_path):
+    texts = dict(
+        lines=[
+            dict(n=1, text="The  Punch"),
+            dict(n=3, text=""),
+            dict(n="x", text="?"),
+            dict(n=1, text="later answers lose"),
+        ]
+    )
+    r = pagebuild.run(handle(), dict(ocr=TWO, groups=GROUPS, texts=json.dumps(texts), dpi=200, png=False))
+    assert [ln["spans"][0]["text"] for ln in r["page"]["blocks"][0]["lines"]] == ["The Punch", "and Jndy"]
+    with pytest.raises(RunError, match="give groups too"):
+        pagebuild.page_of(dict(ocr=TWO, texts=texts, dpi=200))
+
+
+def test_font_fit_sets_each_word_where_it_was_fitted_in_its_own_cut(tmp_path, ttf):
+    r = pagebuild.run(handle(), dict(ocr=TWO, groups=GROUPS, font_fit=json.dumps(_fit(ttf)), dpi=200, png=False))
+    a, b, junk = r["page"]["blocks"][0]["lines"]
+    assert [(s["text"], s.get("style", "roman"), s["face"], s["size_pt"], s["x"]) for s in a["spans"]] == [
+        ("Tbe ", "roman", "caslon:roman", 10.0, 100),
+        ("Punch", "roman", "caslon:roman", 10.6, 200),  # the face has no bold cut: roman
+    ]
+    assert [(s.get("style", "roman"), s["face"]) for s in b["spans"]] == [
+        ("italic", "caslon:italic"),
+        ("small-caps", "caslon:small-caps"),
+    ]
+    assert a["spans"][0]["hscale"] == 1.05 and a["spans"][0]["baseline_y"] == 128
+    assert junk["spans"] == [dict(text="%%")]  # no fitted word: drawn as it was
+    assert r["text"].split() == ["Tbe", "Punch", "and", "Jndy", "%%"]
+
+
+def test_a_corrected_line_with_other_words_keeps_the_fits_type_and_is_spaced_to_its_box(ttf):
+    texts = dict(lines=[dict(n=1, text="The Punch show")])
+    page = pagebuild.page_of(dict(ocr=TWO, groups=GROUPS, texts=texts, font_fit=_fit(ttf), dpi=200))
+    ln = page.blocks[0].lines[0]
+    assert [s.text for s in ln.spans] == ["The Punch show"] and ln.spans[0].x is None
+    assert (ln.face, ln.size_pt, ln.baseline_y) == ("caslon:roman", 10.3, 128)
+    page = pagebuild.page_of(
+        dict(ocr=TWO, groups=GROUPS, texts=dict(lines=[dict(n=1, text="The Punch")]), font_fit=_fit(ttf), dpi=200)
+    )
+    assert [s.text for s in page.blocks[0].lines[0].spans] == ["The ", "Punch"]  # same words: still placed one by one
+
+
+def test_styles_keeps_only_the_named_fitted_styles(ttf):
+    page = pagebuild.page_of(dict(ocr=TWO, groups=GROUPS, font_fit=_fit(ttf), styles=["roman", "italic"], dpi=200))
+    assert [s.style for s in page.blocks[0].lines[1].spans] == ["italic", "roman"]
+    with pytest.raises(RunError, match="styles is a list"):
+        pagebuild.page_of(dict(ocr=TWO, groups=GROUPS, font_fit=_fit(ttf), styles=["fancy"], dpi=200))
+
+
+def test_a_fit_without_a_roman_cut_is_refused(ttf):
+    with pytest.raises(RunError, match="no face with a roman file"):
+        pagebuild.page_of(dict(ocr=TWO, groups=GROUPS, font_fit=_fit(ttf, styles=("italic",)), dpi=200))
+
+
+def test_snap_sets_near_sizes_to_the_blocks_median_and_keeps_each_words_width(ttf):
+    r = pagebuild.run(handle(), dict(ocr=TWO, groups=GROUPS, font_fit=_fit(ttf), snap=0.1, dpi=200, png=False))
+    spans = [s for ln in r["page"]["blocks"][0]["lines"][:2] for s in ln["spans"]]
+    # median of 10, 10.6, 13, 9.8 is 10.3: all but the 13 pt word are within 10 %
+    assert [s["size_pt"] for s in spans] == [10.3, 10.3, 13.0, 10.3]
+    assert spans[1]["hscale"] == pytest.approx(1.05 * 10.6 / 10.3)
+    assert spans[1]["tracking_em"] == pytest.approx(0.01 * 10.6 / 10.3)
+
+
+def test_crop_cuts_each_figure_from_the_scan_with_its_paper_whitened(tmp_path):
+    pic = tmp_path / "scan.png"
+    im = Image.new("L", (1000, 500), 200)  # yellowed paper
+    im.paste(50, (300, 300, 400, 400))  # a picture
+    im.save(pic, dpi=(200, 200))
+    groups = dict(blocks=GROUPS["blocks"], figures=[dict(box=[300, 600, 400, 800], kind="engraving")])
+    r = pagebuild.run(handle(), dict(ocr=TWO, groups=groups, image=str(pic), crop=True, png=False))
+    f = r["page"]["figures"][0]
+    assert f["box"] == [300, 300, 100, 100] and os.path.dirname(f["image"]) == os.path.join(
+        str(settings.data_dir()), "pages", "crops"
+    )
+    with Image.open(f["image"]) as c:
+        assert c.size == (100, 100) and abs(c.getpixel((50, 50)) - 50 * 255 / 200) <= 1
+    with pytest.raises(RunError, match="give its picture"):
+        pagebuild.run(handle(), dict(ocr=TWO, groups=groups, dpi=200, crop=True, png=False))
+
+
+def test_rules_finds_the_border_and_a_rule_but_not_type_or_the_books_edge(tmp_path):
+    pic = tmp_path / "scan.png"
+    im = Image.new("L", (1000, 1400), 230)
+    d = ImageDraw.Draw(im)
+    d.rectangle((160, 220, 840, 900), outline=20, width=4)  # the border round the print
+    d.line((300, 702, 700, 705), fill=20, width=3)  # a rule under a heading, a little skewed
+    d.rectangle((420, 300, 432, 600), fill=20)  # the stem of a tall condensed letter, inside a line of type
+    d.line((20, 20, 20, 1380), fill=20, width=4)  # the book's edge beside the leaf, far from the print
+    im.save(pic, dpi=(300, 300))
+    ocr = dict(
+        width=1000,
+        height=1400,
+        lines=[
+            dict(text="BIG", box=[400, 280, 200, 340], block=1, words=[dict(text="BIG", box=[400, 280, 200, 340])]),
+            dict(text="text", box=[200, 800, 600, 40], block=2, words=[dict(text="text", box=[200, 800, 600, 40])]),
+        ],
+    )
+    groups = dict(blocks=[dict(lines=[1], role="heading"), dict(lines=[2], role="body")], figures=[])
+    r = pagebuild.run(handle(), dict(ocr=ocr, groups=groups, image=str(pic), rules=True, png=True))
+    rules = sorted([round(v) for v in f["box"]] for f in r["page"]["figures"] if f["kind"] == "rule")
+    assert len(rules) == 5  # the border's four sides and the rule; not the stem, not the edge
+    assert any(abs(b[1] - 700) < 10 and b[2] > 380 for b in rules)
+    with Image.open(r["png"]) as out:  # drawn: the border's ink is on the rebuilt page
+        assert out.getpixel((162, 600)) < 128 and out.getpixel((20, 700)) > 128
+
+
+def test_the_rebuild_spec_climbs_one_step_a_candidate_and_its_presets_carry_their_schemas():
+    import tomllib
+
+    from stratamodels.evals import core as C
+    from stratamodels.runtimes import llama
+
+    text, schema = llama.preset("page-text-fix-v1")
+    assert "{context}" in text and schema["properties"]["lines"]["items"]["required"] == ["n", "text"]
+    with open(os.path.join(os.path.dirname(__file__), "..", "..", "evals", "specs", "page-rebuild.toml"), "rb") as f:
+        spec = C.parse_spec(tomllib.load(f))
+    roles = {c.name: [s["params"].get("preset") or s["role"] for s in c.stages] for c in spec.candidates}
+    assert roles == dict(
+        tesseract=[],
+        layout=["page-build", "page-layout-fix-v2"],
+        **{"layout-text": ["page-build", "page-layout-fix-v2", "page-text-fix-v1"]},
+        **{"layout-text-type": ["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"]},
+        full=["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"],
+        **{"full-opus": ["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"]},
+    )
+    fonts = [s for c in spec.candidates for s in c.stages if s["role"] == "font-match"]
+    assert all(s["answer"] == "json" and s["into"] == "font_fit" and s["also"] == ["image"] for s in fonts)
+    assert {c.name for c in spec.candidates if not c.judge} == {"layout", "layout-text"} and spec.pairs == "all"

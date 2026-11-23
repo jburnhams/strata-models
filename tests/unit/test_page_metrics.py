@@ -121,6 +121,37 @@ def test_page_ink_f1_scores_the_raster_against_the_print_in_the_text_blocks(tmp_
     assert m.score(dict(input=dict(image=scan), reference={}), dict(png=scan), None) is None
 
 
+def test_page_ink_all_reads_the_whole_print_with_its_border_but_not_the_books_edge(tmp_path):
+    text = [(150, 150, 250, 160)]
+    border = [(135, 138, 265, 140), (135, 170, 265, 172), (135, 138, 137, 172), (263, 138, 265, 172)]
+    edge = [(2, 0, 6, 299)]  # the book's edge beside the leaf, far outside the print: no candidate is held to it
+    scan = _scan(tmp_path, "scan.png", [*text, *border, *edge])
+    item = dict(
+        input=dict(image=scan),
+        reference=dict(page=dict(width=400, height=300, dpi=200, blocks=[dict(box=[150, 150, 101, 11])])),
+    )
+    m = M.METRICS["page_ink_all"]
+    full = m.score(item, dict(png=_scan(tmp_path, "full.png", [*text, *border])), None)
+    bare = m.score(item, dict(png=_scan(tmp_path, "bare.png", text)), None)
+    assert full == pytest.approx(1.0) and bare < 0.7
+    assert M.METRICS["page_ink_f1"].score(item, dict(png=_scan(tmp_path, "bare2.png", text)), None) == pytest.approx(
+        1.0
+    )
+    assert m.score(item, None, "boom") == 0.0 and m.score(item, dict(pdf="x.pdf"), None) is None
+    assert m.score(item, dict(png=_scan(tmp_path, "other.png", text, size=(401, 300))), None) == 0.0
+    assert m.score(item, dict(png=str(tmp_path / "gone.png")), None) is None
+    assert m.score(dict(input=dict(image=scan), reference={}), dict(png=scan), None) is None
+
+
+def test_cost_counts_a_runtimes_own_cloud_call():
+    """font-match asks Sonnet for a shortlist on the way: its answer carries that call's cost under proposer, which cost_usd adds."""
+    m = M.METRICS["cost_usd"]
+    assert m.score({}, dict(proposer=dict(model="s", cost_usd=0.02)), None) == pytest.approx(0.02)
+    assert m.score({}, dict(proposer=dict(model="s", error="429")), None) == 0.0
+    pipe = dict(pipeline=[dict(cost_usd=0.01), dict(proposer=dict(cost_usd=0.02)), dict()], text="x")
+    assert m.score({}, pipe, None) == pytest.approx(0.03)
+
+
 def test_the_labelled_pages_are_drawable_and_consistent():
     """scripts/evals/page_layout/pages.toml: every page a valid description whose blocks and figures each match only themselves (no label
     is split or merged by its neighbours, so a perfect reader scores 1)."""
