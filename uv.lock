@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -2926,6 +2926,8 @@ dependencies = [
     { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sqlalchemy" },
     { name = "strata-python", extra = ["db", "pdf"] },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
@@ -2937,8 +2939,6 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "opencv-python-headless" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "soundfile" },
     { name = "strata-models-client" },
     { name = "strata-python", extra = ["dev"] },
@@ -2961,6 +2961,7 @@ requires-dist = [
     { name = "pillow" },
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic", specifier = ">=2.9" },
+    { name = "scipy", specifier = ">=1.17.1" },
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "strata-python", extras = ["db", "pdf"], specifier = ">=0.2.2,<0.3" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
@@ -2972,7 +2973,6 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
-    { name = "scipy", specifier = ">=1.17.1" },
     { name = "soundfile", specifier = ">=0.14.0" },
     { name = "strata-models-client", editable = "client" },
     { name = "strata-python", extras = ["dev"] },
