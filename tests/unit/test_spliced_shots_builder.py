@@ -7,6 +7,7 @@ import os
 import random
 import subprocess
 from fractions import Fraction
+from pathlib import Path
 
 import pytest
 
@@ -66,7 +67,8 @@ def test_sources_walks_folders_in_order_and_refuses_a_missing_path(tmp_path):
     (tmp_path / "x").mkdir()
     for n in ("x/b.MP4", "x/a.mov", "notes.txt", "z.mkv"):
         (tmp_path / n).write_bytes(b"")
-    assert [os.path.relpath(f, tmp_path) for f in B.sources([str(tmp_path)])] == ["z.mkv", "x/a.mov", "x/b.MP4"]
+    found = [Path(os.path.relpath(f, tmp_path)).as_posix() for f in B.sources([str(tmp_path)])]
+    assert found == ["z.mkv", "x/a.mov", "x/b.MP4"]
     with pytest.raises(SystemExit, match="no file or folder"):
         B.sources([str(tmp_path / "gone")])
 
@@ -94,7 +96,7 @@ def test_build_writes_items_by_kind_with_their_known_cuts(tmp_path):
         assert len(ref["cuts"]) == 4 and ref["tolerance_s"] == 0.5
         assert [p["at"] for p in ref["pieces"][1:]] == ref["cuts"]
         assert it["tags"] == {"kind": it["id"][:-3]}
-        assert it["input"]["path"].endswith(f"spliced-test/{it['id']}.mp4")
+        assert Path(it["input"]["path"]).parts[-2:] == ("spliced-test", f"{it['id']}.mp4")
     assert "6 spliced videos, 24 known cuts, from 2 uncut files (seed 1)" in ds.description
     again = B.build([str(tmp_path)], "spliced-test", items=2, pieces=5, run=ffprobe_says(lengths), make=False)
     assert again.items == ds.items  # the same seed gives the same dataset
