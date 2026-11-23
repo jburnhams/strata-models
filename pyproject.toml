@@ -21,6 +21,7 @@ dependencies = [
     "huggingface-hub>=2.4.0",
     "anthropic>=2.8.0",
     "scipy>=1.17.1",   # page-build: the scan's ruled lines (rules = true), min/max filters and labelling
+    "fonttools>=4.68.0",
 ]
 
 [project.scripts]

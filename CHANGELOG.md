@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Page rebuilds draw the CFF faces (TeX Gyre, Latin Modern) through a TrueType copy (branch `claude/project-thread-dvu0cz`)**
+The page-rebuild run failed every page fitted in TeX Gyre Schola (24 failures, 7 of 20 pages for each fitted candidate): the CTAN faces of `runtimes/fonts.toml` are CFF OpenType, which fontfit reads through FreeType but ReportLab refuses ("postscript outlines are not supported").
+- `runtimes/pagebuild.py`: `truetype(path)`: a CFF font is converted once to `<stem>.truetype.ttf` beside it (fontTools' otf2ttf recipe: cubic outlines to quadratic within a thousandth of an em) and drawn from that; TrueType fonts are used as they are. Every font a job draws with goes through it.
+- `pyproject.toml`, `uv.lock`: `fonttools` (MIT) is a runtime dependency. The deploy needs `uv sync`.
+- Tests in `test_pagebuild.py` (a CFF font built with fontTools is drawn, and its copy is reused). Checked by hand on the real Schola and Latin Modern files.
+
 **Page layout default: Opus regroups Tesseract's lines when a page is rebuilt (branch `claude/project-thread-dvu0cz`)**
 The page-layout eval's pick (opus-fix-v2, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, $0.033 a page) was never made the default, so an app sending a plain OCR answer still got Tesseract's blocks.
 - `runtimes/pagebuild.py`: a model whose options name a layout model (`group`, with `group_preset` and `group_tokens`) asks it for the `groups` of a plain `ocr` answer (the numbered lines and the picture), then draws as with given groups. `group = false` in a job draws Tesseract's blocks; a failed call (budget, network, no blocks, no picture) does too, as does an answer that fits the preset's schema but not the page (line numbers out of range, a malformed figure box: Codex review), and the answer's `grouper` says why. The answer carries the call's `cost_usd`.

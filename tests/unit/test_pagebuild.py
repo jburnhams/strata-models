@@ -667,3 +667,57 @@ def test_the_page_build_role_defaults_to_opus_regrouping_and_the_evals_draw_only
     assert (
         reg.models["pagebuild"].options.get("group") is None
     )  # what the eval candidates name: their baselines stay Tesseract's blocks
+
+
+# ---- CFF faces (the CTAN ones of fonts.toml): ReportLab draws TrueType outlines only -------------------------------------------------------
+def cff_font(path):
+    """A small CFF OpenType font (sfnt OTTO) with a box for every capital letter and a space, built with fontTools."""
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+
+    names = [".notdef", "space"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    fb = FontBuilder(1000, isTTF=False)
+    fb.setupGlyphOrder(names)
+    fb.setupCharacterMap({32: "space", **{ord(n): n for n in names[2:]}})
+    strings = {}
+    for n in names:
+        pen = T2CharStringPen(600, None)
+        if n != "space":
+            pen.moveTo((50, 0))
+            pen.lineTo((550, 0))
+            pen.curveTo((560, 300), (560, 400), (550, 700))
+            pen.lineTo((50, 700))
+            pen.closePath()
+        strings[n] = pen.getCharString()
+    fb.setupCFF("TestCFF-Regular", {"FullName": "Test CFF"}, strings, {})
+    fb.setupHorizontalMetrics(dict.fromkeys(names, (600, 50)))
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupNameTable({"familyName": "Test CFF", "styleName": "Regular"})
+    fb.setupOS2(sTypoAscender=800, usWinAscent=800, usWinDescent=200)
+    fb.setupPost()
+    fb.save(path)
+    return path
+
+
+def test_a_cff_face_is_drawn_through_a_truetype_copy_made_once(tmp_path):
+    from fontTools.ttLib import TTFont
+
+    otf = cff_font(str(tmp_path / "roman.otf"))
+    assert open(otf, "rb").read(4) == b"OTTO"
+    ttf = pagebuild.truetype(otf)
+    assert ttf == str(tmp_path / "roman.truetype.ttf") and "glyf" in TTFont(ttf) and "CFF " not in TTFont(ttf)
+    made = os.path.getmtime(ttf)
+    assert pagebuild.truetype(otf) == ttf and os.path.getmtime(ttf) == made  # reused, not made again
+    assert pagebuild.truetype(ttf) == ttf and pagebuild.truetype(str(tmp_path / "none.otf")).endswith("none.otf")
+    page = dict(
+        width=600,
+        height=200,
+        dpi=100,
+        blocks=[
+            dict(box=[20, 20, 560, 60], lines=[dict(box=[20, 20, 560, 60], spans=[dict(text="ABC DEF", face="cff")])])
+        ],
+    )
+    out = pagebuild.run(handle(), dict(page=page, fonts=dict(cff=otf), out=str(tmp_path / "c.pdf")))
+    assert "ABC DEF" in out["text"]
+    with Image.open(out["png"]) as im:
+        assert im.convert("L").getextrema()[0] < 100  # the boxes are drawn
