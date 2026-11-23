@@ -10,7 +10,10 @@ as a font file and the nearest few are what a person or the eval reads.
 
 Candidates: `candidates` names faces of the catalogue (fonts.toml), as a list or as a vision model's answer (any text: the ids and family names
 in it are picked out in order, and a `class` with no names picks that class's faces). Without candidates every face is screened (a quick fit
-of each, then the full fit of the best `top`): the exhaustive search a proposer should match at a fraction of the time.
+of each, then the full fit of the best `top`): the exhaustive search a proposer should match at a fraction of the time. Unless the job
+gives candidates (or `propose = false`), the model's `propose` option (models.toml; Sonnet since 2026-11-23, the font-match eval's pick)
+names a vision-language model that is asked for the shortlist first (preset font-propose-v1, the block cut out when `box` is given); if
+that call fails, every face is screened and the answer's `proposer` says why.
 
 params:
   image       the page or block picture (PNG with its dpi, else `dpi`); `path` is the same
@@ -20,13 +23,14 @@ params:
   candidates  as above; `face` fixes one face (the naive mode's default: tinos)
   mode        fit (default) | measure (the first candidate, sized from the measured x-height and widths, no search: what a proposer alone
               gives) | naive (one face, the line's box height as the size and each word stretched to its box: Tesseract's own PDF overlay)
+  propose     false: no proposer, even when the model has one (the eval's `exhaustive`)
   top         faces given the full fit after the screen (default 6)
   min_conf    the Tesseract confidence below which a word is set but not fitted on (default 70)
   out         where to write the rendering (PNG, the picture's size: black type on white), else <data>/generated/fonts/
 Answer: {face, class, style, size_pt, ink_f1, precision, recall, path (the rendering), fonts: {id: {family, class, like, files: {style: ttf}}},
 faces: [{face, class, ink_f1}] (ranked), blocks: [{box, face, class, ink_f1, lines: [{text, box, baseline_y, size_px, size_pt, hscale,
 tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta, stroke_em}]}]}],
-proposed, mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
+proposed, proposer ({model, seconds, cost_usd} or {model, seconds, error}; null when none was asked), mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
 summary; a renderer sets each word with the word's own: `size_pt` (or size_px at the scan's dpi), stretched by `hscale`, `tracking_em` times
 the size added after every glyph, its baseline at `baseline_y` and its left ink edge at `x` (that is the rendering's geometry exactly, so a
 rebuild reproduces what was scored); weight_delta > 0 means the
@@ -38,6 +42,7 @@ import difflib
 import json
 import os
 import re
+import tempfile
 import time
 import tomllib
 import urllib.error
@@ -626,9 +631,72 @@ def parse_candidates(value):
     return out
 
 
+PROPOSE_PROMPT = "Identify the typeface of the printed text in this picture."
+
+
 def load(model, models_dir):
     opts = dict(model.options)
-    return dict(key=model.key, models_dir=models_dir, top=int(opts.get("top", 6)), get=_get)
+    return dict(
+        key=model.key,
+        models_dir=models_dir,
+        top=int(opts.get("top", 6)),
+        get=_get,
+        propose=opts.get("propose") or None,
+        propose_tokens=int(opts.get("propose_tokens", 1500)),
+    )
+
+
+def _proposer(handle):
+    """A callable that runs the `propose` model (a vision-language model of the registry, e.g. claude-sonnet-5-5-api) on params: loaded once,
+    in this process (a cloud model holds no GPU; its spend is counted by its own runtime)."""
+    if "proposer" not in handle:
+        from stratamodels import registry, runtimes
+
+        m = registry.Registry.load().models.get(handle["propose"])
+        if m is None:
+            raise RunError(f"the propose model {handle['propose']!r} is not in the registry")
+        rt = runtimes.get(m.runtime)
+        h = rt.load(m, handle["models_dir"])
+        handle["proposer"] = lambda params: rt.run(h, params)
+        handle["proposer_unload"] = lambda: rt.unload(h)
+    return handle["proposer"]
+
+
+def _propose(handle, path, box):
+    """The proposer's shortlist for the picture (the block when `box` is given), as its answer's text; or (None, error) when it fails, and
+    the fit then screens every face."""
+    t0 = time.monotonic()
+    crop = None
+    try:
+        image = path
+        if box:
+            x, y, w, h = (int(round(v)) for v in box)
+            fd, crop = tempfile.mkstemp(suffix=".png", prefix="fontfit-propose-")
+            os.close(fd)
+            with Image.open(path) as im:
+                im.crop((x, y, x + w, y + h)).save(crop, dpi=im.info.get("dpi") or (300, 300))
+            image = crop
+        r = _proposer(handle)(
+            dict(
+                system_preset="font-propose-v1",
+                prompt=PROPOSE_PROMPT,
+                image=image,
+                max_tokens=handle.get("propose_tokens", 1500),
+            )
+        )
+        r = r if isinstance(r, dict) else {"text": r}
+        if not isinstance(r.get("text"), str) or not r["text"].strip():
+            raise RunError("the proposer answered no text")
+        return r["text"], dict(
+            model=handle["propose"], seconds=round(time.monotonic() - t0, 2), cost_usd=r.get("cost_usd")
+        )
+    except Exception as e:  # a refused or failed call (budget, network) costs the fit its shortlist, never the job
+        return None, dict(
+            model=handle["propose"], seconds=round(time.monotonic() - t0, 2), error=f"{type(e).__name__}: {e}"[:500]
+        )
+    finally:
+        if crop:
+            os.remove(crop)
 
 
 def _out_path(params):
@@ -727,6 +795,17 @@ def run(handle, params):
         lines = [ln for ln in lines if _inside(ln["box"], params["box"])]
     full, _ = INK.binarise(im, dpi, deskew=False)
     scan = Scan(full, lines, dpi, float(params.get("min_conf", 70)))
+    proposer = None
+    if (
+        mode == "fit"
+        and "candidates" not in params
+        and not params.get("face")
+        and handle.get("propose")
+        and params.get("propose", True) is not False
+    ):  # no shortlist given: the role's proposer makes one (models.toml: options.propose), unless the job says propose = false
+        text, proposer = _propose(handle, path, params.get("box"))
+        if text is not None:
+            params = dict(params, candidates=text)
     proposed = parse_candidates(params.get("candidates"))
     if params.get("face"):
         proposed = parse_candidates([params["face"]]) or proposed
@@ -865,6 +944,7 @@ def run(handle, params):
             )
         ],
         proposed=proposed,
+        proposer=proposer,
         mode=mode,
         dpi=dpi,
         seconds=round(time.monotonic() - t0, 3),
@@ -873,4 +953,6 @@ def run(handle, params):
 
 
 def unload(handle):
+    if "proposer_unload" in handle:
+        handle["proposer_unload"]()
     handle.clear()

@@ -298,3 +298,75 @@ def test_load_and_unload(models):
     assert h["top"] == 3 and h["models_dir"] == models
     F.unload(h)
     assert h == {}
+
+
+def test_without_candidates_the_proposer_gives_the_shortlist(tmp_path, ttf, models):
+    p, lines = block(tmp_path, ttf)
+    asked = []
+
+    def proposer(params):
+        asked.append(dict(params, size=Image.open(params["image"]).size))
+        return {"text": '{"class": "modern", "faces": ["old-standard"]}', "cost_usd": 0.01}
+
+    h = dict(handle(models), propose="claude-sonnet-5-5-api", proposer=proposer)
+    r = F.run(h, dict(image=p, lines=lines, box=[0, 0, 700, 120], out=str(tmp_path / "p.png")))
+    assert r["proposed"][0] == "old-standard" and r["face"] in ("old-standard", "tinos")
+    assert r["proposer"]["model"] == "claude-sonnet-5-5-api" and r["proposer"]["cost_usd"] == 0.01
+    assert asked[0]["system_preset"] == "font-propose-v1" and asked[0]["size"] == (700, 120)  # the block, cut out
+    assert not os.path.exists(asked[0]["image"])  # and removed after
+    # candidates given, or propose = false: no call
+    F.run(h, dict(image=p, lines=lines, candidates=["tinos"], out=str(tmp_path / "q.png")))
+    r = F.run(h, dict(image=p, lines=lines, propose=False, out=str(tmp_path / "r.png")))
+    assert len(asked) == 1 and r["proposer"] is None
+
+
+def test_a_failed_proposer_falls_back_to_every_face(tmp_path, ttf, models):
+    p, lines = block(tmp_path, ttf)
+
+    def proposer(params):
+        raise RunError("Claude API 529: overloaded")
+
+    h = dict(handle(models), propose="claude-sonnet-5-5-api", proposer=proposer)
+    r = F.run(h, dict(image=p, lines=lines, out=str(tmp_path / "p.png")))
+    assert (
+        "529" in r["proposer"]["error"] and r["proposed"] == [] and len(r["faces"]) == 2
+    )  # the two fetchable faces, screened
+
+
+def test_the_proposer_is_loaded_from_the_registry_once_and_unloaded(models, monkeypatch):
+    from stratamodels import runtimes
+
+    calls = []
+
+    class RT:
+        @staticmethod
+        def load(m, d):
+            calls.append(("load", m.key))
+            return {"m": m.key}
+
+        @staticmethod
+        def run(h, params):
+            calls.append(("run", h["m"]))
+            return {"text": "tinos"}
+
+        @staticmethod
+        def unload(h):
+            calls.append(("unload", h["m"]))
+
+    monkeypatch.setattr(runtimes, "get", lambda name: RT)
+
+    class M:
+        key = "fontfit"
+        options = {"propose": "claude-sonnet-5-5-api"}
+
+    h = F.load(M(), models)
+    f = F._proposer(h)
+    assert f({}) == {"text": "tinos"} and F._proposer(h) is f
+    F.unload(h)
+    assert calls == [
+        ("load", "claude-sonnet-5-5-api"),
+        ("run", "claude-sonnet-5-5-api"),
+        ("unload", "claude-sonnet-5-5-api"),
+    ]
+    with pytest.raises(RunError, match="not in the registry"):
+        F._proposer(dict(propose="no-such-model", models_dir=models))

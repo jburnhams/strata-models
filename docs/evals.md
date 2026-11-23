@@ -169,12 +169,15 @@ Schoolbook and Latin Modern, from CTAN), listed in `runtimes/fonts.toml` (74 in 
   by ink and by class (`font_close`: 1 the same class, 0.5 a neighbour), and the synthetic ones by exact face (`font_top1`, `font_top3`) and size.
 - **Candidates**: `naive` (Tesseract's boxes in Tinos, each word stretched to its box: what a rebuild does without the role), `exhaustive`
   (every face: a quick screen, then the full fit of the best 6), a vision model's shortlist then the fit (`qwen-fit`, `gemma-fit`,
-  `flash-fit`, `haiku-fit` on a sample; preset `font-propose-v1` lists the catalogue), and the shortlist alone (`*-only`, `mode = "measure"`:
+  `flash-fit`, `haiku-fit`, `sonnet-fit`, `opus-fit`; preset `font-propose-v1` lists the catalogue), and the shortlist alone (`*-only`, `mode = "measure"`:
   its first face sized from the measured x-height), which shows what the fit adds.
 - `ink_f1` decides against the baseline, but the fit maximises it, so compare the fitted candidates with each other on it and read
   `font_top3` and `font_close` beside it: a shortlist that keeps both against `exhaustive` in less time is the one to adopt.
 - Model judges see the block and two renderings and pick the one whose type looks more like the print; the analysis scores them against
   `ink_f1`.
+- Chosen (2026-11-23, Jonathan, from the 2026-11-15 trial): Claude Sonnet's shortlist, then the fit. The role does both itself: the
+  `fontfit` model's `propose` option names the proposer, asked whenever a job gives no candidates (`propose = false` turns it off, as
+  `exhaustive` does); if the call fails, every face is screened instead.
 - Before the role is deployed, `scripts/evals/font_match_trial.py` runs the same candidates with the stages through the running service and
   the fit in its own process.
 

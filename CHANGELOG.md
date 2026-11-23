@@ -2,6 +2,13 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-23
+
+**font-match: Claude Sonnet proposes the shortlist (branch `claude/project-thread-01gj43`)**
+Jonathan chose Sonnet from the 2026-11-15 trial (class right on 75 % of real blocks against 22 % for every face, 8 s and about a cent a block).
+- `runtimes/fontfit.py`: the model's `propose` option (a registry model key) is asked for the shortlist (preset `font-propose-v1`, the block cut out when `box` is given) when a job gives no candidates; loaded once in-process, its spend counted by its own runtime. A failed call falls back to screening every face; the answer's `proposer` gives the model, seconds and cost or the error. `propose = false` turns it off.
+- `models.toml`: `fontfit` options `propose = "claude-sonnet-5-5-api"`, `propose_tokens = 1500`. Spec `font-match`: `exhaustive` sets `propose = false`.
+
 ## 2026-11-15
 
 **font-match: fonts from Fontsource, 17 more period faces, Claude shortlists (branch `claude/project-thread-01gj43`)**
