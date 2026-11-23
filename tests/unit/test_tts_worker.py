@@ -3,6 +3,8 @@ engines: tests/gpu (needs the tts venvs). Covers `phonemes`, IPA said as written
 
 import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -125,9 +127,18 @@ class FakeSampled:
 
 
 @pytest.fixture
-def sampled(monkeypatch):
+def stretched(monkeypatch):
+    """ffmpeg's atempo, which the unit suite does not run (no external processes): the factors asked for, the file kept."""
+    factors = []
+    monkeypatch.setattr(T, "stretch", lambda path, speed: factors.append(speed))
+    return factors
+
+
+@pytest.fixture
+def sampled(monkeypatch, stretched):
     def use(engine, options=None):
         m = FakeSampled()
+        m.stretched = stretched
         monkeypatch.setattr(T, "E", dict(engine=engine, name=engine, options=options or {}, m=m))
         return m
 
@@ -203,9 +214,30 @@ def test_qwen3_engines(sampled, ref, tmp_path):
 
 
 def test_a_slower_speed_on_a_sampled_model_is_a_stretch(sampled, tmp_path):
-    sampled("chatterbox")
+    m = sampled("chatterbox")
     r = T.run(dict(text="hello there", speed=0.8, out_dir=str(tmp_path)))
-    assert r["duration_s"] > 0.5
+    assert m.stretched == [pytest.approx(0.8)]
+    assert r["duration_s"] > 0.3
+
+
+def test_stretch_runs_ffmpeg_atempo_and_replaces_the_file(monkeypatch, tmp_path):
+    """The command line and both outcomes, with subprocess.run standing in for ffmpeg (tests/gpu runs the real one)."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"old")
+    seen = []
+
+    def ok(cmd, **kw):
+        seen.append(cmd)
+        Path(cmd[-1]).write_bytes(b"new")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(T.subprocess, "run", ok)
+    T.stretch(str(wav), 0.8)
+    assert seen[0][0] == "ffmpeg" and "atempo=0.8000" in seen[0]
+    assert wav.read_bytes() == b"new"
+    monkeypatch.setattr(T.subprocess, "run", lambda cmd, **kw: SimpleNamespace(returncode=1, stderr="bad input"))
+    with pytest.raises(RuntimeError, match="atempo failed: bad input"):
+        T.stretch(str(wav), 1.2)
 
 
 def test_an_unknown_engine(sampled, tmp_path):
