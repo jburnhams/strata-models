@@ -10,7 +10,7 @@ Jonathan: the page-rebuild page hung on open. Its first analysis worked out whil
 - `evals/core.py`: `analyse(..., progress=)` says which candidate it is scoring or comparing.
 - `evals/metrics.py`: one binarised scan a page (`_page_binarised`, cached) for both page ink metrics; masks are made per call, so only the ink is held.
 - `evals/api.py`: `GET /api/evals/{name}/progress`: per candidate its outputs in and failed and, for a pipeline, how many items have each step; the queue's eval jobs on the dataset's items (running and queued, model, item, how long); the run started here; the analysis step. It works for runs started from the CLI too.
-- Web: a Progress panel on the experiment page (outputs per candidate, pipeline steps, the jobs running and queued with their items and times, the analysis step), polled while there is work; the Results tab says the results are being worked out instead of waiting. Static build updated.
+- Web: a Progress panel on the experiment page (outputs per candidate, pipeline steps, the jobs running and queued with their items and times, the analysis step), polled while there is work; the Results and Write-up tabs say the results are being worked out instead of waiting (the write-up is fetched again once the analysis is in, keyed by when it was worked out); progress counts a sampled candidate over its sample. Static build updated.
 - Tests in `test_eval_api.py` and `web/tests/integration/Evals.test.tsx`.
 
 **End-to-end page rebuild eval: layout, corrected text, fitted type, pictures and borders (branch `claude/project-thread-dvu0cz`)**

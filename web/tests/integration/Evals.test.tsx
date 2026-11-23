@@ -82,6 +82,15 @@ describe('An experiment', () => {
     expect(screen.getByText('waiting 50 s')).toBeInTheDocument()
     expect(screen.getByText('Working out the results')).toBeInTheDocument()
   })
+  it('waits for the analysis before the write-up, then shows it', async () => {
+    mock.analysis = { experiment: evalFixtures.analysis().experiment, summary: { stale: false, pending: true, progress: null } } as unknown as typeof mock.analysis
+    setup(<App />, { route: '/evals/transcribe-en?tab=writeup' })
+    expect(await screen.findByText('Working out the results')).toBeInTheDocument()
+    expect(screen.queryByText(/## Answer/)).not.toBeInTheDocument()
+    mock.analysis = { ...evalFixtures.analysis(), summary: { computed_at: 1_700_000_100, seconds: 90, stale: false } }
+    await waitFor(() => expect(screen.queryByText('Working out the results')).not.toBeInTheDocument(), { timeout: 6000 })
+    expect(await screen.findByText(/## Answer/)).toBeInTheDocument()
+  }, 10_000)
   it('shows no progress once every output is in and nothing is running', async () => {
     setup(<App />, { route: '/evals/transcribe-en' })
     await screen.findByText(/Keep large-v3/)

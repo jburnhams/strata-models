@@ -366,8 +366,9 @@ function Judge({ name }: { name: string }) {
   )
 }
 
-function WriteUp({ name }: { name: string }) {
-  const load = useLoad({ queryKey: ['report', name], queryFn: () => evalsApi.report(name) })
+function WriteUp({ name, version }: { name: string; version?: number }) {
+  // keyed by when the analysis was worked out: a newer analysis is a newer write-up
+  const load = useLoad({ queryKey: ['report', name, version], queryFn: () => evalsApi.report(name) })
   return (
     <DataView state={load} isEmpty={t => !t} skeleton={<Skeleton className="h-96 w-full" />} empty={<EmptyState title="No write-up" />}>
       {t => <div className="grid gap-3"><p className="type-body-sm text-muted-foreground">The standard write-up, generated from the results. Save it with <code className="font-mono">./strata-models eval report {name} --out FILE</code> and fill in the two sections left for a person.</p><pre className="overflow-x-auto rounded-control bg-muted p-4 font-mono type-caption whitespace-pre-wrap">{t}</pre></div>}
@@ -444,7 +445,7 @@ export default function EvalPage() {
       <DataView state={load} isEmpty={() => false} skeleton={<TableSkeleton rows={4} columns={5} />} empty={null}>
         {a => (
           <Tabs param="tab" label="Experiment view" items={[{ value: 'results', label: 'Results' }, { value: 'judge', label: 'Judge' }, { value: 'outputs', label: 'Outputs' }, { value: 'writeup', label: 'Write-up' }]}>
-            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'outputs' ? <Outputs name={name} /> : tab === 'writeup' ? <WriteUp name={name} /> : a.summary?.pending ? <EmptyState title="Working out the results">The first analysis of this experiment reads every output; progress is above, and this fills in when it is done. The Judge and Outputs tabs work meanwhile.</EmptyState> : <Results a={a} />}
+            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'outputs' ? <Outputs name={name} /> : a.summary?.pending ? <EmptyState title="Working out the results">The first analysis of this experiment reads every output; progress is above, and this fills in when it is done. The Judge and Outputs tabs work meanwhile.</EmptyState> : tab === 'writeup' ? <WriteUp name={name} version={a.summary?.computed_at} /> : <Results a={a} />}
           </Tabs>
         )}
       </DataView>
