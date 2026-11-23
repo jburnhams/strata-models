@@ -706,6 +706,7 @@ def test_a_cff_face_is_drawn_through_a_truetype_copy_made_once(tmp_path):
     assert open(otf, "rb").read(4) == b"OTTO"
     ttf = pagebuild.truetype(otf)
     assert ttf == str(tmp_path / "roman.truetype.ttf") and "glyf" in TTFont(ttf) and "CFF " not in TTFont(ttf)
+    assert sorted(os.listdir(tmp_path)) == ["roman.otf", "roman.truetype.ttf"]  # no temporary file left behind
     made = os.path.getmtime(ttf)
     assert pagebuild.truetype(otf) == ttf and os.path.getmtime(ttf) == made  # reused, not made again
     assert pagebuild.truetype(ttf) == ttf and pagebuild.truetype(str(tmp_path / "none.otf")).endswith("none.otf")

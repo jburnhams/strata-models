@@ -52,6 +52,7 @@ import itertools
 import json
 import os
 import statistics
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
@@ -636,9 +637,16 @@ def truetype(path: str) -> str:
     if "CFF " not in font:
         raise RunError(f"{os.path.basename(path)}: CFF2 (variable) outlines are not supported")
     _cff_to_glyf(font)
-    tmp = f"{out}.{os.getpid()}.tmp"  # two jobs converting the same face at once each write their own and the last rename wins
-    font.save(tmp)
-    os.replace(tmp, out)
+    # a file of this call's own (jobs run on threads of one process, so a pid is not enough): two jobs converting the same face at once
+    # each write their own and the last rename wins
+    fd, tmp = tempfile.mkstemp(suffix=".tmp", prefix=os.path.basename(out) + ".", dir=os.path.dirname(out) or ".")
+    os.close(fd)
+    try:
+        font.save(tmp)
+        os.replace(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return out
 
 
