@@ -58,6 +58,7 @@ def rank(p):
 
 
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
+AFTER = "__after__"  # a job's params key: the step job (a prompt upsampler) whose answer becomes this job's prompt; it waits for that job
 MB = 1024.0
 
 
@@ -153,11 +154,69 @@ class Scheduler:
         if options:
             m = self.registry.variant(m.key, options)
             params[OPTIONS] = dict(options)  # kept with the job, so a restart can rebuild the variant
+        step = self._upsample_step(m, params, app, priority)
+        if step is not None:
+            params[AFTER] = step["id"]
         j = self.store.add(
             kind="run", role=role, model=m.key, app=app, priority=self._priority(priority), params=params
         )
         self._notify()
         return j
+
+    def _upsample_step(self, m, params, app, priority):
+        """A model whose options name an `upsample` step (FLUX.3 Klein: its prompt upsampler) gets the job's short prompt expanded first: a job
+        on that step's role and model, queued now, whose answer becomes this job's prompt when it runs. `upsample = false` in the params skips
+        it (evals, a prompt that is already a full caption); so do edits with reference pictures. Returns the step's row, or None."""
+        want = params.pop("upsample", None)
+        plan = m.options.get("upsample")
+        if not isinstance(plan, dict) or want is False or want == 0 or params.get("ref_images"):
+            return None
+        prompt = params.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return None
+        role = str(plan.get("role") or "text")
+        um = self.registry.resolve(role, plan.get("model"))
+        return self.store.add(
+            kind="run",
+            role=role,
+            model=um.key,
+            app=app,
+            priority=self._priority(priority),
+            params={**(plan.get("params") or {}), "prompt": prompt},
+        )
+
+    def _waiting_on_step(self, j):
+        """Whether a queued job still waits for its upsampling step (queued or running)."""
+        after = (j.get("params") or {}).get(AFTER)
+        if after is None:
+            return False
+        step = self.store.get(after, result=False)
+        return step is not None and step["status"] in ("queued", "running")
+
+    def _from_step(self, params):
+        """Put the step's answer in as the prompt (the raw prompt when it failed or answered nothing); returns what to record in the result."""
+        after = params.pop(AFTER, None)
+        if after is None:
+            return None
+        step = self.store.get(after) or {}
+        raw = params.get("prompt")
+        text = (step.get("result") or {}).get("text") if step.get("status") == "done" else None
+        text = text.strip() if isinstance(text, str) else ""
+        if text:
+            params["prompt"] = text
+        return dict(
+            job=after,
+            model=step.get("model"),
+            prompt_in=raw,
+            prompt=params.get("prompt"),
+            run_s=step.get("run_s"),
+            error=None
+            if text
+            else (
+                step.get("error")
+                or f"the step {step.get('status') or 'is gone'}, no answer: the prompt as typed was used"
+            ),
+        )
 
     def lease(self, app, vram_gb=None, ttl_s=120.0, priority="normal", note=None, pid=None):
         """Queue a request for `vram_gb` of the GPU (None: all of it, exclusively); returns its row (status queued, then running once granted).
@@ -693,7 +752,7 @@ class Scheduler:
             t = self._do_control()
             if t is not None:
                 return t
-        queued = self.store.queued()
+        queued = [q for q in self.store.queued() if not self._waiting_on_step(q)]  # a job waits for its upsampling step
         gpu_q, cpu_q = [], []
         for q in queued:
             (gpu_q if self._lane(q) == "gpu" else cpu_q).append(q)
@@ -753,6 +812,7 @@ class Scheduler:
     def _run(self, j, model):
         params = dict(j["params"] or {})
         params.pop(OPTIONS, None)
+        upsampled = self._from_step(params)
         load_s = 0.0
         try:
             if model is None or not model.served:
@@ -762,6 +822,8 @@ class Scheduler:
             try:
                 with spend.job(j.get("app"), j["id"]):  # a cloud API call's ledger row names the app and the job
                     result = self.get_runtime(model.runtime).run(r.handle, params)
+                if upsampled is not None and isinstance(result, dict):
+                    result = {**result, "upsampled": upsampled}  # what was typed, what the picture was made from
             except runtimes.RunError:
                 raise
             except Exception:

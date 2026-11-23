@@ -440,7 +440,10 @@ licence = "FLUX Kommunity licence (accept it on Hugging Face: black-forest-labs/
 source = "https://huggingface.co/unsloth/flux-3-image-klein-GGUF"
 used_by = []
 # The text encoder is Qwen3-VL-4B (as GGUF here); the VAE comes from the gated BFL repo. Eval image-models (docs repo): kept over Qwen-Image 2.1 Turbo.
-options = { diffusion = "unsloth/flux-3-image-klein-GGUF:flux-3-image-klein-UD-Q4_K_XL.gguf", llm = "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf", vae = "black-forest-labs/flux-3-image-klein:ae.safetensors", steps = 16, cfg_scale = 1.0, sampler = "euler", args = ["--diffusion-fa"] }
+# upsample: every prompt is first expanded by BFL's own upsampler (a job on role text, about 5 s), as the model card says to; a job's
+# `upsample = false` skips it (a prompt that is already a full caption), and edits with reference pictures skip it. Round 2 of eval
+# image-models (2026-11-23): expansion ahead of raw prompts in Jonathan's judging; switched on at his word.
+options = { diffusion = "unsloth/flux-3-image-klein-GGUF:flux-3-image-klein-UD-Q4_K_XL.gguf", llm = "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-UD-Q4_K_XL.gguf", vae = "black-forest-labs/flux-3-image-klein:ae.safetensors", steps = 16, cfg_scale = 1.0, sampler = "euler", args = ["--diffusion-fa"], upsample = { role = "text", model = "flux3-klein-pup", params = { system_preset = "image-prompt-bfl", max_tokens = 3584, temperature = 0.0 } } }
 
 [models."qwen-image-2.1-turbo"]
 runtime = "sd-cpp"

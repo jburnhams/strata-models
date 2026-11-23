@@ -1201,6 +1201,13 @@ def forget(spec, engine, candidate=None, stages=False):
         return n
 
 
+def explicit(params):
+    """An eval's job does only what its spec says: a model's own upsampling step (scheduler: `upsample` in its options) is off unless the
+    candidate's params turn it on; a pipeline candidate names its steps itself. Not part of the result key: the job's params as stored
+    never carry `upsample`, so a finished job is still found by its params."""
+    return params if "upsample" in params else {**params, "upsample": False}
+
+
 class SchedulerExecutor:
     """Runs eval jobs in this process's scheduler (the service, and tests)."""
 
@@ -1208,7 +1215,7 @@ class SchedulerExecutor:
         self.s, self.app = scheduler, app
 
     def submit(self, role, params, model, options):
-        return self.s.submit(role, params, self.app, "low", model, options or None)["id"]
+        return self.s.submit(role, explicit(params), self.app, "low", model, options or None)["id"]
 
     def wait(self, job_id):
         while True:
@@ -1224,7 +1231,7 @@ class ClientExecutor:
         self.sm, self.app = client, app
 
     def submit(self, role, params, model, options):
-        return self.sm.submit(role, params, self.app, "low", model, options or None)["id"]
+        return self.sm.submit(role, explicit(params), self.app, "low", model, options or None)["id"]
 
     def wait(self, job_id):
         return self.sm.wait_job(job_id)
