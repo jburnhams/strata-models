@@ -429,7 +429,9 @@ def todo(spec, engine, j, only=None):
     else:
         from stratamodels.evals import similarity as SIM
 
-        names = [c.name for c in spec.candidates]
+        names = [
+            c.name for c in spec.candidates if c.judge
+        ]  # a candidate culled from judging (`judge = false`) is in no new pair
         for i in range(len(ds.items)):
             here = [n for n in names if ok(i, n)]
             for k, a in enumerate(here):

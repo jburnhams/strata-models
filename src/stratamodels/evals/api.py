@@ -291,7 +291,7 @@ def mount(app, scheduler):
 
         todo = []
         for i in range(len(ds.items)):
-            ok = [c.name for c in s.candidates if outs[c.name][i] and not outs[c.name][i][1]]
+            ok = [c.name for c in s.candidates if c.judge and outs[c.name][i] and not outs[c.name][i][1]]
             todo += [(i, a, b) for n, a in enumerate(ok) for b in ok[n + 1 :]]
         if s.primary == "judged" and s.pairs == "baseline":
             todo = [p for p in todo if s.baseline in p[1:]]  # decided head to head with the baseline: only those pairs

@@ -50,6 +50,9 @@ runtime.
   `[decision] pairs = "all"` offers every pair instead, for candidates that all beat one baseline and need ranking against each other
   (whole pipelines, `video-pipeline-vhs`): the decision against the baseline still uses the pairs with it, and the write-up's
   Bradley-Terry strengths rank the lot.
+- **Culling**: a candidate with `judge = false` is in no new pair (people's or a model judge's) once the judgments so far put it clearly
+  behind (its Bradley-Terry interval below the leaders', or it loses nearly every pair it is in). Its outputs, metrics and the judgments
+  already made still count; only the Judge tab stops spending time on it.
 - **`[score]`** names a second model that reads every output with a file (`role`, optional `model`, `params`): after a run, each output gets
   a `scored` reading (kept in the output, redone when the `[score]` table changes). `tts_wer` uses it: Whisper transcribes the speech back and
   the words are scored against the text that was to be spoken, an intelligibility guard for text to speech. `with = {param = "item.field"}`

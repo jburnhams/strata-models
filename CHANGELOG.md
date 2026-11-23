@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Cull a candidate from blind judging (branch `claude/project-thread-dvu0cz`)**
+A candidate with `judge = false` is in no new pair on the Judge tab or for a model judge; its outputs, metrics and judgments made already still count (`evals/core.py`, `evals/api.py`, `evals/judges.py`, docs/evals.md "Judged experiments"). page-layout culls `sonnet-layout` (lost all 12 of its pairs) and `gemma-layout` (2 wins, 4 losses, block_f1 12 %), so judging time goes to the candidates still in contention. Test in `test_eval_api.py`.
+
 **The item's own picture beside picture outputs (branch `claude/project-thread-dvu0cz`)**
 After #93 the page-layout Judge tab showed the rebuilt pages but not the scan they rebuild, which the judge needs. `/api/evals/{name}/media/{item_id}` now serves the item's `image` input when it has no `path` (still only a file the dataset names); the Judge tab shows it above a pair of pictures (open by default), and the Outputs tab puts it first in the grid as "Source". Tests in `test_eval_api.py` and `web/tests/integration/Evals.test.tsx`; static build updated.
 

@@ -275,9 +275,13 @@ class Candidate:
     sources: list = dataclasses.field(
         default_factory=list
     )  # `from`: candidates whose outputs this one is made from (their paths are its job's `sources`), see "Made from other candidates"
+    judge: bool = True  # `judge = false`: culled from blind judging (shown in no new pair, people's or a model judge's) once the judgments so
+    # far put it clearly behind; its metrics, outputs and the judgments already made still count
 
     def to_json(self):
         d = dataclasses.asdict(self)
+        if self.judge:
+            d.pop("judge")
         if not self.sources:
             d.pop("sources")
         if not self.stages:
@@ -396,6 +400,12 @@ def sample(c, items, engine=None):
     return [it for it in items if it["id"] in ids]
 
 
+def _flag(v, what):
+    if not isinstance(v, bool):
+        raise ValueError(f"{what} is true or false, not {v!r}")
+    return v
+
+
 def parse_spec(d, source=""):
     try:
         dec = d.get("decision") or {}
@@ -409,6 +419,7 @@ def parse_spec(d, source=""):
                 stages=[parse_stage(x) for x in c.get("stages") or []],
                 items=_sample_size(c.get("items")),
                 sources=[str(x) for x in (c.get("from") or [])],
+                judge=_flag(c.get("judge", True), f"candidate {c.get('name')}: judge"),
             )
             for c in d["candidates"]
         ]
