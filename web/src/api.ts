@@ -167,7 +167,7 @@ export const evalsApi = {
 }
 
 // ---- image generation ----------------------------------------------------------------------------------------------------------------------
-export interface GeneratedImage { id: number; app: string; model: string; prompt: string; finished_at: number; path: string; width: number; height: number; seed: number; steps: number; seconds: number; peak_vram_mb: number }
+export interface GeneratedImage { id: number; app: string; model: string; prompt: string; finished_at: number; path: string; width: number; height: number; seed: number; steps: number; seconds: number; peak_vram_mb: number; upsampled?: { prompt_in: string; prompt: string; model: string | null; run_s: number | null; error: string | null } }
 export interface ImagePage { items: GeneratedImage[]; next: number | null }
 export interface GenerateParams { prompt: string; width?: number; height?: number; seed?: number; steps?: number; cfg_scale?: number; ref_images?: string[] }
 

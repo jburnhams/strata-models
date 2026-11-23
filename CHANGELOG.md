@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**FLUX.3 Klein expands every prompt with BFL's upsampler first (branch `flux-upsampler`)**
+FLUX.3 Klein's model card says to always run its prompt upsampler; round 2 of eval image-models had expansion ahead of raw prompts in Jonathan's judging, and he chose to switch (2026-11-23).
+- `scheduler.py`: a model whose options name an `upsample` step (role, model, params) gets a text job queued first with the job's prompt; the picture job waits for it (`__after__`), takes its answer as the prompt, and its result keeps `upsampled` (what was typed, what was drawn from, the step's model, time, or why the prompt was used as typed). `upsample = false` in a job skips it, as do edits with reference pictures.
+- `models.toml`: `flux3-klein` upsamples with `flux3-klein-pup` and system preset `image-prompt-bfl` (greedy).
+- `evals/core.py`: eval jobs send `upsample = false` unless the candidate's params say otherwise (not part of the result key), so every eval output stays what its spec says.
+- Generate page: an "Expand the prompt" box under Advanced (on by default) and the expanded prompt under the picture.
+- Tests in `test_scheduler_upsample.py`, `Generate.test.tsx`.
+
 **Page rebuilds draw the CFF faces (TeX Gyre, Latin Modern) through a TrueType copy (branch `claude/project-thread-dvu0cz`)**
 The page-rebuild run failed every page fitted in TeX Gyre Schola (24 failures, 7 of 20 pages for each fitted candidate): the CTAN faces of `runtimes/fonts.toml` are CFF OpenType, which fontfit reads through FreeType but ReportLab refuses ("postscript outlines are not supported").
 - `runtimes/pagebuild.py`: `truetype(path)`: a CFF font is converted once to `<stem>.truetype.ttf` beside it (fontTools' otf2ttf recipe: cubic outlines to quadratic within a thousandth of an em) and drawn from that; TrueType fonts are used as they are. Every font a job draws with goes through it.

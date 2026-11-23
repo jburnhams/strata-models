@@ -43,6 +43,12 @@ def run(handle, params):
         )
         d = dict(reason=f"fake judge, favouring {params.get('favour')!r}", winner=w)
         return dict(text=json.dumps(d), json=d, model=handle["model"], images=params.get("images") or [])
+    if params.get(
+        "upsampler"
+    ):  # a fake prompt upsampler (a model's `upsample` step): answers a longer prompt, or nothing when asked to
+        return dict(
+            text="" if params.get("silent") else f"a detailed picture of {params.get('prompt')}", model=handle["model"]
+        )
     if "expand" in params:  # a fake text model for pipeline evals: "expands" a prompt (a style param says how)
         return dict(
             text=f'"{params.get("style", "detailed")}: {params["expand"]}"',

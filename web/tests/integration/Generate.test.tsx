@@ -13,13 +13,16 @@ describe('Generate', () => {
     await user.type(screen.getByLabelText('What should the picture show?'), 'a hare')
     await user.click(go)
     expect(await screen.findByRole('img', { name: 'a hare' })).toBeInTheDocument()
-    expect(screen.getByText(/seed 5/)).toBeInTheDocument()
+    expect(screen.getByText(/seed 5 .* prompt expanded by flux3-klein-pup in 4.8/)).toBeInTheDocument()
+    expect(screen.getByText('The prompt as expanded')).toBeInTheDocument()
     expect(mock.calls).toEqual(['generate a hare'])
   })
   it('opens Advanced for model, size, seed and steps, and adds a reference picture', async () => {
     const { user } = setup(<App />, { route: '/generate' })
     await user.click(await screen.findByRole('button', { name: 'Advanced' }))
     expect(await screen.findByRole('option', { name: 'Default (flux3-klein)' })).toBeInTheDocument()
+    const expand = screen.getByRole('checkbox', { name: /Expand the prompt/ }); expect(expand).toBeChecked()
+    await user.click(expand); expect(expand).not.toBeChecked()
     await user.selectOptions(screen.getByLabelText('Size and shape'), '832x1216')
     await user.type(screen.getByLabelText('Seed'), '42')
     const file = new File(['png'], 'ref.png', { type: 'image/png' })
@@ -39,6 +42,7 @@ describe('Generate', () => {
   it('sends only the settings that were set', () => {
     expect(paramsOf({ prompt: ' a ', size: '1216x832', seed: '', steps: '', guidance: '', refs: [] })).toEqual({ prompt: 'a', width: 1216, height: 832 })
     expect(paramsOf({ prompt: 'a', size: '768x768', seed: '3', steps: '8', guidance: '1.5', refs: ['/r.png'] })).toEqual({ prompt: 'a', width: 768, height: 768, seed: 3, steps: 8, cfg_scale: 1.5, ref_images: ['/r.png'] })
+    expect(paramsOf({ prompt: 'a', size: '768x768', seed: '', steps: '', guidance: '', refs: [], expand: false })).toEqual({ prompt: 'a', width: 768, height: 768, upsample: false })
   })
 })
 
