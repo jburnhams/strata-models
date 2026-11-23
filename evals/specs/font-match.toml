@@ -24,7 +24,7 @@ params = { mode = "naive" }
 [[candidates]]
 name = "exhaustive"
 model = "fontfit"
-params = { mode = "fit" }        # every face of the catalogue: a quick fit of each, the full fit of the best 6
+params = { mode = "fit", propose = false }   # every face of the catalogue: a quick fit of each, the full fit of the best 6
 note = "the upper bound a shortlist should match: about a minute a block on one core"
 
 # ---- a vision model's shortlist, then the fit -----------------------------------------------------------------------------------------------

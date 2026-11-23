@@ -91,6 +91,11 @@ def bind(engine):
     _engine = engine
 
 
+def engine():
+    """The database the settings are bound to (the service's own), or None when they live in the file."""
+    return _engine
+
+
 def _db_rows():
     from sqlalchemy import select
     from sqlalchemy.orm import Session
