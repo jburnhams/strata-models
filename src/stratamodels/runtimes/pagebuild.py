@@ -52,6 +52,7 @@ import itertools
 import json
 import os
 import statistics
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
@@ -565,6 +566,90 @@ def _picture(path: object, dpi: object) -> tuple[int, int, float]:
         return im.width, im.height, d
 
 
+def _cff_to_glyf(font: Any) -> None:
+    """Rewrite a CFF-outline font (fontTools TTFont, sfnt "OTTO") as TrueType in place: each glyph's cubic outline turned into quadratic
+    curves within a thousandth of an em (fontTools' own otf2ttf recipe), so ReportLab, which embeds TrueType outlines only, can draw it."""
+    from fontTools.pens.cu2quPen import Cu2QuPen  # pyright: ignore[reportMissingTypeStubs]
+    from fontTools.pens.ttGlyphPen import TTGlyphPen  # pyright: ignore[reportMissingTypeStubs]
+    from fontTools.ttLib import newTable as _new  # pyright: ignore[reportMissingTypeStubs]
+
+    newTable = cast("Any", _new)  # fontTools' tables are typed as DefaultTable, without the fields each one has
+    order = font.getGlyphOrder()
+    font["loca"] = newTable("loca")
+    glyf = newTable("glyf")
+    font["glyf"] = glyf
+    glyf.glyphOrder, glyf.glyphs = order, {}
+    glyphs = font.getGlyphSet()
+    for name in order:
+        pen = TTGlyphPen(glyphs)
+        glyphs[name].draw(Cu2QuPen(pen, max_err=1.0, reverse_direction=True))
+        glyf[name] = pen.glyph()
+    if "VORG" in font:
+        del font["VORG"]
+    glyf.compile(font)
+    hmtx = font["hmtx"]
+    made: dict[str, Any] = getattr(glyf, "glyphs")  # noqa: B009  (typed through Any: fontTools types the table as DefaultTable)
+    for name, g in made.items():
+        if hasattr(g, "xMin"):
+            hmtx[name] = (hmtx[name][0], g.xMin)
+    maxp = newTable("maxp")
+    font["maxp"] = maxp
+    maxp.tableVersion = 0x00010000
+    maxp.maxZones = 1
+    for k in (
+        "maxTwilightPoints",
+        "maxStorage",
+        "maxFunctionDefs",
+        "maxInstructionDefs",
+        "maxStackElements",
+        "maxSizeOfInstructions",
+    ):
+        setattr(maxp, k, 0)
+    maxp.maxComponentElements = max((len(getattr(g, "components", None) or []) for g in made.values()), default=0)
+    maxp.compile(font)
+    post = font["post"]
+    post.formatType, post.extraNames, post.mapping, post.glyphOrder = 2.0, [], {}, order
+    try:
+        post.compile(font)
+    except OverflowError:
+        post.formatType = 3
+    del font["CFF "]
+    font.sfntVersion = "\x00\x01\x00\x00"
+
+
+def truetype(path: str) -> str:
+    """The path of a font ReportLab can draw: `path` itself when its outlines are TrueType, else a TrueType copy made beside it once
+    (<stem>.truetype.ttf) and reused. The CTAN faces of fonts.toml (TeX Gyre, Latin Modern) are CFF OpenType: fontfit measures them through
+    FreeType, which reads either, but ReportLab refuses CFF ("postscript outlines are not supported"), which failed every page fitted in
+    one (page-rebuild, 2026-11-23)."""
+    try:
+        with open(path, "rb") as f:
+            if f.read(4) != b"OTTO":
+                return path
+    except OSError:
+        return path  # the renderer says what is wrong with it
+    out = os.path.splitext(path)[0] + ".truetype.ttf"
+    if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(path):
+        return out
+    from fontTools.ttLib import TTFont  # pyright: ignore[reportMissingTypeStubs]
+
+    font = cast("Any", TTFont)(path)
+    if "CFF " not in font:
+        raise RunError(f"{os.path.basename(path)}: CFF2 (variable) outlines are not supported")
+    _cff_to_glyf(font)
+    # a file of this call's own (jobs run on threads of one process, so a pid is not enough): two jobs converting the same face at once
+    # each write their own and the last rename wins
+    fd, tmp = tempfile.mkstemp(suffix=".tmp", prefix=os.path.basename(out) + ".", dir=os.path.dirname(out) or ".")
+    os.close(fd)
+    try:
+        font.save(tmp)
+        os.replace(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return out
+
+
 def _fonts(params: Mapping[str, Any]) -> dict[str, str]:
     fonts: dict[str, str] = {}
     folder = params.get("font_dir")
@@ -727,6 +812,7 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         if params.get("snap"):
             snap_sizes(page, float(params["snap"]))
     fonts.update(_fonts(params))
+    fonts = {k: truetype(v) for k, v in fonts.items()}
     image = params.get("image")
     if params.get("crop") or params.get("rules"):
         if not isinstance(image, str) or not os.path.isfile(image):
