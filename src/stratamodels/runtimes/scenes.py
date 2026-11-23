@@ -1,7 +1,7 @@
 """Where a video cuts from one shot to the next, from ffmpeg's scene score (the `scene` value of its `select` filter), role `shot-boundaries`.
 Asked for by strata-reels, the video editor: a digitised VHS tape is hours of home video with a cut wherever the camcorder was stopped and
 started, and the editor splits a tape into shots before it can describe, choose or trim anything. This is the plain baseline the role's eval
-(`evals/specs/shots-vhs.toml`) measures learned detectors against, and it runs on the CPU (vram_gb = 0: the CPU lane), so a tape never waits
+(`evals/specs/shots-spliced.toml`) measures learned detectors against, and it runs on the CPU (vram_gb = 0: the CPU lane), so a tape never waits
 for the GPU.
 
 How: ffmpeg decodes the video (deinterlaced with yadif, one frame per frame, so the two fields of an interlaced tape do not read as motion),

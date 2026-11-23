@@ -47,7 +47,7 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `transcribe-fast` | Whisper small | 0.6 GB, 0.3 s for 11 s |
 | `denoise-audio` | DeepFilterNet3 capped at 18 dB with strata-360's speech finish and -14 LUFS (its `audio_clean`), in its own worker venv; MossFormer2, MossFormerGAN, FRCRN, Resemble Enhance, noisereduce and afftdn as eval candidates | not yet measured here |
 | `ocr` | Tesseract 5 (`eng`, LSTM), on the CPU: lines and words with boxes, and a searchable PDF page on request; `clean` cleans the page first (`flatten`, `contrast`, `sharpen`, `denoise`, `otsu`, `adaptive`, `upscale`, see `runtimes/pageclean.py`). The vision-language models also serve `ocr`, for the `ocr-pages` eval only (no boxes) | CPU, about 1-3 s a book page |
-| `shot-boundaries` | ffmpeg's scene score after yadif at 160 px (`runtimes/scenes.py`), on the CPU: the cuts between shots and the black stretches of a video, for strata-reels; the baseline eval `shots-vhs` measures other settings and learned detectors against | CPU, not yet measured on a tape |
+| `shot-boundaries` | ffmpeg's scene score after yadif at 160 px (`runtimes/scenes.py`), on the CPU: the cuts between shots and the black stretches of a video, for strata-reels; the baseline eval `shots-spliced` measures other settings and learned detectors against | CPU, not yet measured on a tape |
 | `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
 The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.

@@ -77,7 +77,7 @@ model = "tesseract-eng"                      # first pick (2026-11-13, for strat
 
 [roles.shot-boundaries]
 description = "Where a video cuts from one shot to the next, and its black stretches (home video and digitised VHS, for strata-reels)"
-model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, for strata-reels): eval shots-vhs measures learned detectors against it
+model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, for strata-reels): eval shots-spliced measures learned detectors against it
 
 [roles.page-build]
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
