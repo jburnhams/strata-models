@@ -103,6 +103,13 @@ CONTEXT_S = 2.0  # seconds either side of a phrase in a ?cut=1 answer
 
 
 def mount(app, scheduler):
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(C.EvalError)
+    def eval_error(_request, e):
+        """An experiment that cannot be read (its dataset missing, a bad spec) is a 400 with the reason on every endpoint, not a bare 500."""
+        return JSONResponse(status_code=400, content=dict(detail=str(e)))
+
     runs = {}
     engine = lambda: scheduler.store.engine
     sims = {}  # sims: (result key, result key) -> similarity, outputs never change under a key
