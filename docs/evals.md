@@ -175,6 +175,11 @@ Tesseract's own lines in those blocks. Grouping the lines by the labels themselv
 rest is lines Tesseract never read), against 84 % before the split. psm 3 stays: the settings best for OCR text find fewer blocks (block_f1
 psm 4 67 %, flatten 64 %, flatten + psm 4 63 %, against 77 %).
 
+The default (2026-11-23): the `page-build` role runs model `pagebuild-opus-layout`, whose option `group = "claude-opus-5-5-api"` makes a job
+that sends a plain `ocr` answer and the picture do the opus-fix-v2 steps itself (list the lines, ask Opus with page-layout-fix-v2, draw in its
+blocks): block_f1 96.5 % on the 20 pages against Tesseract's 64 %, about 3 cents a page. A failed call draws Tesseract's blocks and says why in
+the answer's `grouper`. The eval candidates name model `pagebuild` (draws only), so their baselines and stages are unchanged.
+
 `page-rebuild` (`evals/specs/page-rebuild.toml`, the page-layout dataset) puts the stage winners together and asks what each is worth to the
 whole page, as a ladder: `tesseract`; `layout` (Sonnet regroups Tesseract's lines, page-layout-fix-v2); `layout-text` (+ Haiku corrects
 each numbered line against the page, preset page-text-fix-v1, answering only the lines it changes, `{lines: [{n, text}]}`, given to

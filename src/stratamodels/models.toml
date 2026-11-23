@@ -89,7 +89,7 @@ model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, f
 
 [roles.page-build]
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
-model = "pagebuild"                          # drawing only (strata_python.pages, the renderer strata-scan prints with): the readers that fill the description are the eval candidates
+model = "pagebuild-opus-layout"              # Tesseract's lines regrouped into blocks by Claude Opus (eval page-layout, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, about 3 cents a page); `pagebuild` draws only, for the evals
 
 [models.buffalo_l]
 runtime = "insightface"
@@ -402,6 +402,16 @@ vram_gb = 0.0
 licence = "BSD-3-Clause (ReportLab), Apache-2.0 (pdfium)"
 source = "https://pypi.org/project/strata-python/ (the pdf extra)"
 used_by = ["strata-scan"]
+
+[models.pagebuild-opus-layout]
+runtime = "page-build"
+name = "strata-python pages, layout by Claude Opus"
+roles = ["page-build"]
+vram_gb = 0.0
+licence = "BSD-3-Clause (ReportLab), Apache-2.0 (pdfium); the layout call: Anthropic commercial terms (paid per token)"
+source = "https://pypi.org/project/strata-python/ (the pdf extra)"
+used_by = ["strata-scan"]
+options = { group = "claude-opus-5-5-api", group_preset = "page-layout-fix-v2", group_tokens = 8192 }   # group: the vision model that regroups an ocr answer's lines (runtimes/pagebuild.py)
 
 [roles.font-match]
 description = "Which typeface a scanned block is printed in, and its size, width, spacing and weight, line by line, with each word's style (page rebuilds)"

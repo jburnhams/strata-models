@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Page layout default: Opus regroups Tesseract's lines when a page is rebuilt (branch `claude/project-thread-dvu0cz`)**
+The page-layout eval's pick (opus-fix-v2, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, $0.033 a page) was never made the default, so an app sending a plain OCR answer still got Tesseract's blocks.
+- `runtimes/pagebuild.py`: a model whose options name a layout model (`group`, with `group_preset` and `group_tokens`) asks it for the `groups` of a plain `ocr` answer (the numbered lines and the picture), then draws as with given groups. `group = false` in a job draws Tesseract's blocks; a failed call (budget, network, no blocks, no picture) does too, as does an answer that fits the preset's schema but not the page (line numbers out of range, a malformed figure box: Codex review), and the answer's `grouper` says why. The answer carries the call's `cost_usd`.
+- `models.toml`: model `pagebuild-opus-layout` (`group = "claude-opus-5-5-api"`, preset page-layout-fix-v2) is the `page-build` role's model. `pagebuild` stays, drawing only: every eval candidate names it, so the page-layout and page-rebuild baselines and runs are unchanged.
+- Tests in `test_pagebuild.py`; `docs/evals.md` (Page rebuild).
+
 **Jobs record the model settings they ran with; the client returns them (issue #103, branch `claude/project-thread-3e79cp`)**
 strata-reels keeps the model, version and config on every inferred item and keys its cache on them. The job row had only the model key, which stays the same when `models.toml` changes its options (`ffmpeg-scene-score`'s `threshold`), and `run()` dropped which model served the job.
 - `jobs.options` and `jobs.settings_hash` (**migration** `d32954a09201`): set when a run starts (`Scheduler.dispatch`), from the model as it runs: its load options (`models.toml`'s merged with the job's own variant `options`) and `registry.settings_hash` (12 hex digits of sha256 over runtime, model file and options). Recorded at start, not submit, so an edit while the job waits counts. Leases and older rows keep null. The job row in the API carries both.
