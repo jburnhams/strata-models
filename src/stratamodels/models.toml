@@ -27,6 +27,14 @@ model = "whisper-small"
 description = "Answer questions about pictures: scenes, objects, regions"
 model = "qwen3.5-9b-vl"
 
+[roles.photo-fields]
+description = "Classify a photo into flat fields (setting, people, light, sharpness, quality) with preset photo-fields-v2"
+model = "qwen3.5-9b-vl"                      # eval photo-fields-v2, 2026-11-14: 84.8 % agreement with the Sonnet tags at 3.7 s (Gemma 4 12B 86.5 %, no clear difference; Qwen shares residency with vision-language)
+
+[roles.photo-caption]
+description = "Caption, description, search tags and legible text of a photo with preset photo-caption-v1"
+model = "claude-haiku-5-5-api"               # eval photo-caption, 2026-11-14: won 13 of 15 blind pairs against local Qwen (2 ties) at $0.0004 a photo
+
 [roles.text]
 description = "Text in, text out: rewrite, expand or summarise (e.g. a short image prompt into a detailed caption, system_preset image-prompt-*)"
 model = "qwen3.5-9b-vl"
@@ -126,7 +134,7 @@ options = { worker = "whisper", venv = "whisper", compute_type = "float16" }
 [models."qwen3.5-9b-vl"]
 runtime = "llama-server"
 name = "Qwen3.5-9B Q4_K_M"
-roles = ["vision-language", "text", "summarise", "judge-text", "judge-vision", "ocr"]   # ocr: only as an eval candidate (ocr-pages): it reads text but gives no boxes
+roles = ["vision-language", "photo-fields", "text", "summarise", "judge-text", "judge-vision", "ocr"]   # ocr: only as an eval candidate (ocr-pages): it reads text but gives no boxes
 vram_gb = 7.5
 licence = "Apache-2.0"
 source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
@@ -799,7 +807,7 @@ options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", timeo
 [models.claude-haiku-5-5-api]
 runtime = "claude-api"
 name = "Claude Haiku 5.5 (Claude API)"
-roles = ["text", "summarise", "vision-language", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
+roles = ["text", "summarise", "vision-language", "photo-caption", "judge-text", "judge-vision", "ocr"]   # ocr: as an eval candidate (no boxes)
 vram_gb = 0.0
 licence = "Anthropic commercial terms (paid per token)"
 source = "https://platform.claude.com/docs/en/about-claude/models/overview"
