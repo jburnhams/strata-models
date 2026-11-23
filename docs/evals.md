@@ -86,7 +86,8 @@ more later (pairs nobody has time for, or a first pass before people).
 ## Pipelines: a step before the candidate
 A candidate can run **stages** before its own job (`[[candidates.stages]]`: role, optional model, params, `input` template over the item's
 fields, the `send` param that carries it, the `into` param its answer replaces, and `also`, item fields passed as they are beside it, such as
-the `image` a vision model is shown with a text). The first use: a text model turns a short image prompt into a
+the `image` a vision model is shown with a text; a stage hands on its answer's text, or with `answer = "json"` its whole answer as JSON, for a
+role whose answer is data, such as font-match's fitted words). The first use: a text model turns a short image prompt into a
 detailed caption (`role = "text"`, `system_preset = "image-prompt-*"`, see `runtimes/presets/`), then the image model draws it.
 - Each stage's output is cached under its own key, so candidates that share a first step run it once; stages run level by level, grouped by
   model, so a text model loads once and not once per item between pictures.
@@ -149,6 +150,22 @@ text `context` in as it is) and answers which lines make each block, with roles 
 Tesseract's own lines in those blocks. Grouping the lines by the labels themselves scores block_f1 97.6 % (the ceiling of the approach: the
 rest is lines Tesseract never read), against 84 % before the split. psm 3 stays: the settings best for OCR text find fewer blocks (block_f1
 psm 4 67 %, flatten 64 %, flatten + psm 4 63 %, against 77 %).
+
+`page-rebuild` (`evals/specs/page-rebuild.toml`, the page-layout dataset) puts the stage winners together and asks what each is worth to the
+whole page, as a ladder: `tesseract`; `layout` (Sonnet regroups Tesseract's lines, page-layout-fix-v2); `layout-text` (+ Haiku corrects
+each numbered line against the page, preset page-text-fix-v1, answering only the lines it changes, `{lines: [{n, text}]}`, given to
+page-build as `texts`); `layout-text-type` (+ a font-match stage over the page's Tesseract words with Sonnet's shortlist, `answer = "json"`
+into `font_fit`: each word set in the fitted face and style where it was measured, a corrected line with other words keeping the fit's face
+and size, spaced to its box); `full` (+ `snap`: sizes within 10 % of their block's median take it, each word's width kept; `styles`: words
+fitted bold or small capitals, which a word-by-word fit to worn print calls now and then, set in roman; `crop`: figures cut from the scan,
+paper whitened; `rules`: the scan's long thin straight lines near the print, the border and the rules page-layout-fix-v2 leaves out, cut
+from the scan as figures); and `full-opus` on Opus's layout. The primary metric `page_ink_all` reads ink over the whole printed area (the
+labelled blocks and figures, grown by 6 % of the page, so the border counts and the book's edge beside the leaf does not); `page_ink_f1`
+the text blocks alone. Text metrics (`cer_exact`, `wer_bag`, on the text read back from the PDF) need a reading of each page:
+`scripts/evals/ocr_reference.py --pages <data>/evals/page-layout` has Opus read the pictures (about $0.03 a page, kept beside them in
+`text/`), and page_layout.py adds them as `reference.text`. Tried here on three pages with layout from the labels, fonts from a three-face
+shortlist (2026-11-23): page_ink_all 42 % to 72 % (Collier verse), 43 % to 85 % (Ward dialogue, its border drawn) and 30 % to 59 %
+(Ward advertisement in display faces, which no single face fits).
 
 ## Files in candidate params
 A candidate's params may name a file under the service's data folder as `"{data}/..."` (the runner's voice for the cloning TTS

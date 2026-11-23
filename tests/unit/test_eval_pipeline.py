@@ -1,6 +1,7 @@
 """Pipeline candidates (stages before a candidate's own job, stratamodels.evals.core): each stage cached on its own, the trace kept with the end
 result, a failed stage fails the output, judges see only the end result, the Outputs API and the write-up show every step."""
 
+import json
 import os
 
 import pytest
@@ -92,6 +93,22 @@ def test_stages_are_parsed_and_checked(pipe):
         C.parse_spec(dict(base, candidates=[dict(name="a", model="m", stages=[dict(role="r", also="image")])]))
 
 
+def test_a_stage_can_hand_on_its_whole_answer_as_json():
+    """answer = "json": a role whose answer is data (font-match's fitted words), passed on as JSON text, which page-build reads; only kept
+    when given, so no existing stage's key changes."""
+    st = C.parse_stage(
+        dict(role="font-match", input="{ocr}", send="ocr", also=["image"], answer="json", into="font_fit")
+    )
+    assert st["answer"] == "json" and "answer" not in C.parse_stage(dict(role="r", answer="text"))
+    got = C.stage_answer(st, dict(face="caslon", seconds=3))
+    assert json.loads(got) == dict(face="caslon", seconds=3)
+    assert C.stage_answer(dict(role="r"), dict(text=" x ")) == "x"
+    with pytest.raises(C.EvalError, match="no JSON"):
+        C.stage_answer(st, "plain")
+    with pytest.raises(ValueError, match="text or json"):
+        C.parse_stage(dict(role="r", answer="xml"))
+
+
 def test_a_stageless_candidate_keeps_its_key(pipe):
     """Adding stages to the spec format must not change the keys of the outputs already made (they would all run again)."""
     it = dict(id="p0", input=dict(prompt="a cat number 0", seed=0))
@@ -166,6 +183,34 @@ def test_pipelines_run_stage_by_stage_cached_and_shared(pipe, scheduler):
             and p["plain+small"]["words_out"] == 5
             and len(p["two-step"]["examples"]) == 2
             and "raw" not in p
+        )
+    finally:
+        stop.set()
+
+
+def test_candidates_sharing_a_stage_job_each_take_its_answer_their_own_way(pipe, scheduler):
+    """One job for both (same model, params, input), but one hands on the text and the other the whole answer as JSON into another field:
+    each consumer applies its own `answer` and `into`, whichever asked first."""
+    engine = scheduler.store.engine
+    stop = scheduler.start()
+    try:
+        d = C.load_spec("fake-pipe").to_json()
+        shared = dict(role="echo", model="big", send="expand")
+        d["candidates"] = [
+            d["candidates"][0],
+            dict(name="as-text", model="small", stages=[dict(shared)]),
+            dict(name="as-json", model="small", stages=[dict(shared, answer="json", into="meta")]),
+        ]
+        s = C.parse_spec(d)
+        log = []
+        assert C.run(s, engine, C.SchedulerExecutor(scheduler), log=log.append)["failed"] == 0
+        assert any("stage 1: 0 of 6 cached, 6 to run" in m for m in log)  # one job an item for both
+        _ds, outs, _ = C.outputs_for(s, engine)
+        text, meta = outs["as-text"][0][0]["echo"], outs["as-json"][0][0]["echo"]
+        assert text["prompt"] == "detailed: a cat number 0" and "meta" not in text
+        assert (
+            meta["prompt"] == "a cat number 0"
+            and json.loads(meta["meta"])["text"].strip('"') == "detailed: a cat number 0"
         )
     finally:
         stop.set()

@@ -4,7 +4,8 @@ advertisements in a dozen display faces; Collier 1828's chapter openings, prose,
 
 Each item's input is `image` (the leaf as scanned, a PNG with its dpi) and `ocr` (Tesseract's reading of it, JSON, psm 3 as strata-scan
 reads pages: what the baseline draws and what a correcting candidate is given), and its reference is `page`, the labelled layout as a
-strata_python.pages description, which the layout metrics (block_f1, figure_f1, role_acc, order_tau) and page_ink_f1 read. The scans come
+strata_python.pages description, which the layout metrics (block_f1, figure_f1, role_acc, order_tau) and page_ink_f1 read, and `text` when
+`<data>/evals/page-layout/text/<id>.txt` holds a reading of the page (scripts/evals/ocr_reference.py --pages: the page-rebuild eval's cer). The scans come
 from archive.org (the same leaves and cache as scripts/evals/font_match.py); pictures go to `<data>/evals/page-layout/`.
 
     .venv/bin/python scripts/evals/page_layout.py
@@ -61,11 +62,18 @@ def items(out, cache, get=FM.get):
         page, dpi = FM.leaf(p["book"], int(p["leaf"]), cache, get)
         png = os.path.join(out, f"{pid}.png")
         page.save(png, dpi=(dpi, dpi))
+        ref = dict(page=reference(p, page.width, page.height, dpi))
+        txt = os.path.join(out, "text", f"{pid}.txt")
+        if os.path.isfile(
+            txt
+        ):  # a strong model's reading of the page (scripts/evals/ocr_reference.py --pages), for the rebuild's text metrics
+            with open(txt, encoding="utf8") as f:
+                ref["text"] = f.read().strip()
         got.append(
             dict(
                 id=pid,
                 input=dict(image=png, ocr=ocr(png, dpi)),
-                reference=dict(page=reference(p, page.width, page.height, dpi)),
+                reference=ref,
                 tags=dict(book=p["book"], kind=p["kind"], set=p.get("set", "tune")),
             )
         )

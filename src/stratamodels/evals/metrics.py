@@ -711,6 +711,54 @@ def _page_ink_f1(item, output, error):
     return INK.ink_f1(scan, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
 
 
+PRINT_REACH = 0.06  # page_ink_all reads this fraction of the page's size around the labelled print (its border), as page-build's rules do
+
+
+@functools.lru_cache(maxsize=64)
+def _page_print_ink(image, boxes):
+    """(the scan's ink, the print area as a mask, dpi) for page_ink_all: the box round every labelled block and figure, grown by PRINT_REACH
+    of the page's size, so the border round the page counts and the book's edge and cover beside the leaf do not."""
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    im = Image.open(image)
+    found = im.info.get("dpi")
+    dpi = round(float(found[0]), 1) if found and found[0] > 1 else 300.0
+    full, _ = INK.binarise(im, dpi, deskew=False)
+    h, w = full.shape
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
+    rx, ry = PRINT_REACH * w, PRINT_REACH * h
+    mask = INK.box_mask(full.shape, [x0 - rx, y0 - ry, x1 - x0 + 2 * rx, y1 - y0 + 2 * ry])
+    return full, mask, dpi
+
+
+def _page_ink_all(item, output, error):
+    """F1 of the rebuilt page's ink against the scan's over the whole printed area (text, pictures, ornaments, rules and the border): how much
+    the rebuild looks like the page, where page_ink_f1 reads the text alone. A rebuild pasting the whole scan in as a picture would score 1:
+    pictures cut from the scan are for figures and rules, which the judge sees."""
+    ref = _page_ref(item)
+    image = (item.get("input") or {}).get("image")
+    if ref is None or not image or not ref.get("blocks"):
+        return None
+    if error or not isinstance(output, dict) or not output.get("png"):
+        return 0.0 if error else None
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    boxes = tuple(tuple(float(v) for v in b["box"]) for b in [*ref["blocks"], *(ref.get("figures") or [])])
+    try:
+        scan, mask, dpi = _page_print_ink(image, boxes)
+        got = np.asarray(Image.open(output["png"]).convert("L")) < 128
+    except (OSError, ValueError, TypeError):
+        return None
+    if got.shape != scan.shape:
+        return 0.0
+    return INK.ink_f1(scan, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
+
+
 # ---- fonts (role font-match) ----------------------------------------------------------------------------------------------------------
 @functools.lru_cache(maxsize=256)
 def _scan_ink(image, ocr):
@@ -821,6 +869,17 @@ def _latency(item, output, error):
     return item.get("_run_s")
 
 
+def own_cost(o):
+    """The dollars one answer says it cost: its `cost_usd`, or for a runtime that asked a cloud model on the way (font-match's proposer) that
+    call's cost."""
+    if isinstance(o.get("cost_usd"), (int, float)):
+        return float(o["cost_usd"])
+    p = o.get("proposer")
+    if isinstance(p, dict) and isinstance(p.get("cost_usd"), (int, float)):
+        return float(p["cost_usd"])
+    return None
+
+
 def _cost(item, output, error):
     """US dollars the item cost: a cloud API model's `cost_usd` (from the ledger's price, runtimes/cloud.py), 0 for a model run here (its cost
     is GPU time: latency_s), none for outputs recorded through a subscription CLI (paid in quota, not dollars) or a failed item. A pipeline adds
@@ -833,8 +892,9 @@ def _cost(item, output, error):
     ]  # the last entry is the candidate's own job: `output` itself
     total = 0.0
     for o in [*steps, output]:
-        if isinstance(o.get("cost_usd"), (int, float)):
-            total += float(o["cost_usd"])
+        c = own_cost(o)
+        if c is not None:
+            total += c
         elif o.get("recorded") or o.get("cli"):
             return None
     return total
@@ -1023,6 +1083,14 @@ METRICS = {
             "The rebuilt page's ink against the scan's within the page's text blocks: F1 with a pixel or two of tolerance (evals/ink.py)",
             "%",
             _page_ink_f1,
+        ),
+        Metric(
+            "page_ink_all",
+            "mean",
+            "higher",
+            "The rebuilt page's ink against the scan's over the whole printed area (text, pictures, rules, the border): F1 with a pixel or two of tolerance",
+            "%",
+            _page_ink_all,
         ),
         Metric(
             "verification_auc",

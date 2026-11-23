@@ -20,6 +20,7 @@ dependencies = [
     "tzdata; sys_platform == 'win32'",
     "huggingface-hub>=2.4.0",
     "anthropic>=2.8.0",
+    "scipy>=1.17.1",   # page-build: the scan's ruled lines (rules = true), min/max filters and labelling
 ]
 
 [project.scripts]
@@ -32,7 +33,6 @@ dev = [
     "hypothesis",
     "diff-cover",
     "opencv-python-headless>=5.0.0.93",
-    "scipy>=1.17.1",
     "soundfile>=0.14.0",
 ]
 # The model runtimes (`uv sync --group gpu` on the machine with the GPU). One copy of each, for every app.

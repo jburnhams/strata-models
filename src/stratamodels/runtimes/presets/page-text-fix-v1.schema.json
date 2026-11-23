@@ -1,0 +1,28 @@
+{
+ "type": "object",
+ "properties": {
+  "lines": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "n": {
+      "type": "integer"
+     },
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "n",
+     "text"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "lines"
+ ],
+ "additionalProperties": false
+}
