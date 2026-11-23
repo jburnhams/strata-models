@@ -668,11 +668,10 @@ def _order_tau(item, output, error):
     return float(s) / (len(pairs) * (len(pairs) - 1) / 2)  # Kendall's tau (no ties: ranks are distinct)
 
 
-@functools.lru_cache(maxsize=64)
-def _page_scan_ink(image, boxes):
-    """(the scan's ink, the reference text blocks as a mask, dpi) for page_ink_f1: the page binarised as the font eval does (not deskewed: a
-    rebuild draws in the scan's own pixels), and the union of the cleaned page's text blocks (4 px around), so borders, rules, pictures, library
-    stamps and show-through from the next leaf count for no candidate."""
+@functools.lru_cache(maxsize=32)
+def _page_binarised(image):
+    """(the scan's ink, dpi): the page binarised as the font eval does (not deskewed: a rebuild draws in the scan's own pixels). Seconds a page,
+    so kept for every page metric of every candidate (the masks are cheap and made per call, so only the ink is held: a bool a pixel)."""
     from PIL import Image
 
     from stratamodels.evals import ink as INK
@@ -681,6 +680,15 @@ def _page_scan_ink(image, boxes):
     found = im.info.get("dpi")
     dpi = round(float(found[0]), 1) if found and found[0] > 1 else 300.0
     full, _ = INK.binarise(im, dpi, deskew=False)
+    return full, dpi
+
+
+def _page_scan_ink(image, boxes):
+    """(the scan's ink, the reference text blocks as a mask, dpi) for page_ink_f1: the union of the cleaned page's text blocks (4 px around),
+    so borders, rules, pictures, library stamps and show-through from the next leaf count for no candidate."""
+    from stratamodels.evals import ink as INK
+
+    full, dpi = _page_binarised(image)
     mask = np.zeros_like(full)
     for x, y, w, h in boxes:
         mask |= INK.box_mask(full.shape, [x - 4, y - 4, w + 8, h + 8])
@@ -714,18 +722,12 @@ def _page_ink_f1(item, output, error):
 PRINT_REACH = 0.06  # page_ink_all reads this fraction of the page's size around the labelled print (its border), as page-build's rules do
 
 
-@functools.lru_cache(maxsize=64)
 def _page_print_ink(image, boxes):
     """(the scan's ink, the print area as a mask, dpi) for page_ink_all: the box round every labelled block and figure, grown by PRINT_REACH
     of the page's size, so the border round the page counts and the book's edge and cover beside the leaf do not."""
-    from PIL import Image
-
     from stratamodels.evals import ink as INK
 
-    im = Image.open(image)
-    found = im.info.get("dpi")
-    dpi = round(float(found[0]), 1) if found and found[0] > 1 else 300.0
-    full, _ = INK.binarise(im, dpi, deskew=False)
+    full, dpi = _page_binarised(image)
     h, w = full.shape
     x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)

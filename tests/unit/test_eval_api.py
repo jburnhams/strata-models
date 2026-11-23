@@ -637,3 +637,148 @@ def test_a_candidate_culled_from_judging_is_in_no_new_pair(client):
                 candidates=[dict(name="a", model="m", judge="no")],
             )
         )
+
+
+def test_a_first_analysis_that_takes_long_answers_pending_with_its_progress(client, monkeypatch):
+    """A big experiment's first analysis takes minutes (the page metrics binarise every scan): the page gets a stub marked pending, with the
+    step under way, rather than hanging, and the analysis itself when it is done."""
+    import threading
+
+    from stratamodels.evals import core as C
+    from stratamodels.evals import summaries as SU
+
+    wait_idle(client)
+    sm = client.app.state.eval_summaries
+    sm.memo.clear()
+    from stratamodels.db.models import EvalSummary
+
+    with C.session(sm.engine()) as s:  # never analysed
+        s.query(EvalSummary).delete()
+        s.commit()
+    monkeypatch.setattr(SU, "QUICK_S", 0.05)
+    gate = threading.Event()
+    real = C.analyse
+
+    def slow(spec, engine, progress=None, **k):
+        progress("scoring base (wer)", 0, 6)
+        gate.wait(30)
+        return real(spec, engine, progress=progress, **k)
+
+    monkeypatch.setattr(C, "analyse", slow)
+    a = client.get("/api/evals/fake-asr").json()
+    assert a["summary"]["pending"] is True and a["experiment"]["name"] == "fake-asr"
+    assert a["summary"]["progress"]["step"] == "scoring base (wer)" and a["summary"]["progress"]["total"] == 6
+    assert client.get("/api/evals/fake-asr/progress").json()["analysis"]["step"] == "scoring base (wer)"
+    assert (
+        client.get("/api/evals/fake-asr").json()["summary"]["pending"] is True
+    )  # asked again: the same work, not a second one
+    r = client.get("/api/evals/fake-asr/report")
+    assert r.status_code == 202 and "still being worked out (scoring base (wer))" in r.text
+    gate.set()
+    for _ in range(200):
+        b = client.get("/api/evals/fake-asr").json()
+        if not b["summary"].get("pending"):
+            break
+        time.sleep(0.05)
+    assert b["summary"]["stale"] is False and "decision" in b and sm.working == {}
+
+
+def test_analyse_tells_its_progress():
+    import inspect
+
+    from stratamodels.evals import core as C
+
+    assert "progress" in inspect.signature(C.analyse).parameters
+
+
+def test_progress_says_where_a_run_stands_and_what_the_queue_runs_for_it(client, monkeypatch):
+    p = client.get("/api/evals/fake-asr/progress").json()
+    assert [(c["name"], c["done"], c["total"], c["failed"]) for c in p["candidates"]] == [
+        ("base", 0, 40, 0),
+        ("better", 0, 40, 0),
+        ("same", 0, 40, 0),
+    ]
+    assert p["jobs"] == [] and p["run"] is None
+    client.post("/api/evals/fake-asr/run", params=dict(limit=3))
+    wait_run(client, "fake-asr")
+    p = client.get("/api/evals/fake-asr/progress").json()
+    assert [c["done"] for c in p["candidates"]] == [3, 3, 3] and p["run"]["state"] == "done"
+    from stratamodels.evals import core as C
+
+    say = C.load_dataset("speech").items[7]["input"]["say"]
+    fake = [
+        dict(
+            id=9,
+            app="evals",
+            kind="run",
+            status="running",
+            role="echo",
+            model="big",
+            params=dict(say=say),
+            submitted_at=1.0,
+            started_at=2.0,
+        ),
+        dict(
+            id=10,
+            app="strata-scan",
+            kind="run",
+            status="running",
+            role="echo",
+            model="big",
+            params=dict(say=say),
+            submitted_at=1.0,
+            started_at=2.0,
+        ),
+        dict(
+            id=11,
+            app="evals",
+            kind="run",
+            status="queued",
+            role="echo",
+            model="small",
+            params=dict(say="another dataset"),
+            submitted_at=1.0,
+            started_at=None,
+        ),
+    ]
+    from stratamodels import store as STORE
+
+    monkeypatch.setattr(STORE.Store, "running", lambda self: fake[:2])
+    monkeypatch.setattr(STORE.Store, "queued", lambda self: fake[2:])
+    jobs = client.get("/api/evals/fake-asr/progress").json()["jobs"]
+    assert jobs == [dict(id=9, status="running", role="echo", model="big", item="u7", submitted_at=1.0, started_at=2.0)]
+
+
+def test_progress_counts_each_pipeline_step(client):
+    import os
+
+    specs = os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs")
+    with open(os.path.join(specs, "fake-pipe.toml"), "w") as f:
+        f.write("""name = "fake-pipe"
+question = "q"
+role = "echo"
+dataset = "speech"
+metrics = ["failed"]
+[decision]
+primary = "failed"
+baseline = "base"
+[[candidates]]
+name = "base"
+model = "small"
+[[candidates]]
+name = "two-step"
+model = "small"
+[[candidates.stages]]
+role = "echo"
+model = "big"
+input = "{say}"
+send = "say"
+into = "say"
+""")
+    p = client.get("/api/evals/fake-pipe/progress").json()
+    two = next(c for c in p["candidates"] if c["name"] == "two-step")
+    assert two["done"] == 0 and two["steps"] == [dict(role="echo", model="big", done=0, failed=0)]
+    client.post("/api/evals/fake-pipe/run", params=dict(limit=2))
+    wait_run(client, "fake-pipe")
+    two = next(c for c in client.get("/api/evals/fake-pipe/progress").json()["candidates"] if c["name"] == "two-step")
+    assert two["done"] == 2 and two["steps"] == [dict(role="echo", model="big", done=2, failed=0)]

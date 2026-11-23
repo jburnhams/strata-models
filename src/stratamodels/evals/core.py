@@ -1265,8 +1265,10 @@ def judgments(engine, experiment, current=None):
     ]
 
 
-def analyse(spec, engine, dataset=None, seed=None):
-    """Everything a report says, as data: per candidate the value and interval of every metric, the comparison with the baseline, the decision."""
+def analyse(spec, engine, dataset=None, seed=None, progress=None):
+    """Everything a report says, as data: per candidate the value and interval of every metric, the comparison with the baseline, the decision.
+    `progress(step, done, total)` is told each candidate's scoring and comparison as it starts (the page shows it while it waits)."""
+    tell = progress or (lambda step, done, total: None)
     ds, outs, runs = outputs_for(spec, engine, dataset)
     names = [c.name for c in spec.candidates]
     ran = [
@@ -1296,7 +1298,9 @@ def analyse(spec, engine, dataset=None, seed=None):
         comparisons={},
         metrics={m: M.METRICS[m].to_json() for m in spec.metrics},
     )
-    for n in names:
+    steps = 2 * len(names)
+    for k, n in enumerate(names):
+        tell(f"scoring {n} ({', '.join(m for m in spec.metrics if m != 'judged')})", k, steps)
         done = sum(o is not None for o in outs[n])
         loads = [r["load_s"] for r in runs[n] if r and r.get("load_s")]
         res["candidates"][n] = dict(
@@ -1316,9 +1320,10 @@ def analyse(spec, engine, dataset=None, seed=None):
         for n in names:
             res["candidates"][n]["metrics"]["judged"] = judged_share(j, n)
     pvals = []
-    for n in names:
+    for k, n in enumerate(names):
         if n == base or not shared[n] or n not in ran:
             continue
+        tell(f"comparing {n} with {base}", len(names) + k, steps)
         items = [ds.items[i] for i in shared[n]]
         res["comparisons"][n] = {
             m: dict(M.compare(m, items, oo(base, n), oo(n), seed), items=len(items))

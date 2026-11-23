@@ -5,12 +5,13 @@ import { useParams } from 'react-router'
 import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AsyncButton, Button, Compare, CompareGrid, CompareVideo, DataTable, DataView, Disclosure, EmptyState, Field, KeysLegend, MediaPlayer, NativeSelect, PageHeader, SPEECH_RATES, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useHotkeys, useLoad, type Candidate, type Column, type CompareMode, type Region, type Shortcut, type VideoLoop, type VideoMedia, type VideoMode } from 'strata-react'
-import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Share, type Step } from '../api'
+import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Progress, type Share, type Step } from '../api'
 import { VideoCompare, videoOf, type VideoSide } from './VideoCompare'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
 function finding(a: Analysis) {
+  if (a.summary?.pending) return 'Working out the results: the first analysis reads every output, which takes a while.'
   const d = a.decision
   if (a.dataset.compared === 0) return 'No outputs yet: run the experiment.'
   return d.change ? `Change to ${d.recommendation}: ${d.per_candidate[d.recommendation].why}.` : `Keep ${a.experiment.baseline}: no candidate is clearly better on ${a.experiment.primary} by enough.`
@@ -388,17 +389,62 @@ function RunButton({ name }: { name: string }) {
   )
 }
 
+const since = (t: number | null | undefined, now: number) => (t ? `${Math.max(0, Math.round(now - t))} s` : '–')
+
+/** Where the experiment stands while anything is still to do: each candidate's outputs (and a pipeline's steps), the queue's jobs for its
+ *  items, and what the analysis is working out. Polls while there is work under way; folded away once every output is in. */
+function RunProgress({ name, analysing }: { name: string; analysing: boolean }) {
+  const load = useLoad({ queryKey: ['eval-progress', name], queryFn: () => evalsApi.progress(name), refetchInterval: q => (analysing || (q.state.data?.jobs.length ?? 0) > 0 || q.state.data?.run?.state === 'running' ? 3000 : 30_000) })
+  if (load.status !== 'ready') return null
+  const p: Progress = load.data
+  const done = p.candidates.reduce((n, c) => n + c.done, 0)
+  const total = p.candidates.reduce((n, c) => n + c.total, 0)
+  const running = p.jobs.filter(j => j.status === 'running')
+  const queued = p.jobs.length - running.length
+  if (done >= total && !p.jobs.length && !p.analysis && !analysing) return null
+  type Row = Progress['candidates'][number]
+  const cols: Column<Row>[] = [
+    { key: 'name', header: 'Candidate', cell: r => <span className="font-mono">{r.name}</span> },
+    { key: 'done', header: 'Outputs', numeric: true, cell: r => `${r.done} of ${r.total}${r.failed ? ` (${r.failed} failed)` : ''}` },
+    { key: 'steps', header: 'Pipeline steps in', cell: r => r.steps.length ? r.steps.map((s, i) => `${i + 1}. ${s.model ?? s.role}: ${s.done}${s.failed ? ` (${s.failed} failed)` : ''}`).join(' · ') : '–' },
+  ]
+  type JobRow = Progress['jobs'][number]
+  const jcols: Column<JobRow>[] = [
+    { key: 'status', header: 'State', cell: j => <Status tone={j.status === 'running' ? 'info' : 'neutral'}>{j.status === 'running' ? 'Running' : 'Queued'}</Status> },
+    { key: 'what', header: 'Job', cell: j => <span className="font-mono">{j.model ?? j.role}</span> },
+    { key: 'item', header: 'Item', cell: j => j.item ?? '–' },
+    { key: 'time', header: 'For', numeric: true, cell: j => j.status === 'running' ? since(j.started_at, p.now) : `waiting ${since(j.submitted_at, p.now)}` },
+  ]
+  const summary = [
+    `${done} of ${total} outputs in`,
+    running.length ? `${running.length} job${running.length > 1 ? 's' : ''} running` : '',
+    queued ? `${queued} queued` : '',
+    p.analysis ? `analysis: ${p.analysis.step}${p.analysis.total ? ` (step ${p.analysis.done + 1} of ${p.analysis.total})` : ''}` : analysing ? 'analysis starting' : '',
+  ].filter(Boolean).join(' · ')
+  return (
+    <Disclosure defaultOpen={analysing} summary={`Progress: ${summary}`}>
+      <div className="grid gap-3">
+        {p.run?.log.length ? <p className="type-caption text-muted-foreground">Run started here: {p.run.log[p.run.log.length - 1]}</p> : null}
+        <DataTable caption="Outputs in, per candidate (a pipeline's steps are cached on their own)" columns={cols} rows={p.candidates} rowKey={r => r.name} />
+        {p.jobs.length > 0 ? <DataTable caption="The queue's jobs for this experiment's items" columns={jcols} rows={p.jobs} rowKey={j => String(j.id)} /> : <p className="type-caption text-muted-foreground">No job for these items is running or queued.</p>}
+      </div>
+    </Disclosure>
+  )
+}
+
 export default function EvalPage() {
   const { name = '' } = useParams()
-  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: q => (q.state.data?.summary?.stale ? 3000 : 60_000) })
+  const load = useLoad({ queryKey: ['eval', name], queryFn: () => evalsApi.analysis(name), refetchInterval: q => (q.state.data?.summary?.stale || q.state.data?.summary?.pending ? 3000 : 60_000) })
+  const pending = load.status === 'ready' && !!load.data.summary?.pending
   return (
     <div className="grid gap-6">
       <PageHeader title={name} scope={load.status === 'ready' ? load.data.experiment.question : undefined} actions={<RunButton name={name} />} finding={load.status === 'ready' ? { text: finding(load.data) } : undefined} />
-      {load.status === 'ready' && load.data.summary?.stale && <p className="type-caption text-muted-foreground">Updating: these results are from {new Date(load.data.summary.computed_at * 1000).toLocaleTimeString()}, new outputs or judgments are being added.</p>}
+      {load.status === 'ready' && load.data.summary?.stale && load.data.summary.computed_at && <p className="type-caption text-muted-foreground">Updating: these results are from {new Date(load.data.summary.computed_at * 1000).toLocaleTimeString()}, new outputs or judgments are being added.</p>}
+      {load.status === 'ready' && <RunProgress name={name} analysing={pending} />}
       <DataView state={load} isEmpty={() => false} skeleton={<TableSkeleton rows={4} columns={5} />} empty={null}>
         {a => (
           <Tabs param="tab" label="Experiment view" items={[{ value: 'results', label: 'Results' }, { value: 'judge', label: 'Judge' }, { value: 'outputs', label: 'Outputs' }, { value: 'writeup', label: 'Write-up' }]}>
-            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'outputs' ? <Outputs name={name} /> : tab === 'writeup' ? <WriteUp name={name} /> : <Results a={a} />}
+            {tab => tab === 'judge' ? <Judge name={name} /> : tab === 'outputs' ? <Outputs name={name} /> : tab === 'writeup' ? <WriteUp name={name} /> : a.summary?.pending ? <EmptyState title="Working out the results">The first analysis of this experiment reads every output; progress is above, and this fills in when it is done. The Judge and Outputs tabs work meanwhile.</EmptyState> : <Results a={a} />}
           </Tabs>
         )}
       </DataView>

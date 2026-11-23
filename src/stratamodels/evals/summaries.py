@@ -3,7 +3,8 @@
 The analysis bootstraps every metric (seconds to a minute for a large dataset), so the page must not wait for it. It is worked out in the
 background when something it reads changes (a run finishes, a judgment comes in, the spec is edited) and at the service's start, and kept with
 the signature of what it read. The page gets the kept one: when it is out of date it gets it anyway, marked stale, while a fresh one is
-worked out. Only an experiment never analysed, or one whose analysis took under QUICK_S, is worked out while the request waits."""
+worked out. An experiment never analysed, or one whose analysis took under QUICK_S, is worked out while the request waits up to QUICK_S;
+past that the page gets a stub marked pending, with what the analysis is doing (`progress`), and asks again."""
 
 import hashlib
 import json
@@ -76,6 +77,9 @@ class Summaries:
         self.locks = {}
         self.guard = threading.Lock()
         self.pending = {}  # name -> force, of refreshes queued and not started
+        self.working = {}  # name -> {step, done, total, started_at}: what an analysis under way is doing, for the page
+        self.error = {}  # name -> what the last inline analysis raised: the request that started it answers it
+        self.inline = {}  # name -> the thread working out an analysis a page asked for and could not wait on
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="eval-summaries")
 
     def _lock(self, name):
@@ -100,7 +104,18 @@ class Summaries:
                     self.memo[spec.name] = (sig, row[1])
                     return row[1]
             t = time.time()
-            res = finite((self.analyse or C.analyse)(spec, self.engine()))
+            self.working[spec.name] = dict(step="reading the outputs", done=0, total=0, started_at=t)
+
+            def progress(step, done, total):
+                self.working[spec.name] = dict(step=step, done=done, total=total, started_at=t)
+
+            try:
+                if self.analyse is None:
+                    res = finite(C.analyse(spec, self.engine(), progress=progress))
+                else:
+                    res = finite(self.analyse(spec, self.engine()))
+            finally:
+                self.working.pop(spec.name, None)
             took = time.time() - t
             res["summary"] = dict(computed_at=time.time(), seconds=round(took, 3), stale=False)
             with C.session(self.engine()) as s:
@@ -133,9 +148,43 @@ class Summaries:
         old = row[1] if row else (hit[1] if hit else None)
         took = row[3] if row else ((old or {}).get("summary") or {}).get("seconds")
         if old is None or (took is not None and took <= QUICK_S):
-            return self.compute(spec, sig)  # none yet, or a quick one: no reason to show an old one
+            # none yet, or a quick one: no reason to show an old one. Worked out beside the request, which waits QUICK_S for it: a first
+            # analysis of a big experiment (page metrics binarise every scan) takes minutes, and a page that hangs that long looks broken
+            with self.guard:
+                th = self.inline.get(spec.name)
+                if th is None or not th.is_alive():
+                    th = self.inline[spec.name] = threading.Thread(
+                        target=self._inline, args=(spec, sig), name=f"eval-summary-{spec.name}", daemon=True
+                    )
+                    th.start()
+            th.join(QUICK_S)
+            if not th.is_alive() and spec.name in self.error:
+                raise self.error.pop(spec.name)  # a bad spec or a missing dataset: the page says why, as before
+            hit = self.memo.get(spec.name)
+            if hit and hit[0] == sig:
+                return hit[1]
+            if old is not None:
+                return {
+                    **old,
+                    "summary": {**(old.get("summary") or {}), "stale": True, "progress": self.working.get(spec.name)},
+                }
+            return dict(
+                experiment=spec.to_json(),
+                summary=dict(pending=True, stale=False, progress=self.working.get(spec.name)),
+            )
         self.refresh(spec.name)
-        return {**old, "summary": {**(old.get("summary") or {}), "stale": True}}
+        return {
+            **old,
+            "summary": {**(old.get("summary") or {}), "stale": True, "progress": self.working.get(spec.name)},
+        }
+
+    def _inline(self, spec, sig):
+        self.error.pop(spec.name, None)
+        try:
+            self.compute(spec, sig)
+        except Exception as e:  # the next request works it out again and answers the error itself
+            self.error[spec.name] = e
+            self.log(f"eval summary {spec.name}: {type(e).__name__}: {e}")
 
     def refresh(self, name, force=False):
         """Work out name's analysis in the background (once, however often asked before it starts; forced if any of those asks was)."""
