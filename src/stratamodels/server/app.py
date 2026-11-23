@@ -447,9 +447,12 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     @app.get("/api/images/file")
     def get_image_file(path: str):
-        """A generated picture or sound (speak jobs), an uploaded reference, or an eval's reference voice; nothing else on the disk."""
+        """A generated picture or sound (speak jobs), an uploaded reference, an eval's reference voice, or a page page-build drew (its PDFs
+        and rasters live in <data>/pages: the page-layout Judge and Outputs tabs showed "Picture not found" while this left it out); nothing
+        else on the disk."""
         roots = [
-            os.path.join(settings.data_dir(), d) for d in ("generated", "uploads", os.path.join("evals", "voices"))
+            os.path.join(settings.data_dir(), d)
+            for d in ("generated", "uploads", os.path.join("evals", "voices"), "pages")
         ]
         if not _inside(path, *roots) or not os.path.isfile(path):
             raise HTTPException(404, "no such file")
