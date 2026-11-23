@@ -766,6 +766,10 @@ baseline = "base"
 name = "base"
 model = "small"
 [[candidates]]
+name = "sampled"
+model = "big"
+items = 3
+[[candidates]]
 name = "two-step"
 model = "small"
 [[candidates.stages]]
@@ -780,5 +784,11 @@ into = "say"
     assert two["done"] == 0 and two["steps"] == [dict(role="echo", model="big", done=0, failed=0)]
     client.post("/api/evals/fake-pipe/run", params=dict(limit=2))
     wait_run(client, "fake-pipe")
-    two = next(c for c in client.get("/api/evals/fake-pipe/progress").json()["candidates"] if c["name"] == "two-step")
+    cands = {c["name"]: c for c in client.get("/api/evals/fake-pipe/progress").json()["candidates"]}
+    two = cands["two-step"]
     assert two["done"] == 2 and two["steps"] == [dict(role="echo", model="big", done=2, failed=0)]
+    assert (cands["sampled"]["done"], cands["sampled"]["total"]) == (2, 3)  # its sample is its whole run
+    client.post("/api/evals/fake-pipe/run", params=dict(candidate="sampled"))
+    wait_run(client, "fake-pipe")
+    cands = {c["name"]: c for c in client.get("/api/evals/fake-pipe/progress").json()["candidates"]}
+    assert (cands["sampled"]["done"], cands["sampled"]["total"]) == (3, 3)

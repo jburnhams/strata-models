@@ -275,7 +275,7 @@ def mount(app, scheduler):
         eng = engine()
         cands = []
         for c in s.candidates:
-            items = ds.items
+            items = C.sample(c, ds.items, eng)  # what a run runs: a sampled candidate's total is its sample
             rows = C.cached(eng, [C.result_key(s, c, it) for it in items])
             steps = []
             if c.stages and len(rows) < len(
