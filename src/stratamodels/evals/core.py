@@ -740,7 +740,8 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
                 st["err"] = f"stage {level + 1}: {e}"
                 continue
             sk = stage_key(stage, p, it)
-            want.setdefault(sk, (stage, p, it, []))[3].append(k)
+            # the job is shared by every candidate that asks for it; what each does with the answer (`answer`, `into`) is its own
+            want.setdefault(sk, (stage, p, it, []))[3].append((k, stage))
         have = cached(engine, want)
         run_ = sorted(
             (sk for sk in want if sk not in have), key=lambda sk: (want[sk][0]["model"] or "", want[sk][0]["role"])
@@ -775,9 +776,9 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
             save(engine, rows)
             have.update(cached(engine, chunk))
             log(f"  stage {level + 1}: {min(i + batch, len(run_))} of {len(run_)} run")
-        for sk, (stage, p, _it, keys) in want.items():
+        for sk, (_first, p, _it, keys) in want.items():
             r = have.get(sk)
-            for k in keys:
+            for k, stage in keys:
                 st = state[k]
                 if r is None or r.error:
                     st["err"] = (

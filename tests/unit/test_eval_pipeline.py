@@ -188,6 +188,34 @@ def test_pipelines_run_stage_by_stage_cached_and_shared(pipe, scheduler):
         stop.set()
 
 
+def test_candidates_sharing_a_stage_job_each_take_its_answer_their_own_way(pipe, scheduler):
+    """One job for both (same model, params, input), but one hands on the text and the other the whole answer as JSON into another field:
+    each consumer applies its own `answer` and `into`, whichever asked first."""
+    engine = scheduler.store.engine
+    stop = scheduler.start()
+    try:
+        d = C.load_spec("fake-pipe").to_json()
+        shared = dict(role="echo", model="big", send="expand")
+        d["candidates"] = [
+            d["candidates"][0],
+            dict(name="as-text", model="small", stages=[dict(shared)]),
+            dict(name="as-json", model="small", stages=[dict(shared, answer="json", into="meta")]),
+        ]
+        s = C.parse_spec(d)
+        log = []
+        assert C.run(s, engine, C.SchedulerExecutor(scheduler), log=log.append)["failed"] == 0
+        assert any("stage 1: 0 of 6 cached, 6 to run" in m for m in log)  # one job an item for both
+        _ds, outs, _ = C.outputs_for(s, engine)
+        text, meta = outs["as-text"][0][0]["echo"], outs["as-json"][0][0]["echo"]
+        assert text["prompt"] == "detailed: a cat number 0" and "meta" not in text
+        assert (
+            meta["prompt"] == "a cat number 0"
+            and json.loads(meta["meta"])["text"].strip('"') == "detailed: a cat number 0"
+        )
+    finally:
+        stop.set()
+
+
 def test_a_failed_stage_fails_the_output_without_running_the_job(pipe, scheduler):
     engine = scheduler.store.engine
     stop = scheduler.start()
