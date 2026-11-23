@@ -121,3 +121,32 @@ def test_ocr_reads_a_page_through_the_service(service, tmp_path):
     assert r["text"].lower().split() == ["punch", "and", "judy"] and r["model"] == "tesseract-eng"
     assert (tmp_path / "page.pdf").read_bytes()[:5] == b"%PDF-"
     assert sm.role_model("ocr") == "tesseract-eng"
+
+
+def test_shots_finds_the_cuts_through_the_service(service, tmp_path):
+    """The shipped `shot-boundaries` role on the real ffmpeg, through the client as strata-reels calls it: a CPU job, like ocr."""
+    import subprocess
+
+    video = tmp_path / "two-shots.mp4"
+    cmd = [
+        "ffmpeg",
+        "-nostdin",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=s=160x120:r=25:d=2",
+        "-f",
+        "lavfi",
+        "-i",
+        "smptebars=s=160x120:r=25:d=2",
+    ]
+    subprocess.run(
+        cmd + ["-filter_complex", "[0][1]concat=n=2:v=1[v]", "-map", "[v]", "-pix_fmt", "yuv420p", str(video)],
+        check=True,
+    )
+    r = sm.shots(str(video), app="it")
+    assert [c["time"] for c in r["cuts"]] == [2.0] and len(r["shots"]) == 2 and r["model"] == "ffmpeg-scene-score"
+    assert sm.role_model("shot-boundaries") == "ffmpeg-scene-score"

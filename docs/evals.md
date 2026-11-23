@@ -108,6 +108,23 @@ Cleanup evals (`vhs-chroma-shift`, `vhs-chroma-cleanup`, `vhs-grain`) hold the u
 stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate. `vhs-smear` does the same for the
 tape's horizontal trail after high-contrast edges (`cleanup.vs.desmear`, kernel from `scripts/evals/smear_kernel.py`).
 
+## Shots: where a video cuts (`shots-spliced`)
+`shot-boundaries` answers the cuts of a video as times; `shots-spliced` scores them against cuts that are known because the builder made them
+(`scripts/evals/spliced_shots.py`): stretches of uncut camera files (the race footage: each file one continuous shot) are spliced end to end
+at exact frame counts, so cut k is at the frames before it over the frame rate, with nobody marking anything by hand. Each item uses one
+kind of cut, in `tags.kind`: `files` (another file: the easy cut), `far` (the same file at least a minute away) and `near` (the same file, 2
+to 12 s away, forward or back: both sides show nearly the same picture, the cut a detector most often misses). A reference cut is found
+when an answered cut lies within 0.5 s of it (the item's `tolerance_s` overrides), one to one, nearest pairs first: `cut_miss` (reference
+cuts not found), `cut_false` (answered cuts matching none) and `cut_f1` per item, the primary. A missed cut is the costlier error for the
+editor (two shots it cannot split), so read `cut_miss` beside F1. The spliced video is progressive, so deinterlacing is not compared here.
+The first candidates tune the ffmpeg baseline (threshold, width); learned detectors (TransNetV2, PySceneDetect) join as venv workers
+(`runtimes/worker.py`), their libraries in a venv of their own, never in this service's dependencies.
+
+**Subjective cuts** (later, role `cut-points`): where to cut inside one shot, which has no single right answer. Two ways to measure it: a
+score from what the cut lands on (does it break a spoken phrase: word times from transcription; does it interrupt a movement: motion just
+before and after the cut), and blind A/B judging in the Judge tab, two candidates' cuts of the same shot played side by side
+(`primary = "judged"`), with the score checked against people's choices like a model judge.
+
 ## OCR: which cleanup and which reader on hard book pages
 `ocr-pages` (`evals/specs/ocr-pages.toml`, built by `scripts/evals/ocr_pages.py` from strata-scan or a folder of PNGs) is ten hard pages of
 two public-domain books (title pages, display-type adverts, small capitals, italics, footnotes, a grey 1828 scan) with their text typed by

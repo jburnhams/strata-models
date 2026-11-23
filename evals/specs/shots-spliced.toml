@@ -1,0 +1,38 @@
+name = "shots-spliced"
+question = "Which detector and settings should serve shot-boundaries, judged on cuts whose times are known because the video was spliced from uncut camera files?"
+role = "shot-boundaries"
+dataset = "spliced-shots"    # scripts/evals/spliced_shots.py: uncut race files spliced end to end; tags.kind is files, far or near (the hard one)
+metrics = ["cut_f1", "cut_miss", "cut_false", "latency_s", "failed"]
+
+# A missed cut joins two shots into one the editor cannot split; a false one splits a shot the editor can join again, so cut_miss is read
+# beside the primary, and the `near` items (a jump of a few seconds within one file) beside the rest. Learned detectors (TransNetV2,
+# PySceneDetect's adaptive detector) join as venv workers, their libraries in a venv of their own and not in this service's (Jonathan,
+# 2026-11-23); these first ones tune the baseline itself. The spliced video is progressive, so deinterlacing is not a candidate here.
+[decision]
+primary = "cut_f1"
+baseline = "ffmpeg-0.3"
+min_effect = 0.05            # five points of F1: about one cut in twenty more right
+guards = { latency_s = 3.0, failed = 1.0 }
+
+[[candidates]]
+name = "ffmpeg-0.3"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.3 }
+note = "what serves shot-boundaries today: scene score at 160 px after yadif"
+
+[[candidates]]
+name = "ffmpeg-0.2"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.2 }
+note = "lower threshold: finds cuts between like shots of the same room, at the cost of false cuts on fast pans"
+
+[[candidates]]
+name = "ffmpeg-0.4"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.4 }
+
+[[candidates]]
+name = "ffmpeg-0.3-320"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.3, width = 320 }
+note = "twice the analysis width"

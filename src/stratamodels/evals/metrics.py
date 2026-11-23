@@ -317,6 +317,64 @@ def _faces_recall(item, output, error):
     return (len(boxes) - hit, len(boxes))  # misses over gold faces: lower is better, like an error rate
 
 
+CUT_TOLERANCE_S = 0.5  # the spec's tightest tolerance (strata-reels spec S5: 0.5, 2 and 5 s): a camcorder cut on tape is one frame, so 0.5 s is generous
+
+
+def match_cuts(ref, got, tol=CUT_TOLERANCE_S):
+    """How many reference cuts (seconds) are found by `got`, one to one, each within `tol` seconds: the most pairs there can be. Nearest
+    pairs first is not that: with cuts [1.0, 1.65] and answers [0.6, 1.25], taking (1.0, 1.25) first leaves both others alone. On a line,
+    walking both in order and pairing each reference cut with the earliest answer still in reach is the maximum matching."""
+    ref, got = sorted(ref), sorted(got)
+    i = j = hit = 0
+    while i < len(ref) and j < len(got):
+        if got[j] < ref[i] - tol:
+            j += 1  # too early for this cut, so for every later one
+        elif got[j] > ref[i] + tol:
+            i += 1  # nothing left in reach of this cut
+        else:
+            hit, i, j = hit + 1, i + 1, j + 1
+    return hit
+
+
+def _cuts_of(output):
+    return [float(c["time"]) for c in (output or {}).get("cuts") or [] if isinstance(c, dict) and "time" in c]
+
+
+def _ref_cuts(item):
+    ref = (item.get("reference") or {}).get("cuts")
+    return None if ref is None else [float(t) for t in ref], float(
+        (item.get("reference") or {}).get("tolerance_s") or CUT_TOLERANCE_S
+    )
+
+
+def _cut_miss(item, output, error):
+    ref, tol = _ref_cuts(item)
+    if ref is None:
+        return None
+    return (len(ref), len(ref)) if error else (len(ref) - match_cuts(ref, _cuts_of(output), tol), len(ref))
+
+
+def _cut_false(item, output, error):
+    ref, tol = _ref_cuts(item)
+    if ref is None or error:
+        return None  # a failed job found nothing, so it made no false cut: cut_miss and failed count it
+    got = _cuts_of(output)
+    return (len(got) - match_cuts(ref, got, tol), len(got))
+
+
+def _cut_f1(item, output, error):
+    ref, tol = _ref_cuts(item)
+    if ref is None:
+        return None
+    if error:
+        return 0.0  # a failed job did not say the stretch is one shot, even when it is
+    got = _cuts_of(output)
+    if not ref and not got:
+        return 1.0  # one shot, and nothing claimed: right
+    hit = match_cuts(ref, got, tol)
+    return 2 * hit / (len(ref) + len(got))
+
+
 def _avg_ranks(x):
     """1-based ranks of x with ties sharing their average rank (vectorised: verification is recomputed for every bootstrap sample)."""
     _, inv, counts = np.unique(x, return_inverse=True, return_counts=True)
@@ -1046,6 +1104,30 @@ METRICS = {
             _faces_recall,
         ),
         Metric("face_found", "binary", "higher", "The labelled face was detected (IoU 0.5)", "%", _face_found),
+        Metric(
+            "cut_miss",
+            "ratio",
+            "lower",
+            "Shot cuts in the reference that no answered cut lies within 0.5 s of (or the item's tolerance_s), matched one to one",
+            "%",
+            _cut_miss,
+        ),
+        Metric(
+            "cut_false",
+            "ratio",
+            "lower",
+            "Answered shot cuts that match no reference cut: cuts that are not there",
+            "%",
+            _cut_false,
+        ),
+        Metric(
+            "cut_f1",
+            "mean",
+            "higher",
+            "F1 of the answered cuts against the reference per item (1 when both say one shot)",
+            "",
+            _cut_f1,
+        ),
         Metric(
             "block_f1",
             "mean",
