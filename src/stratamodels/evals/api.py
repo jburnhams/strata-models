@@ -481,7 +481,7 @@ def mount(app, scheduler):
             out = J.mark_borderline(engine(), name, judgment_id, b.borderline)
         except KeyError:
             raise HTTPException(404, f"no judgment {judgment_id} by a person in {name}")
-        summaries.refresh(name, force=True)  # a mark changes no count the analysis signature reads
+        summaries.refresh(name)  # the signature reads the marks: the kept analysis goes stale and is worked out again
         return out
 
     @app.post("/api/evals/{name}/judgments", status_code=201)

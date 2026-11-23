@@ -78,8 +78,11 @@ function Disagreements({ name, judge }: { name: string; judge: string }) {
           {d.pairs.map(p => (
             <section key={`${p.item_id}-${p.a}-${p.b}`} aria-label={`${p.item_id}: ${p.a} against ${p.b}`} className={`grid gap-2 rounded-surface border border-border p-3${p.borderline ? ' opacity-70' : ''}`}>
               <h3 className="type-label"><span className="font-mono">{p.item_id}</span>{p.borderline ? ' · borderline' : ''}</h3>
+              {p.has_media && !Object.values(p.outputs).some(o => imagePath(o)) && <PhrasePlayer key={p.item_id} src={evalsApi.mediaUrl(name, p.item_id)} clip={Array.isArray(p.input.clip) ? p.input.clip as [number, number] : undefined} />}
               {typeof p.input.prompt === 'string' && <p className="type-body-sm">Prompt: {p.input.prompt}</p>}
               {typeof p.input.text === 'string' && <p className="type-body-sm">Text: {p.input.text}</p>}
+              {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
+              {typeof p.input.image === 'string' && <Disclosure summary="The item's picture"><img src={evalsApi.mediaUrl(name, p.item_id)} alt={`Item ${p.item_id}'s picture`} className="h-auto max-h-[70vh] max-w-full rounded-control" /></Disclosure>}
               <p className="type-body-sm">{`You: ${said(p.person)}. ${judge}: ${said(p.judge)}${p.consistent === false ? ' (changed its mind when swapped)' : ''}.`}{p.reason ? ` ${p.reason}` : ''}</p>
               <div className="grid gap-3 md:grid-cols-2">
                 {[p.a, p.b].map(c => (

@@ -57,6 +57,17 @@ def signature(spec, engine):
             s.scalar(select(func.max(EvalJudgment.id)).where(EvalJudgment.experiment == spec.name)),
             C.load_dataset(spec.dataset, engine=engine).version,
             CODE,
+            sorted(  # a person's borderline marks (evals.judges.mark_borderline) change judge agreement and no count above
+                jid
+                for jid, d in s.execute(
+                    select(EvalJudgment.id, EvalJudgment.detail).where(
+                        EvalJudgment.experiment == spec.name,
+                        EvalJudgment.judge.is_(None),
+                        EvalJudgment.detail.isnot(None),
+                    )
+                )
+                if isinstance(d, dict) and d.get("borderline")
+            ),
         ]
     if spec.judges:  # a judge with no model of its own follows its role's choice: a new choice is a new judge, whose verdicts count instead
         from stratamodels.evals import judges as J

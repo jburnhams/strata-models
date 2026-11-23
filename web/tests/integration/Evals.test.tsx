@@ -46,6 +46,8 @@ describe('An experiment', () => {
     expect(screen.getByText('You: about the same. qwen-text: small.')).toBeInTheDocument()
     expect(screen.getByText('No output.')).toBeInTheDocument()
     expect(screen.getByText('Prompt: a cat')).toBeInTheDocument()
+    expect(screen.getByText('Reference: a dog barks')).toBeInTheDocument()
+    expect(screen.getByText("The item's picture")).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Borderline: either is fine' }))
     await waitFor(() => expect(mock.calls).toContain('borderline 7 true'))
     expect(await screen.findAllByRole('button', { name: 'Not borderline after all' })).toHaveLength(2)

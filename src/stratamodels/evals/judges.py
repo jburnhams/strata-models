@@ -861,6 +861,8 @@ def disagreements(spec, engine, name):
             dict(
                 item_id=r.item_id,
                 input={k: v for k, v in it["input"].items() if k != "path"},
+                has_media=isinstance(it["input"].get("path"), str),
+                reference=it.get("reference"),
                 a=p.a,
                 b=p.b,
                 outputs={p.a: output(p.a), p.b: output(p.b)},

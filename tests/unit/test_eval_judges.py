@@ -559,7 +559,11 @@ def test_disagreements_list_both_outputs_and_borderline_marks_leave_them_out(ran
     assert d[0]["input"] and not d[0]["borderline"] and d[0]["judge"] == "better"
     s0 = C.analyse(ran, engine)["judges"]["j"]
     assert s0["agree"]["n"] == 7 and s0["ranking"]["n"] == 7 and s0["ranking"]["candidates"] == 3
+    from stratamodels.evals import summaries as SU
+
+    sig = SU.signature(ran, engine)
     assert J.mark_borderline(engine, ran.name, d[0]["judgment_id"]) == dict(id=d[0]["judgment_id"], borderline=True)
+    assert SU.signature(ran, engine) != sig  # the kept analysis goes stale on a mark
     s1 = C.analyse(ran, engine)["judges"]["j"]
     assert s1["agree"]["n"] == 6 and s1["tally"]["borderline"] == 1 and len(s1["disagreements"]) == 1
     d2 = J.disagreements(ran, engine, "j")

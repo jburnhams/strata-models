@@ -145,7 +145,7 @@ export interface JudgeSummary {
   disagreements: { item_id: string; a: string; b: string; person: string; judge: string; reason: string }[]
 }
 /** A pair a model judge answered differently from a person (or one the person marked borderline), with both outputs to look at again. */
-export interface Disagreement { item_id: string; input: Record<string, unknown>; a: string; b: string; outputs: Record<string, unknown>; person: string; judge: string; reason: string; consistent: boolean | null; judgment_id: number; borderline: boolean }
+export interface Disagreement { item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; a: string; b: string; outputs: Record<string, unknown>; person: string; judge: string; reason: string; consistent: boolean | null; judgment_id: number; borderline: boolean }
 export interface JudgmentRow { a: string; b: string; winner: string; rater: string; judge: string | null; at: number; note: string | null; detail: { consistent?: boolean | null } | null; a_key: string | null; b_key: string | null; current: boolean }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
