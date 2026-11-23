@@ -328,9 +328,11 @@ def test_a_failed_proposer_falls_back_to_every_face(tmp_path, ttf, models):
 
     h = dict(handle(models), propose="claude-sonnet-5-5-api", proposer=proposer)
     r = F.run(h, dict(image=p, lines=lines, out=str(tmp_path / "p.png")))
-    assert (
-        "529" in r["proposer"]["error"] and r["proposed"] == [] and len(r["faces"]) == 2
-    )  # the two fetchable faces, screened
+    # the two fetchable faces, screened
+    assert "529" in r["proposer"]["error"] and r["proposed"] == [] and len(r["faces"]) == 2
+    h["proposer"] = lambda params: {"text": "The picture is too faint to tell."}  # an answer that names no face
+    r = F.run(h, dict(image=p, lines=lines, out=str(tmp_path / "q.png")))
+    assert "no catalogue face" in r["proposer"]["error"] and len(r["faces"]) == 2
 
 
 def test_the_proposer_is_loaded_from_the_registry_once_and_unloaded(models, monkeypatch):
@@ -370,3 +372,26 @@ def test_the_proposer_is_loaded_from_the_registry_once_and_unloaded(models, monk
     ]
     with pytest.raises(RunError, match="not in the registry"):
         F._proposer(dict(propose="no-such-model", models_dir=models))
+
+
+def test_the_proposer_comes_from_the_database_registry_when_the_service_has_one(models, monkeypatch):
+    from stratamodels import registry, runtimes, settings
+
+    seen = []
+
+    class Reg:
+        models = {"db-only-vl": type("M", (), {"key": "db-only-vl", "runtime": "fake"})()}
+
+    class RT:
+        @staticmethod
+        def load(m, d):
+            return {}
+
+        @staticmethod
+        def run(h, params):
+            return {"text": "tinos"}
+
+    monkeypatch.setattr(settings, "engine", lambda: "ENGINE")
+    monkeypatch.setattr(registry.Registry, "from_db", classmethod(lambda cls, e: seen.append(e) or Reg))
+    monkeypatch.setattr(runtimes, "get", lambda name: RT)
+    assert F._proposer(dict(propose="db-only-vl", models_dir=models))({}) == {"text": "tinos"} and seen == ["ENGINE"]

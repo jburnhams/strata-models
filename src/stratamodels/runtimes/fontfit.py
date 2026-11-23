@@ -650,9 +650,13 @@ def _proposer(handle):
     """A callable that runs the `propose` model (a vision-language model of the registry, e.g. claude-sonnet-5-5-api) on params: loaded once,
     in this process (a cloud model holds no GPU; its spend is counted by its own runtime)."""
     if "proposer" not in handle:
-        from stratamodels import registry, runtimes
+        from stratamodels import registry, runtimes, settings
 
-        m = registry.Registry.load().models.get(handle["propose"])
+        eng = (
+            settings.engine()
+        )  # the service's registry is the database's (models edited in the app or API); the files only without one
+        reg = registry.Registry.from_db(eng) if eng is not None else registry.Registry.load()
+        m = reg.models.get(handle["propose"])
         if m is None:
             raise RunError(f"the propose model {handle['propose']!r} is not in the registry")
         rt = runtimes.get(m.runtime)
@@ -687,6 +691,10 @@ def _propose(handle, path, box):
         r = r if isinstance(r, dict) else {"text": r}
         if not isinstance(r.get("text"), str) or not r["text"].strip():
             raise RunError("the proposer answered no text")
+        if not parse_candidates(
+            r["text"]
+        ):  # an answer naming no face or class (an unreadable block): screen every face instead
+            raise RunError(f"no catalogue face in the proposer's answer: {r['text'][:200]}")
         return r["text"], dict(
             model=handle["propose"], seconds=round(time.monotonic() - t0, 2), cost_usd=r.get("cost_usd")
         )
