@@ -321,14 +321,19 @@ CUT_TOLERANCE_S = 0.5  # the spec's tightest tolerance (strata-reels spec S5: 0.
 
 
 def match_cuts(ref, got, tol=CUT_TOLERANCE_S):
-    """How many reference cuts (seconds) are found by `got`, one to one, nearest pairs first, each within `tol` seconds."""
-    pairs = sorted((abs(r - g), i, j) for i, r in enumerate(ref) for j, g in enumerate(got) if abs(r - g) <= tol)
-    used_r, used_g = set(), set()
-    for _, i, j in pairs:
-        if i not in used_r and j not in used_g:
-            used_r.add(i)
-            used_g.add(j)
-    return len(used_r)
+    """How many reference cuts (seconds) are found by `got`, one to one, each within `tol` seconds: the most pairs there can be. Nearest
+    pairs first is not that: with cuts [1.0, 1.65] and answers [0.6, 1.25], taking (1.0, 1.25) first leaves both others alone. On a line,
+    walking both in order and pairing each reference cut with the earliest answer still in reach is the maximum matching."""
+    ref, got = sorted(ref), sorted(got)
+    i = j = hit = 0
+    while i < len(ref) and j < len(got):
+        if got[j] < ref[i] - tol:
+            j += 1  # too early for this cut, so for every later one
+        elif got[j] > ref[i] + tol:
+            i += 1  # nothing left in reach of this cut
+        else:
+            hit, i, j = hit + 1, i + 1, j + 1
+    return hit
 
 
 def _cuts_of(output):
@@ -361,7 +366,9 @@ def _cut_f1(item, output, error):
     ref, tol = _ref_cuts(item)
     if ref is None:
         return None
-    got = [] if error else _cuts_of(output)
+    if error:
+        return 0.0  # a failed job did not say the stretch is one shot, even when it is
+    got = _cuts_of(output)
     if not ref and not got:
         return 1.0  # one shot, and nothing claimed: right
     hit = match_cuts(ref, got, tol)
