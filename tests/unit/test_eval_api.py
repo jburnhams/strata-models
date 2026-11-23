@@ -75,13 +75,19 @@ def test_media_only_for_files_a_dataset_names(client, tmp_path, setup):
 
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"RIFF0000WAVE")
+    scan = tmp_path / "leaf.png"
+    scan.write_bytes(b"scan")
     C.write_dataset(
         "speech",
         [
             dict(id="a", input=dict(path=str(wav), say="hello there"), reference=dict(text="hello there")),
             dict(id="b", input=dict(say="x"), reference=dict(text="x")),
+            dict(
+                id="c", input=dict(image=str(scan)), reference=dict(text="x")
+            ),  # no recording: the picture candidates work from
         ],
     )
+    assert client.get("/api/evals/fake-asr/media/c").content == b"scan"
     r = client.get("/api/evals/fake-asr/media/a")
     assert r.status_code == 200 and r.content == b"RIFF0000WAVE"
     assert (
