@@ -108,6 +108,14 @@ Cleanup evals (`vhs-chroma-shift`, `vhs-chroma-cleanup`, `vhs-grain`) hold the u
 stage, one problem per eval; a winner is then given as `cleanup` to every upscaler's candidate. `vhs-smear` does the same for the
 tape's horizontal trail after high-contrast edges (`cleanup.vs.desmear`, kernel from `scripts/evals/smear_kernel.py`).
 
+## Shots: where a tape cuts (`shots-vhs`)
+`shot-boundaries` answers the cuts of a video as times; `shots-vhs` scores them against cuts marked by hand on stretches of the tapes
+(`scripts/evals/vhs_shots.py`, from a `shots.toml` beside them). A reference cut is found when an answered cut lies within 0.5 s of it (the
+item's `tolerance_s` overrides), one to one, nearest pairs first: `cut_miss` (reference cuts not found), `cut_false` (answered cuts matching
+none) and `cut_f1` per item, the primary. A missed cut is the costlier error for the editor (two shots it cannot split), so read `cut_miss`
+beside F1. The first candidates tune the ffmpeg baseline (threshold, deinterlacing, width); learned detectors join once their dependencies
+are agreed.
+
 ## OCR: which cleanup and which reader on hard book pages
 `ocr-pages` (`evals/specs/ocr-pages.toml`, built by `scripts/evals/ocr_pages.py` from strata-scan or a folder of PNGs) is ten hard pages of
 two public-domain books (title pages, display-type adverts, small capitals, italics, footnotes, a grey 1828 scan) with their text typed by

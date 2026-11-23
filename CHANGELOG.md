@@ -4,6 +4,18 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Shot-boundaries role: ffmpeg scene-score baseline, cut metrics and the `shots-vhs` eval (branch `claude/project-thread-1p0er6`)**
+strata-reels, the new video editor, needs its tapes split into shots, and its model work belongs here. This serves the plain baseline on the CPU and sets up the eval that learned detectors will be measured by; no new dependencies.
+- `runtimes/scenes.py`: **new** runtime `ffmpeg-scenes`: per-frame scene scores from ffmpeg (yadif, 160 px), cuts at a threshold with a minimum shot length, black stretches, an optional clip and every frame's score on request. Answer times are the file's seconds.
+- `runtimes/__init__.py`: registered, with no Python needs; `available()` reports a missing ffmpeg. `models.toml`: role `shot-boundaries`, model `ffmpeg-scene-score` (threshold 0.3, min_shot_s 0.6, width 160, deinterlace on). `pyproject.toml`: the runtime is in the strict pyright list.
+- `evals/metrics.py`: `cut_miss`, `cut_false`, `cut_f1` (cuts matched one to one within 0.5 s or the item's `tolerance_s`), and `match_cuts`.
+- `evals/specs/shots-vhs.toml`: **new** eval: the baseline against threshold 0.2 and 0.4, no deinterlacing and 320 px; primary `cut_f1`.
+- `scripts/evals/vhs_shots.py`: **new** dataset builder from a `shots.toml` of tape stretches and their hand-marked cuts.
+- `client/strata_models_client`: `shots(path, app, ...)` shortcut; `client/README.md` lists it. `README.md`: the role in the served table.
+- Tests: `tests/unit/test_scenes_runtime.py` and `tests/unit/test_vhs_shots_builder.py` **new**, cut metrics in `test_eval_metrics.py`; `tests/integration/test_scenes_runtime.py` **new** (real ffmpeg on generated video) and a client call in `test_service.py`. `.github/workflows/integration.yml` installs ffmpeg beside Tesseract.
+- Docs: `docs/evals.md` (Shots section), `docs/implementation-plan.md` (M5b), `docs/progress.md`.
+
+
 **An eval page never hangs on its first analysis, and shows where a run stands (branch `claude/project-thread-dvu0cz`)**
 Jonathan: the page-rebuild page hung on open. Its first analysis worked out while the request waited, and page_ink_all and page_ink_f1 each binarised every scan (seconds a page, for every candidate).
 - `evals/summaries.py`: an experiment with no kept analysis (or a quick one) is worked out beside the request, which waits QUICK_S; past that the page gets a stub marked `pending` with what the analysis is doing (`progress`: step, done, total), and the same work is joined, not started again, when it asks again. Errors still answer the request.

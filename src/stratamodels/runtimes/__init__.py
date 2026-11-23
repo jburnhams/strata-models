@@ -18,6 +18,7 @@ RUNTIMES = {
     "llama-server": "stratamodels.runtimes.llama",
     "recorded": "stratamodels.runtimes.recorded",
     "tesseract": "stratamodels.runtimes.tesseract",
+    "ffmpeg-scenes": "stratamodels.runtimes.scenes",
     "page-build": "stratamodels.runtimes.pagebuild",
     "fontfit": "stratamodels.runtimes.fontfit",
     "claude-api": "stratamodels.runtimes.claude",
@@ -34,6 +35,7 @@ NEEDS = {
     "llama-server": ("huggingface_hub",),
     "recorded": (),
     "tesseract": (),
+    "ffmpeg-scenes": (),
     "page-build": ("reportlab", "pypdfium2"),
     "fontfit": (),
     "claude-api": ("anthropic",),
@@ -84,4 +86,8 @@ def available():
         out["gemini-api"] = out["gemini-api"] + [f"the key GEMINI_FREE_API_KEY or GEMINI_API_KEY ({keys.path()})"]
     if not tesseract.binary():
         out["tesseract"] = out["tesseract"] + ["the tesseract command (Tesseract 5)"]
+    from stratamodels.runtimes import scenes
+
+    if not scenes.binary():
+        out["ffmpeg-scenes"] = out["ffmpeg-scenes"] + ["the ffmpeg command"]
     return out

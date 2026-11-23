@@ -75,6 +75,10 @@ model = "nudenet-320n"
 description = "Printed text from a page picture: lines and words with boxes and confidences (scanned books)"
 model = "tesseract-eng"                      # first pick (2026-11-13, for strata-scan): boxes on the CPU; a vision-language reader is the eval to run against it
 
+[roles.shot-boundaries]
+description = "Where a video cuts from one shot to the next, and its black stretches (home video and digitised VHS, for strata-reels)"
+model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, for strata-reels): eval shots-vhs measures learned detectors against it
+
 [roles.page-build]
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
 model = "pagebuild"                          # drawing only (strata_python.pages, the renderer strata-scan prints with): the readers that fill the description are the eval candidates
@@ -371,6 +375,16 @@ licence = "Apache-2.0"
 source = "https://github.com/tesseract-ocr/tesseract (pacman -S tesseract tesseract-data-eng)"
 used_by = ["strata-scan"]
 options = { psm = 3, oem = 1 }
+
+[models.ffmpeg-scene-score]
+runtime = "ffmpeg-scenes"
+name = "scene score (ffmpeg select)"
+roles = ["shot-boundaries"]
+vram_gb = 0.0
+licence = "LGPL/GPL (ffmpeg)"
+source = "https://ffmpeg.org/ffmpeg-filters.html#select_002c-aselect"
+used_by = ["strata-reels"]
+options = { threshold = 0.3, min_shot_s = 0.6, width = 160, deinterlace = true }
 
 [models.pagebuild]
 runtime = "page-build"

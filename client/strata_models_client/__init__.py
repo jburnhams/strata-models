@@ -127,6 +127,14 @@ def ocr(path, app, priority="normal", model=None, **params):
     return run("ocr", params, app, priority=priority, model=model)
 
 
+def shots(path, app, priority="normal", model=None, **params):
+    """Where a video cuts from one shot to the next (role `shot-boundaries`): params clip ([start, end] seconds), threshold, min_shot_s, width,
+    deinterlace, black (find black stretches too, default True), scores (every frame's score as well). Returns {cuts: [{time, frame, score}],
+    shots: [{start, end}], black: [{start, end}], fps, frames, duration, ...}; times are seconds in the file."""
+    params["path"] = os.path.abspath(path)
+    return run("shot-boundaries", params, app, priority=priority, model=model)
+
+
 def summarise(
     inputs,
     app,

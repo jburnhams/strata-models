@@ -1,5 +1,8 @@
 # Progress
 
+## 2026-11-23: shot-boundaries role, for strata-reels
+strata-reels (the video editor that will replace strata-360; family VHS tapes first) splits a tape into shots before anything else, and Jonathan's rule is that all its model work lives here. The role starts with the plain baseline: ffmpeg's `select` scene score, every frame against the one before, after yadif (one frame per frame, so an interlaced tape's two fields do not read as motion) at 160 px across, cut at 0.3, of cuts under 0.6 s apart the strongest; blackdetect's stretches come back beside the cuts. On a generated 7 s video (test pattern, black, fractal, bars) it finds the three cuts to the frame, in 0.16 s. Not yet run on a tape: the eval `shots-vhs` needs stretches with their cuts marked by hand (`scripts/evals/vhs_shots.py`). Learned detectors (TransNetV2, PySceneDetect's adaptive detector) are the candidates to add next; each is a new dependency, so Jonathan decides first.
+
 ## 2026-11-09: first version
 - faces: buffalo_l on the RTX 3060 loads in 0.7 s, 0.6 GB, 0.05 s per photo once warm (first call 0.4-1 s while CUDA kernels compile).
 - transcribe: Whisper large-v3 float16 3.7 GB, 1.2 s warm for the 11 s JFK sample; small 0.6 GB, 0.3 s.

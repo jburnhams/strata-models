@@ -424,3 +424,25 @@ def test_font_class_style_face_and_size_metrics():
     for name in ("font_class", "font_close", "font_top1", "font_top3", "font_style", "font_size_err"):
         assert M.METRICS[name].score(bare, out, None) is None
     assert M.METRICS["font_class"].score(dict(reference=dict(**{"class": "modern"})), out, None) is True
+
+
+def test_shot_cut_metrics_match_one_to_one_within_the_tolerance():
+    item = {"reference": {"cuts": [10.0, 20.0, 30.0]}}
+    out = {"cuts": [{"time": 10.3}, {"time": 10.4}, {"time": 29.0}, {"time": 50.0}]}
+    assert (
+        M.match_cuts([10.0, 20.0, 30.0], [10.3, 10.4, 29.0, 50.0]) == 1
+    )  # one answer per reference cut; 29.0 is a second off
+    assert M.METRICS["cut_miss"].score(item, out, None) == (2, 3)
+    assert M.METRICS["cut_false"].score(item, out, None) == (3, 4)
+    assert M.METRICS["cut_f1"].score(item, out, None) == 2 / 7
+    loose = {"reference": {"cuts": [10.0, 20.0, 30.0], "tolerance_s": 1.0}}
+    assert M.METRICS["cut_miss"].score(loose, out, None) == (1, 3)
+    # a failed job: every cut missed, none claimed falsely, F1 0
+    assert M.METRICS["cut_miss"].score(item, None, "boom") == (3, 3)
+    assert M.METRICS["cut_false"].score(item, None, "boom") is None
+    assert M.METRICS["cut_f1"].score(item, None, "boom") == 0.0
+    # one shot, nothing claimed: right; no reference: the metric does not apply
+    assert M.METRICS["cut_f1"].score({"reference": {"cuts": []}}, {"cuts": []}, None) == 1.0
+    assert M.METRICS["cut_miss"].score({"reference": {}}, out, None) is None
+    assert M.METRICS["cut_false"].score({}, out, None) is None and M.METRICS["cut_f1"].score({}, out, None) is None
+    assert M.METRICS["cut_f1"].better == "higher" and M.METRICS["cut_miss"].better == "lower"
