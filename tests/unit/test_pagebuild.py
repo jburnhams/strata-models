@@ -604,11 +604,19 @@ def test_a_plain_ocr_answer_is_regrouped_by_the_models_layout_model(tmp_path):
         (RuntimeError("budget refused"), "budget refused"),
         (dict(text="I cannot read this page."), "not valid JSON|no such"),
         (dict(text=json.dumps(dict(blocks=[]))), "no blocks"),
+        (
+            dict(json=dict(blocks=[dict(lines=[98, 99], role="body")])),
+            "none of the lines",
+        ),  # in the schema, not on this page
+        (
+            dict(json=dict(blocks=[dict(lines=[1], role="body")], figures=[dict(box=[1, 2, 3], kind="engraving")])),
+            "a layout box",
+        ),
     ],
 )
 def test_a_failed_layout_call_draws_tesseracts_blocks_and_says_why(tmp_path, answer, why):
     out = pagebuild.run(grouping(answer, []), dict(ocr=SPLIT, image=scan(tmp_path), out=str(tmp_path / "f.pdf")))
-    assert out["blocks"] == 4 and "cost_usd" not in out  # Tesseract's four blocks
+    assert out["blocks"] == 4 and not out["page"].get("figures")  # Tesseract's four blocks
     assert out["grouper"]["model"] == "claude-opus-5-5-api" and re.search(why, out["grouper"]["error"])
 
 

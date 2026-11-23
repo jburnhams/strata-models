@@ -705,7 +705,18 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
             grouper = dict(
                 model=str(opts["group"]), seconds=0.0, error="the layout model reads the page: give its picture (image)"
             )
-    page = page_of(params)
+    try:
+        page = page_of(params)
+        if grouper and "error" not in grouper and not any(b.lines for b in page.blocks):
+            raise RunError("the layout model's blocks hold none of the lines")
+    except RunError as e:
+        if not grouper or "error" in grouper:
+            raise
+        # the answer fits the preset's schema but not this page (line numbers out of range, a figure box of three numbers): Tesseract's
+        # blocks, as for a failed call, rather than a blank page or a failed job
+        grouper = {**grouper, "error": f"RunError: {e}"[:500]}
+        params = {k: v for k, v in params.items() if k != "groups"}
+        page = page_of(params)
     fonts: dict[str, str] = {}
     small_caps = [str(s) for s in cast("Sequence[Any]", params.get("small_caps_faces") or [])]
     ff = _json(params.get("font_fit"), "font fit") if params.get("font_fit") and params.get("groups") else None
