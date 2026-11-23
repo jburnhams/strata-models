@@ -133,6 +133,16 @@ describe('An experiment', () => {
     expect(await screen.findByText('Prompt: a dog')).toBeInTheDocument()
     expect(screen.getAllByText('Not run yet.')).toHaveLength(2)
   })
+  it('puts the item\'s own picture first in the grid of picture outputs', async () => {
+    const d = evalFixtures.outputs()
+    const it0 = d.items[0] as { input: Record<string, unknown>; outputs: Record<string, unknown> }
+    it0.input = { image: '/d/evals/page-layout/u1.png' }
+    it0.outputs = { 'large-v3': { output: { path: '/d/pages/a.png' }, error: null }, turbo: { output: { path: '/d/pages/b.png' }, error: null } }
+    server.use(http.get('/api/evals/:name/outputs', () => HttpResponse.json(d)))
+    setup(<App />, { route: '/evals/transcribe-en?tab=outputs' })
+    const grid = await screen.findByLabelText(/Item u1: 3\spictures/)
+    expect(within(grid).getByRole('img', { name: "Item u1's picture" })).toHaveAttribute('src', '/api/evals/transcribe-en/media/u1')
+  })
   it('lays picture outputs out in one comparison grid, with a pipeline\'s steps under its tile, and steps through items by key', async () => {
     const d = evalFixtures.outputs()
     const pic = (n: string, extra = {}) => ({ output: { path: `/o/${n}.png`, width: 64, height: 64, ...extra }, error: null, run_s: 2 });
@@ -172,6 +182,13 @@ describe('Judging pictures', () => {
     setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
     expect(await screen.findByRole('img', { name: 'X' })).toHaveAttribute('src', expect.stringContaining(encodeURIComponent('/d/generated/a.png')))
     expect(screen.getByText('Prompt: two hands')).toBeInTheDocument()
+  })
+
+  it('shows the item\'s own picture above the pair, the page the outputs rebuild', async () => {
+    server.use(http.get('/api/evals/:name/pair', () => HttpResponse.json({ pair: { item_id: 'leaf13', input: { image: '/d/evals/page-layout/leaf13.png', ocr: '/d/x.json' }, has_media: false, reference: null, x: { path: '/d/pages/a.png' }, y: { path: '/d/pages/b.png' }, token: 't' } })))
+    setup(<App />, { route: '/evals/transcribe-en?tab=judge' })
+    expect(await screen.findByRole('img', { name: "Item leaf13's picture" })).toHaveAttribute('src', '/api/evals/transcribe-en/media/leaf13')
+    expect(screen.getByRole('img', { name: 'X' })).toBeInTheDocument()
   })
 
   it('plays the two spoken outputs and shows the text they say', async () => {

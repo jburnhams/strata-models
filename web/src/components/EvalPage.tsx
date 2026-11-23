@@ -250,6 +250,8 @@ function Outputs({ name }: { name: string }) {
         const videos = names.map(n => { const o = it.outputs[n]; return o && !o.error ? videoSide(n, n, o.output, typeof o.run_s === 'number' ? `${o.run_s.toFixed(1)} s` : undefined) : null }).filter((v): v is VideoSide => v !== null)
         const source = videos.length ? sourceSide(name, it.id, it.reference) : null
         const { pictures, others } = candidatesOf(it.outputs, names.filter(n => !videos.some(v => v.id === n)))
+        // the item's own picture (a scanned page that candidates rebuild, say) first, so every output sits beside what it should look like
+        if (pictures.length > 0 && typeof it.input.image === 'string') pictures.unshift({ id: 'source', label: 'Source', note: 'the item\'s picture', media: { kind: 'image', src: evalsApi.mediaUrl(name, it.id), alt: `Item ${it.id}'s picture` } })
         return (
           <div className="grid gap-4">
             <p className="type-body-sm text-muted-foreground">Every candidate&apos;s output, and for a pipeline what each step was sent and answered. The Judge tab shows only the end results, so look here after judging.</p>
@@ -329,6 +331,7 @@ function Judge({ name }: { name: string }) {
             {typeof p.input.prompt === 'string' && <p className="type-body">Prompt: {p.input.prompt}</p>}
             {typeof p.input.text === 'string' && <p className="type-body">Text: {p.input.text}</p>}
             {p.reference && 'text' in p.reference && p.reference.text !== p.input.text && <p className="type-body-sm text-muted-foreground">Reference: {String(p.reference.text)}</p>}
+            {pics && typeof p.input.image === 'string' && <Disclosure defaultOpen summary="The item's picture (what the outputs should look like)"><img src={evalsApi.mediaUrl(name, p.item_id)} alt={`Item ${p.item_id}'s picture`} className="h-auto max-h-[70vh] max-w-full rounded-control" /></Disclosure>}
             {answerBar('above')}
             {vx && vy
               ? <>

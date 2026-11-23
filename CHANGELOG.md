@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**The item's own picture beside picture outputs (branch `claude/project-thread-dvu0cz`)**
+After #93 the page-layout Judge tab showed the rebuilt pages but not the scan they rebuild, which the judge needs. `/api/evals/{name}/media/{item_id}` now serves the item's `image` input when it has no `path` (still only a file the dataset names); the Judge tab shows it above a pair of pictures (open by default), and the Outputs tab puts it first in the grid as "Source". Tests in `test_eval_api.py` and `web/tests/integration/Evals.test.tsx`; static build updated.
+
 **Evals API: an experiment that cannot be read is a 400 everywhere (branch `claude/project-thread-01gj43`)**
 The font-match page on omarchy broke because its dataset was never built into the service's data folder (the trial ran in a scratch clone): `/api/evals/font-match` said so (400), but `/report`, `/outputs` and `/pair` raised the same `EvalError` as a bare 500. `evals/api.py` now turns any `EvalError` into a 400 with the reason.
 

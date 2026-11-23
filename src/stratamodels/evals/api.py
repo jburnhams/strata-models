@@ -13,7 +13,7 @@ GET  /api/evals/{name}/pair                  a blind pair to judge: one item, tw
                                              end results only: a pipeline's intermediate steps are left out
 GET  /api/evals/{name}/outputs[?item_id=]    every candidate's full output per item, a pipeline's every step (what it was sent, what it answered)
 POST /api/evals/{name}/judgments             {token, winner: x | y | tie, rater?, note?}
-GET  /api/evals/{name}/media/{item_id}       the item's input file (audio, picture), for the judging page; only files a dataset names
+GET  /api/evals/{name}/media/{item_id}       the item's input file (`path`: audio, video; else `image`), for the judging page; only files a dataset names
      ?file=PATH                              instead one of the item's reference media (`reference.preview`, `reference.crops[].path`: the
                                              source made playable, e.g. a VHS clip deinterlaced and enlarged nearest-neighbour), never another file
 GET  /api/evals/{name}/verdicts/{item_id}    every judgment of an item, people's and model judges' (shown once a person has judged it)
@@ -463,7 +463,9 @@ def mount(app, scheduler):
             return FileResponse(
                 file, media_type=MEDIA_TYPES.get(ext) or mimetypes.guess_type(file)[0] or "application/octet-stream"
             )
-        p = it and it["input"].get("path")
+        # the input file: a recording or video (`path`), else the picture candidates work from (`image`: the scan a page-build rebuilds), shown
+        # beside the outputs on the Judge and Outputs tabs
+        p = it and (it["input"].get("path") or it["input"].get("image"))
         if not isinstance(p, str) or not os.path.isfile(p):
             raise HTTPException(404, "no file for this item")
         clip = it["input"].get("clip")
