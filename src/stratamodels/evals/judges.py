@@ -47,6 +47,7 @@ import hashlib
 import json
 import time
 
+import numpy as np
 from sqlalchemy import select
 
 from stratamodels.db.models import EvalJudgment
@@ -560,9 +561,10 @@ def _share(k, n):
     return dict(value=v, low=lo, high=hi, n=n, k=k)
 
 
-def agreement(people, verdicts):
+def agreement(people, verdicts, borderline=frozenset()):
     """How far a judge agrees with people on the pairs both judged. `people`, `verdicts`: [(pair id, a, b, winner, at)] (a person may judge a
-    pair more than once: their latest counts). Categories are relative to the pair (its first candidate by name wins, the second, or tie)."""
+    pair more than once: their latest counts). Categories are relative to the pair (its first candidate by name wins, the second, or tie).
+    `borderline`: pair ids a person marked as either answer being fine; left out of the agreement (counted in tally['borderline'])."""
     latest = {}
     for pid, a, b, w, _at in sorted(people, key=lambda r: r[4]):
         latest[pid] = (a, b, w)
@@ -573,7 +575,8 @@ def agreement(people, verdicts):
     def cat(a, b, w):
         return "tie" if w == "tie" else "first" if w == min(a, b) else "second"
 
-    both = [(cat(*latest[p]), cat(*mine[p])) for p in mine if p in latest]
+    skipped = sum(1 for p in mine if p in latest and p in borderline)
+    both = [(cat(*latest[p]), cat(*mine[p])) for p in mine if p in latest and p not in borderline]
     decided = [(p, q) for p, q in both if p != "tie" and q != "tie"]
     tally = dict(
         same_winner=sum(1 for p, q in decided if p == q),
@@ -581,6 +584,7 @@ def agreement(people, verdicts):
         judge_tie=sum(1 for p, q in both if q == "tie" and p != "tie"),
         person_tie=sum(1 for p, q in both if p == "tie" and q != "tie"),
         both_tie=sum(1 for p, q in both if p == q == "tie"),
+        borderline=skipped,
     )
     return dict(
         n=len(both),
@@ -591,6 +595,115 @@ def agreement(people, verdicts):
         kappa=kappa(both),
         tally=tally,
     )
+
+
+def _ranks(strength):
+    """{name: rank} from {name: strength}, 1 = strongest; equal strengths share their mean rank."""
+    order = sorted(strength, key=lambda n: -strength[n])
+    out, i = {}, 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and abs(strength[order[j + 1]] - strength[order[i]]) < 1e-9:
+            j += 1
+        for n in order[i : j + 1]:
+            out[n] = (i + j) / 2 + 1
+        i = j + 1
+    return out
+
+
+def _spearman(ra, rb, names):
+    if len(names) < 2:
+        return float("nan")
+    x = np.array([ra[n] for n in names], float)
+    y = np.array([rb[n] for n in names], float)
+    if x.std() == 0 or y.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def _kendall(sa, sb, names):
+    """Kendall's tau-b between two strength orderings: +1 same order, -1 reversed."""
+    con = dis = ta = tb = 0
+    for i, m in enumerate(names):
+        for n in names[i + 1 :]:
+            da, db = sa[m] - sa[n], sb[m] - sb[n]
+            da = 0 if abs(da) < 1e-9 else da
+            db = 0 if abs(db) < 1e-9 else db
+            if da == 0 and db == 0:
+                continue
+            if da == 0:
+                ta += 1
+            elif db == 0:
+                tb += 1
+            elif (da > 0) == (db > 0):
+                con += 1
+            else:
+                dis += 1
+    den = ((con + dis + ta) * (con + dis + tb)) ** 0.5
+    return float("nan") if not den else (con - dis) / den
+
+
+def ranking(people, verdicts, borderline=frozenset(), b=200, seed=0):
+    """How far a judge ranks the candidates as people do, on the pairs both judged: Bradley-Terry strengths from each side's answers (a person's
+    borderline pair counts as a tie for them), then Spearman's rho of the ranks with a bootstrap interval over pairs, Kendall's tau-b, and the
+    mean and largest number of places a candidate moves. Coarse on purpose: a judge can differ on close calls and still order the field alike."""
+    latest, mine = {}, {}
+    for pid, a, b_, w, _at in sorted(people, key=lambda r: r[4]):
+        latest[pid] = (a, b_, "tie" if pid in borderline else w)
+    for pid, a, b_, w, _at in sorted(verdicts, key=lambda r: r[4]):
+        mine[pid] = (a, b_, w)
+    common = [p for p in mine if p in latest]
+    names = sorted({n for p in common for n in latest[p][:2]})
+    if len(names) < 2 or not common:
+        return dict(
+            n=len(common),
+            candidates=len(names),
+            spearman=None,
+            low=None,
+            high=None,
+            kendall=None,
+            mean_shift=None,
+            max_shift=None,
+            people=[],
+            judge=[],
+        )
+
+    def fit(ps):
+        sp = S.bradley_terry([latest[p] for p in ps], names)
+        sj = S.bradley_terry([mine[p] for p in ps], names)
+        return sp, sj
+
+    sp, sj = fit(common)
+    rp, rj = _ranks(sp), _ranks(sj)
+    rng = np.random.default_rng(seed)
+    boots = []
+    for _ in range(b):
+        ps = [common[i] for i in rng.integers(0, len(common), len(common))]
+        bp, bj = fit(ps)
+        v = _spearman(_ranks(bp), _ranks(bj), names)
+        if v == v:
+            boots.append(v)
+    shifts = [abs(rp[n] - rj[n]) for n in names]
+    return dict(
+        n=len(common),
+        candidates=len(names),
+        spearman=_spearman(rp, rj, names),
+        low=float(np.percentile(boots, 2.5)) if boots else None,
+        high=float(np.percentile(boots, 97.5)) if boots else None,
+        kendall=_kendall(sp, sj, names),
+        mean_shift=sum(shifts) / len(shifts),
+        max_shift=max(shifts),
+        people=sorted(names, key=lambda n: rp[n]),
+        judge=sorted(names, key=lambda n: rj[n]),
+    )
+
+
+def borderline_pairs(rows):
+    """Pair ids whose latest judgment by a person is marked borderline (either answer fine: `detail.borderline`)."""
+    latest = {}
+    for r in sorted((r for r in rows if r.judge is None), key=lambda r: r.at):
+        latest[_pair_id(r.item_id, r.a_key, r.b_key)] = r
+    return frozenset(p for p, r in latest.items() if isinstance(r.detail, dict) and r.detail.get("borderline"))
 
 
 def _metric_truth(spec, engine, rows):
@@ -635,6 +748,7 @@ def summary(spec, engine, current, names, base):
     pwin = {}
     for pid, _a, _b, w, _at in sorted(people, key=lambda r: r[4]):
         pwin[pid] = w
+    border = borderline_pairs(rows)
     truth = _metric_truth(spec, engine, rows) if spec.primary != "judged" else []
     out = {}
     for j in spec.judges:
@@ -647,12 +761,13 @@ def summary(spec, engine, current, names, base):
             for r in mine
             if isinstance(r.detail, dict) and r.detail.get("consistent") is not None
         ]
-        ag = agreement(people, [(_pair_id(r.item_id, r.a_key, r.b_key), r.a, r.b, r.winner, r.at) for r in mine])
+        theirs = [(_pair_id(r.item_id, r.a_key, r.b_key), r.a, r.b, r.winner, r.at) for r in mine]
+        ag = agreement(people, theirs, border)
         disagree = [
             dict(item_id=r.item_id, a=r.a, b=r.b, person=pwin[pid], judge=r.winner, reason=r.note or "")
             for r in mine
             for pid in [_pair_id(r.item_id, r.a_key, r.b_key)]
-            if pid in pwin and pwin[pid] != r.winner
+            if pid in pwin and pwin[pid] != r.winner and pid not in border
         ]
         out[j["name"]] = dict(
             kind=j["kind"],
@@ -667,6 +782,7 @@ def summary(spec, engine, current, names, base):
             kappa=ag["kappa"],
             tally=ag["tally"],
             consistent=_share(sum(1 for c in cons if c), len(cons)),
+            ranking=ranking(people, theirs, border),
             comparisons={n: C.judged_vs(trip, n, base) for n in names if n != base},
             metric=dict(
                 agreement(truth, [(_pair_id(r.item_id, r.a_key, r.b_key), r.a, r.b, r.winner, r.at) for r in mine]),
@@ -709,3 +825,69 @@ def verdicts_on(engine, spec, item_id):
         )
         for r in rows
     ]
+
+
+def disagreements(spec, engine, name):
+    """Every pair where judge `name` answered differently from a person (their latest judgment), and those a person has marked borderline,
+    with what is needed to look again: the item's input, both candidates' outputs (end results only), the person's judgment row id."""
+    j = find(spec, name)
+    jk = judge_key(j, resolve(engine, j))
+    ds = C.load_dataset(spec.dataset, engine=engine)
+    current = _current(spec, ds)
+    rows = [r for r in _rows(engine, spec.name) if _counts(r, current)]
+    latest = {}
+    for r in sorted((r for r in rows if r.judge is None), key=lambda r: r.at):
+        latest[_pair_id(r.item_id, r.a_key, r.b_key)] = r
+    _ds, outs, _ = C.outputs_for(spec, engine, ds)
+    index = {it["id"]: i for i, it in enumerate(ds.items)}
+    out, seen = [], set()
+    for r in sorted((r for r in rows if r.judge == jk), key=lambda r: -r.at):
+        pid = _pair_id(r.item_id, r.a_key, r.b_key)
+        p = latest.get(pid)
+        if p is None or pid in seen:
+            continue
+        seen.add(pid)
+        border = bool(isinstance(p.detail, dict) and p.detail.get("borderline"))
+        if p.winner == r.winner and not border:
+            continue
+        i = index.get(r.item_id)
+        it = ds.items[i] if i is not None else {"input": {}}
+
+        def output(n, i=i):
+            o = outs.get(n, [None] * len(ds.items))[i] if i is not None else None
+            return C.without_pipeline(o[0]) if o else None
+
+        out.append(
+            dict(
+                item_id=r.item_id,
+                input={k: v for k, v in it["input"].items() if k != "path"},
+                a=p.a,
+                b=p.b,
+                outputs={p.a: output(p.a), p.b: output(p.b)},
+                person=p.winner,
+                judge=r.winner,
+                reason=r.note or "",
+                consistent=r.detail.get("consistent") if isinstance(r.detail, dict) else None,
+                judgment_id=p.id,
+                borderline=border,
+            )
+        )
+    return out
+
+
+def mark_borderline(engine, experiment, judgment_id, on=True, clock=time.time):
+    """Mark (or unmark) a person's judgment as borderline: either answer is fine, so a judge that chose the other is not counted as disagreeing.
+    Kept in the judgment's `detail`; the person's choice itself stays as it was (the experiment's decision still reads it)."""
+    with C.session(engine) as s:
+        r = s.get(EvalJudgment, judgment_id)
+        if r is None or r.experiment != experiment or r.judge is not None:
+            raise KeyError(judgment_id)
+        d = dict(r.detail or {})
+        if on:
+            d.update(borderline=True, borderline_at=clock())
+        else:
+            d.pop("borderline", None)
+            d.pop("borderline_at", None)
+        r.detail = d or None
+        s.commit()
+        return dict(id=r.id, borderline=bool(on))

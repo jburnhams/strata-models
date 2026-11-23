@@ -5,7 +5,7 @@ import { useParams } from 'react-router'
 import PhrasePlayer from './PhrasePlayer'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AsyncButton, Button, Compare, CompareGrid, CompareVideo, DataTable, DataView, Disclosure, EmptyState, Field, KeysLegend, MediaPlayer, NativeSelect, PageHeader, SPEECH_RATES, Skeleton, Status, Tabs, TableSkeleton, format, useAsyncAction, useHotkeys, useLoad, type Candidate, type Column, type CompareMode, type Region, type Shortcut, type VideoLoop, type VideoMedia, type VideoMode } from 'strata-react'
-import { evalsApi, imagesApi, type Analysis, type JudgeSummary, type Pair, type Progress, type Share, type Step } from '../api'
+import { evalsApi, imagesApi, type Analysis, type Disagreement, type JudgeSummary, type Pair, type Progress, type Share, type Step } from '../api'
 import { VideoCompare, videoOf, type VideoSide } from './VideoCompare'
 import { VERDICT_TONE, VERDICT_WORD, diff, outputText, pvalue, reading, value } from '../evalfmt'
 import { useEffect, useRef, useState, type RefObject } from 'react'
@@ -51,7 +51,7 @@ function Results({ a }: { a: Analysis }) {
           <ul className="grid gap-1 type-body">{Object.entries(a.judgments.strength).sort((x, y) => y[1][0] - x[1][0]).map(([n, s]) => <li key={n}><span className="font-mono">{n}</span>: {s[0].toFixed(2)} ({s[1].toFixed(2)} to {s[2].toFixed(2)})</li>)}</ul>
         </section>
       )}
-      {a.judges && Object.keys(a.judges).length > 0 && <ModelJudges judges={a.judges} />}
+      {a.judges && Object.keys(a.judges).length > 0 && <ModelJudges name={a.experiment.name} judges={a.judges} />}
       <p className="type-body-sm text-muted-foreground">Dataset {a.dataset.name}, version <span className="font-mono">{a.dataset.version}</span>: the baseline has {a.dataset.compared} of {a.dataset.n} items; each candidate is compared with it on the items both have (Items column: a sample has fewer, and wider intervals){a.dataset.not_run?.length ? ` (of those that have run: ${a.dataset.not_run.join(', ')} not yet)` : ''}. Intervals are 95 %; the Write-up tab says how each is computed.</p>
     </div>
   )
@@ -59,9 +59,50 @@ function Results({ a }: { a: Analysis }) {
 
 const share = (s: Share) => (!s.n || s.value === null ? 'n/a' : `${Math.round(s.value * 100)} % (${Math.round((s.low ?? 0) * 100)} to ${Math.round((s.high ?? 0) * 100)}) of ${s.n}`)
 
-/** Model judges: their verdicts on the pairs people judged, and how often they gave the person's answer. */
-function ModelJudges({ judges }: { judges: Record<string, JudgeSummary> }) {
+const fixed = (v: number | null | undefined, d = 2) => (v === null || v === undefined ? 'n/a' : v.toFixed(d))
+
+/** How far a judge ranks the candidates as people do: rho (interval), tau, and places moved. */
+export const rankingText = (r: JudgeSummary['ranking']) => (!r || r.spearman === null ? 'n/a' : `rho ${fixed(r.spearman)}${r.low !== null ? ` (${fixed(r.low)} to ${fixed(r.high)})` : ''}, tau ${fixed(r.kendall)}, moves ${fixed(r.mean_shift, 1)} places (most ${fixed(r.max_shift, 1)})`)
+
+/** The pairs one judge answered differently from the person, both outputs side by side, each markable as borderline (either is fine). */
+function Disagreements({ name, judge }: { name: string; judge: string }) {
+  const qc = useQueryClient()
+  const load = useLoad({ queryKey: ['disagreements', name, judge], queryFn: () => evalsApi.disagreements(name, judge) })
+  const mark = useAsyncAction(async (d: Disagreement) => { await evalsApi.borderline(name, d.judgment_id, !d.borderline); await qc.invalidateQueries({ queryKey: ['disagreements', name, judge] }); await qc.invalidateQueries({ queryKey: ['eval', name] }) }, { settleMs: 0 })
+  const said = (w: string) => (w === 'tie' ? 'about the same' : w)
+  return (
+    <DataView state={load} isEmpty={d => d.pairs.length === 0} skeleton={<Skeleton className="h-48 w-full" />} empty={<EmptyState title="No disagreements">{`${judge} gave your answer on every pair you both judged.`}</EmptyState>}>
+      {d => (
+        <div className="grid gap-4">
+          <p className="type-body-sm text-muted-foreground">{`${format.count(d.pairs.filter(p => !p.borderline).length, 'pair')} where ${judge} chose differently from you, newest first. Mark a close call as borderline and it is left out of this judge's agreement (your own choice still counts in the results).`}</p>
+          {d.pairs.map(p => (
+            <section key={`${p.item_id}-${p.a}-${p.b}`} aria-label={`${p.item_id}: ${p.a} against ${p.b}`} className={`grid gap-2 rounded-surface border border-border p-3${p.borderline ? ' opacity-70' : ''}`}>
+              <h3 className="type-label"><span className="font-mono">{p.item_id}</span>{p.borderline ? ' · borderline' : ''}</h3>
+              {typeof p.input.prompt === 'string' && <p className="type-body-sm">Prompt: {p.input.prompt}</p>}
+              {typeof p.input.text === 'string' && <p className="type-body-sm">Text: {p.input.text}</p>}
+              <p className="type-body-sm">{`You: ${said(p.person)}. ${judge}: ${said(p.judge)}${p.consistent === false ? ' (changed its mind when swapped)' : ''}.`}{p.reason ? ` ${p.reason}` : ''}</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {[p.a, p.b].map(c => (
+                  <figure key={c} className="grid content-start gap-1">
+                    <figcaption className="type-caption"><span className="font-mono">{c}</span>{p.person === c ? ' · your pick' : ''}{p.judge === c ? ` · ${judge}'s pick` : ''}</figcaption>
+                    {p.outputs[c] === null || p.outputs[c] === undefined ? <p className="type-body-sm text-muted-foreground">No output.</p> : <Output o={p.outputs[c]} label={c} />}
+                  </figure>
+                ))}
+              </div>
+              <div><Button onClick={() => mark.run(p)} disabled={mark.phase === 'pending'}>{p.borderline ? 'Not borderline after all' : 'Borderline: either is fine'}</Button></div>
+            </section>
+          ))}
+          {mark.error && <p role="alert" className="text-danger type-body-sm">{mark.error}</p>}
+        </div>
+      )}
+    </DataView>
+  )
+}
+
+/** Model judges: their verdicts on the pairs people judged, how often they gave the person's answer, and how alike they rank the candidates. */
+function ModelJudges({ name, judges }: { name: string; judges: Record<string, JudgeSummary> }) {
   type JRow = JudgeSummary & { name: string }
+  const [open, setOpen] = useState<string | null>(null)
   const cols: Column<JRow>[] = [
     { key: 'name', header: 'Judge', cell: r => <span className="grid"><span className="font-mono">{r.name}</span><span className="type-caption text-muted-foreground">{r.kind}, {r.model ?? '?'}{r.via !== 'queue' ? ` via ${r.via}` : ''}</span></span> },
     { key: 'judged', header: 'Verdicts', numeric: true, cell: r => `${r.judged} (${r.with_people} with people)` },
@@ -69,12 +110,16 @@ function ModelJudges({ judges }: { judges: Record<string, JudgeSummary> }) {
     { key: 'decided', header: 'Same winner', numeric: true, cell: r => share(r.decided) },
     { key: 'kappa', header: 'Kappa', numeric: true, cell: r => (r.kappa === null ? 'n/a' : r.kappa.toFixed(2)) },
     { key: 'consistent', header: 'Same either way round', numeric: true, cell: r => share(r.consistent) },
+    { key: 'ranking', header: 'Ranks like people', cell: r => rankingText(r.ranking) },
+    { key: 'look', header: 'Differences', cell: r => <Button onClick={() => setOpen(o => (o === r.name ? null : r.name))} aria-expanded={open === r.name}>{open === r.name ? 'Hide' : `Show${r.tally.opposite + r.tally.judge_tie + r.tally.person_tie ? ` ${r.tally.opposite + r.tally.judge_tie + r.tally.person_tie}` : ''}`}</Button> },
   ]
   return (
     <section aria-labelledby="model-judges" className="grid gap-2">
       <h2 id="model-judges" className="type-heading">Model judges</h2>
-      <p className="type-body-sm text-muted-foreground">Verdicts by models on the same blind pairs, kept beside people's and never counted as theirs. Agrees: the person's answer, tie included. Same winner: of pairs where both picked one. Kappa: agreement beyond chance (1 perfect, 0 chance).</p>
-      <DataTable caption="Model judges against people" columns={cols} rows={Object.entries(judges).map(([name, j]) => ({ ...j, name }))} rowKey={r => r.name} />
+      <p className="type-body-sm text-muted-foreground">Verdicts by models on the same blind pairs, kept beside people's and never counted as theirs. Agrees: the person's answer, tie included. Same winner: of pairs where both picked one. Kappa: agreement beyond chance (1 perfect, 0 chance). Ranks like people: the candidates ordered by each side's answers on the same pairs, compared (rho and tau 1 = same order); close calls can differ while the order holds.</p>
+      <DataTable caption="Model judges against people" columns={cols} rows={Object.entries(judges).map(([n, j]) => ({ ...j, name: n }))} rowKey={r => r.name} />
+      {open && judges[open]?.ranking?.people.length ? <p className="type-body-sm">{`Your order: ${judges[open].ranking!.people.join(', ')}. ${open}'s: ${judges[open].ranking!.judge.join(', ')}.`}</p> : null}
+      {open && <Disagreements name={name} judge={open} />}
     </section>
   )
 }

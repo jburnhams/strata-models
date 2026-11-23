@@ -139,9 +139,13 @@ export interface Share { value: number | null; low: number | null; high: number 
 export interface JudgeSummary {
   kind: 'text' | 'vision'; model: string | null; via: string; role: string | null; judged: number; with_people: number
   agree: Share; decided: Share; kappa: number | null; consistent: Share
-  tally: { same_winner: number; opposite: number; judge_tie: number; person_tie: number; both_tie: number }
+  tally: { same_winner: number; opposite: number; judge_tie: number; person_tie: number; both_tie: number; borderline?: number }
+  /** How far the judge orders the candidates as people do (Bradley-Terry on the pairs both judged): rho with its interval, tau, places moved. */
+  ranking?: { n: number; candidates: number; spearman: number | null; low: number | null; high: number | null; kendall: number | null; mean_shift: number | null; max_shift: number | null; people: string[]; judge: string[] }
   disagreements: { item_id: string; a: string; b: string; person: string; judge: string; reason: string }[]
 }
+/** A pair a model judge answered differently from a person (or one the person marked borderline), with both outputs to look at again. */
+export interface Disagreement { item_id: string; input: Record<string, unknown>; a: string; b: string; outputs: Record<string, unknown>; person: string; judge: string; reason: string; consistent: boolean | null; judgment_id: number; borderline: boolean }
 export interface JudgmentRow { a: string; b: string; winner: string; rater: string; judge: string | null; at: number; note: string | null; detail: { consistent?: boolean | null } | null; a_key: string | null; b_key: string | null; current: boolean }
 export interface RunStatus { state: 'idle' | 'running' | 'done' | 'failed'; log: string[]; error?: string; result?: { ran: number; cached: number; failed: number } }
 export interface Pair { similarity?: number; item_id: string; input: Record<string, unknown>; has_media: boolean; reference: Record<string, unknown> | null; x: unknown; y: unknown; token: string }
@@ -156,6 +160,8 @@ export const evalsApi = {
   pair: (name: string) => get<{ pair: Pair | null; remaining?: number }>(`/api/evals/${encodeURIComponent(name)}/pair`),
   outputs: (name: string, item?: string) => get<{ candidates: Candidate[]; items: ItemOutputs[] }>(`/api/evals/${encodeURIComponent(name)}/outputs${item ? `?item_id=${encodeURIComponent(item)}` : ''}`),
   judge: (name: string, token: string, winner: 'x' | 'y' | 'tie') => send<{ ok: boolean; item_id: string; x: string; y: string; winner: string }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments`, { token, winner }),
+  disagreements: (name: string, judge: string) => get<{ judge: string; pairs: Disagreement[] }>(`/api/evals/${encodeURIComponent(name)}/judges/${encodeURIComponent(judge)}/disagreements`),
+  borderline: (name: string, id: number, borderline: boolean) => send<{ id: number; borderline: boolean }>('POST', `/api/evals/${encodeURIComponent(name)}/judgments/${id}/borderline`, { borderline }),
   verdicts: (name: string, item: string) => get<{ item_id: string; judgments: JudgmentRow[] }>(`/api/evals/${encodeURIComponent(name)}/verdicts/${encodeURIComponent(item)}`),
   mediaUrl: (name: string, item: string, file?: string) => withBase(`/api/evals/${encodeURIComponent(name)}/media/${encodeURIComponent(item)}${file ? `?file=${encodeURIComponent(file)}` : ''}`),
 }
