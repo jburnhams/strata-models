@@ -5,7 +5,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 ## 2026-11-23
 
 **End-to-end page rebuild eval: layout, corrected text, fitted type, pictures and borders (branch `claude/project-thread-dvu0cz`)**
-Jonathan asked for the full page rebuild once the stage evals had winners. Spec `page-rebuild` is a ladder over the page-layout pages, Tesseract up to the full recipe, so the report says what each step is worth (docs/evals.md "Page rebuild").
+Jonathan asked for the full page rebuild once the stage evals had winners. Spec `page-rebuild` is a ladder over the page-layout pages, Tesseract up to the full recipe, so the report says what each step is worth; `full-every-face` tries every face instead of Sonnet's shortlist (the font-match run's ink winner, wrong class half the time), for the judge to settle (docs/evals.md "Page rebuild").
 - `runtimes/pagebuild.py`: with `ocr` and `groups`, `texts` (a model's corrections of the numbered lines; an empty text drops a line), `font_fit` (a font-match answer: each word in its fitted face, cut, size and place; the answer's font files drawn with), `styles` (fitted styles to keep), `snap` (sizes near the block's median take it, widths kept), `crop` (figures cut from the scan, paper whitened) and `rules` (the scan's ruled lines near the print, the border among them, cut from the scan as figures of kind rule).
 - `pyproject.toml`: scipy moves from the dev group to the runtime dependencies (page-build's `rules`; already installed wherever `uv sync` ran with the dev group, so a deploy's `uv sync` changes nothing there).
 - Preset `page-text-fix-v1` (+ schema): Haiku corrects Tesseract's numbered lines one by one, answering only those it changes.

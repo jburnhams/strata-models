@@ -542,7 +542,11 @@ def test_the_rebuild_spec_climbs_one_step_a_candidate_and_its_presets_carry_thei
         **{"layout-text-type": ["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"]},
         full=["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"],
         **{"full-opus": ["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"]},
+        **{"full-every-face": ["page-build", "page-layout-fix-v2", "page-text-fix-v1", "font-match"]},
     )
+    assert [
+        s["params"].get("propose", True) for s in spec.candidate("full-every-face").stages if s["role"] == "font-match"
+    ] == [False]
     fonts = [s for c in spec.candidates for s in c.stages if s["role"] == "font-match"]
     assert all(s["answer"] == "json" and s["into"] == "font_fit" and s["also"] == ["image"] for s in fonts)
     assert {c.name for c in spec.candidates if not c.judge} == {"layout", "layout-text"} and spec.pairs == "all"

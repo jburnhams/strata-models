@@ -206,3 +206,47 @@ send = "ocr"
 also = ["image"]
 answer = "json"
 into = "font_fit"
+
+# ---- the full recipe with every face tried instead of Sonnet's shortlist ----------------------------------------------------------------
+# font-match's formal run (2026-11-23): exhaustive fits the ink best (ink_f1 0.889 against Sonnet's 0.869) but names the right class of type
+# on only 51 % of real blocks (Sonnet 75 %), at three times the time. Ink rewards fitting as such; the judge says which page looks right.
+[[candidates]]
+name = "full-every-face"
+model = "pagebuild"
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+
+[[candidates.stages]]
+role = "page-build"
+model = "pagebuild"
+params = { list_lines = true }
+input = "{ocr}"
+send = "ocr"
+into = "context"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-sonnet-5-5-api"
+params = { preset = "page-layout-fix-v2", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "groups"
+
+[[candidates.stages]]
+role = "vision-language"
+model = "claude-haiku-5-5-api"
+params = { preset = "page-text-fix-v1", max_tokens = 8192 }
+input = "{context}"
+send = "context"
+also = ["image"]
+into = "texts"
+
+[[candidates.stages]]
+role = "font-match"
+model = "fontfit"
+params = { mode = "fit", propose = false }
+input = "{ocr}"
+send = "ocr"
+also = ["image"]
+answer = "json"
+into = "font_fit"
