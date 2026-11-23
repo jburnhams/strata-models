@@ -41,6 +41,12 @@ class Job(Base):
     submitted_at: Mapped[float]
     role: Mapped[str | None] = mapped_column(sa.String(64), default=None, index=True)
     model: Mapped[str | None] = mapped_column(sa.String(128), default=None)
+    options: Mapped[dict | None] = mapped_column(
+        sa.JSON, default=None
+    )  # a run: the model's load options it ran with (models.toml's, merged with the job's own), recorded when it starts
+    settings_hash: Mapped[str | None] = mapped_column(
+        sa.String(16), default=None
+    )  # a run: registry.settings_hash of the model as it ran (runtime, file, options); apps key their caches on it
     note: Mapped[str | None] = mapped_column(
         sa.String(300), default=None
     )  # a lease's reason ("arena build"), shown in the queue

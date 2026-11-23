@@ -14,7 +14,7 @@ name; strata-python is public, so it has no built-in name). Without them the ser
 | Registry | `models`, `roles`, `model_roles` | `registry.seed` from `models.toml` at start; edits from `PUT /api/roles/{key}`, `PUT /api/models/{key}`, `strata-models role` |
 | Config | `settings` | `settings.bind` at start (copies `~/.strata-models/settings.json` into an empty table); `PUT /api/settings`, `strata-models set` |
 | Preferences | `preferences` | an app's own model and default params for a role: `PUT/DELETE /api/preferences/{app}/{role}`, `strata-models prefer` |
-| Requests | `jobs`, `results`, `files` | the scheduler: every run and lease, each run's output (dropped after a week), the paths a job read or wrote (never the bytes) |
+| Requests | `jobs`, `results`, `files` | the scheduler: every run and lease (a run with the load options and `settings_hash` it started with), each run's output (dropped after a week), the paths a job read or wrote (never the bytes) |
 | Evals | `eval_datasets`, `eval_items`, `eval_experiments`, `eval_candidates`, `eval_results`, `eval_judgments` (people's, and model judges' with `judge` set), `eval_summaries` | spec TOMLs and dataset JSONLs imported when new or changed; `PUT /api/evals/{name}/spec`; runs and the Judge tab; `eval_summaries` worked out in the background after runs, judgments, spec edits and at start |
 
 **Files are seeds.** `models.toml`, `evals/specs/*.toml` and the dataset `.jsonl` files are imported when they are new or changed. A row edited

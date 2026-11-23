@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Jobs record the model settings they ran with; the client returns them (issue #103, branch `claude/project-thread-3e79cp`)**
+strata-reels keeps the model, version and config on every inferred item and keys its cache on them. The job row had only the model key, which stays the same when `models.toml` changes its options (`ffmpeg-scene-score`'s `threshold`), and `run()` dropped which model served the job.
+- `jobs.options` and `jobs.settings_hash` (**migration** `d32954a09201`): set when a run starts (`Scheduler.dispatch`), from the model as it runs: its load options (`models.toml`'s merged with the job's own variant `options`) and `registry.settings_hash` (12 hex digits of sha256 over runtime, model file and options). Recorded at start, not submit, so an edit while the job waits counts. Leases and older rows keep null. The job row in the API carries both.
+- `GET /api/registry`: every model and role has `settings_hash` (a role: its model's).
+- `client/strata_models_client`: `run_with_provenance(...)` returns `(result, {model, options, settings_hash, job_id})`; `provenance(job_row)` reads the same from a row; `role_settings(role)` returns `{model, settings_hash}`. New names, so `run` and `role_model` callers are untouched. strata-python's `clients.models` has the same calls, typed (strata-python PR #49).
+- Tests: `test_scheduler.py` (recorded at start, changes with options under the same key, variants, leases), `test_registry.py` (what the hash covers), `test_service.py` (the client against the real service, on the shot-boundaries role).
+
 **Shot-boundaries role: ffmpeg scene-score baseline, cut metrics and the `shots-spliced` eval (branch `claude/project-thread-1p0er6`)**
 strata-reels, the new video editor, needs its tapes split into shots, and its model work belongs here. This serves the plain baseline on the CPU and sets up the eval that learned detectors will be measured by; no new dependencies.
 - `runtimes/scenes.py`: **new** runtime `ffmpeg-scenes`: per-frame scene scores from ffmpeg (yadif, 160 px), cuts at a threshold with a minimum shot length, black stretches, an optional clip and every frame's score on request. Answer times are the file's seconds.
