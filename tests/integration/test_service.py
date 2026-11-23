@@ -33,6 +33,7 @@ def test_run_submit_wait_and_failures(service):
     with pytest.raises(sm.JobFailed, match="does not serve"):
         sm.speak("hello", app="it", model="buffalo_l", voice=__file__)
     assert sm.role_model("echo") == "echo-small" and sm.role_model("nope") is None
+    assert sm.role_model("nope", with_settings=True) is None
     hist = get(service, "/api/jobs?app=it")["items"]
     assert [x["status"] for x in hist[:2]] == ["failed", "done"]
     assert get(service, "/api/status")["resident"][0]["model"] == "echo-small"
@@ -150,3 +151,8 @@ def test_shots_finds_the_cuts_through_the_service(service, tmp_path):
     r = sm.shots(str(video), app="it")
     assert [c["time"] for c in r["cuts"]] == [2.0] and len(r["shots"]) == 2 and r["model"] == "ffmpeg-scene-score"
     assert sm.role_model("shot-boundaries") == "ffmpeg-scene-score"
+    out = sm.run("shot-boundaries", dict(path=str(video)), app="it", with_provenance=True)
+    p, now = out["provenance"], sm.role_model("shot-boundaries", with_settings=True)
+    assert out["result"]["cuts"] == r["cuts"] and p["model"] == now["model"] == "ffmpeg-scene-score"
+    assert p["options"]["threshold"] == 0.3 and p["settings_hash"] == now["settings_hash"] and p["job_id"] > 0
+    assert sm.provenance(get(service, f"/api/jobs/{p['job_id']}")) == p

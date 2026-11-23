@@ -37,6 +37,12 @@ class Model:
     def served(self):
         return self.runtime in runtimes.RUNTIMES
 
+    @property
+    def settings_hash(self):
+        """A short hash of what decides this model's output besides the job's params: its runtime, file and load options. A job keeps it
+        (`jobs.settings_hash`) and the registry shows it per role, so an app's cache made under other settings of the same key is made again."""
+        return settings_hash(self.runtime, self.name, self.options)
+
     def to_json(self):
         return dict(
             key=self.key,
@@ -48,6 +54,7 @@ class Model:
             source=self.source,
             used_by=list(self.used_by),
             options=self.options,
+            settings_hash=self.settings_hash,
             served=self.served,
         )
 
@@ -60,6 +67,13 @@ class Role:
 
     def to_json(self):
         return dict(key=self.key, description=self.description, model=self.model)
+
+
+def settings_hash(runtime, name, options):
+    """12 hex digits of sha256 over the runtime, the model file and the load options (key order does not count)."""
+    return hashlib.sha256(
+        json.dumps(dict(runtime=runtime, name=name, options=options or {}), sort_keys=True, default=str).encode()
+    ).hexdigest()[:12]
 
 
 def _merge(base, extra):
@@ -179,7 +193,10 @@ class Registry:
 
     def to_json(self):
         return dict(
-            roles=[r.to_json() for r in self.roles.values()],
+            roles=[
+                dict(r.to_json(), settings_hash=m.settings_hash if (m := self.models.get(r.model)) else None)
+                for r in self.roles.values()
+            ],
             models=[m.to_json() for m in self.models.values()],
             preferences=[p.to_json() for p in self.preferences.values()],
         )

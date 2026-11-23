@@ -717,7 +717,10 @@ class Scheduler:
                 )
             elif lane == "gpu" and model is not None:
                 self._make_room(self._need_mb(model), keep=model.key)
-            claimed = self.store.claim(j["id"], status="running", started_at=self.clock())
+            provenance = (
+                dict(options=dict(model.options), settings_hash=model.settings_hash) if model is not None else {}
+            )  # what it ran with, kept on the row: the key alone stays the same when models.toml's options change
+            claimed = self.store.claim(j["id"], status="running", started_at=self.clock(), **provenance)
             if claimed is None:
                 continue  # withdrawn after the queue was read
             if model is None or not model.served:

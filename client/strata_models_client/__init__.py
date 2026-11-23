@@ -95,9 +95,22 @@ def wait(job_id, timeout=None):
             raise TimeoutError(f"job {job_id} is still {j['status']}")
 
 
-def run(role, params, app, priority="normal", model=None, timeout=None):
-    """Run a model job and return its result (queued behind the GPU's other work; priority `high` goes ahead of `normal` (the default), which goes ahead of `low`)."""
-    return wait(submit(role, params, app, priority, model)["id"], timeout)
+def run(role, params, app, priority="normal", model=None, timeout=None, with_provenance=False):
+    """Run a model job and return its result (queued behind the GPU's other work; priority `high` goes ahead of `normal` (the default), which goes ahead of `low`).
+    `with_provenance`: {result, provenance: {model, options, settings_hash, job_id}} instead, what the result was made with (see `provenance`)."""
+    job_id = submit(role, params, app, priority, model)["id"]
+    result = wait(job_id, timeout)
+    if not with_provenance:
+        return result
+    return dict(result=result, provenance=provenance(_call("GET", f"/api/jobs/{int(job_id)}")))
+
+
+def provenance(job):
+    """What a finished run job's output was made with, from its row: {model, options, settings_hash, job_id}. `settings_hash` changes when the
+    model's runtime, file or load options do, even when its key stays the same (None on rows from before the service recorded it)."""
+    return dict(
+        model=job.get("model"), options=job.get("options"), settings_hash=job.get("settings_hash"), job_id=job["id"]
+    )
 
 
 def faces(path, app, priority="normal", model=None, **params):
@@ -156,10 +169,14 @@ def summarise(
     return run("summarise", dict(params, context=context), app, priority=priority, model=model, timeout=timeout)
 
 
-def role_model(role):
+def role_model(role, with_settings=False):
     """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
-    by an earlier model is made again when an eval changes the role's model."""
-    return next((r["model"] for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
+    by an earlier model is made again when an eval changes the role's model. `with_settings`: {model, settings_hash} instead, so a cache keyed
+    on both is also made again when the model's options change under the same key."""
+    r = next((r for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
+    if r is None or not with_settings:
+        return r and r["model"]
+    return dict(model=r["model"], settings_hash=r.get("settings_hash"))
 
 
 def speak(text, app, priority="normal", model=None, **params):

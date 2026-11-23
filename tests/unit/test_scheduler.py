@@ -773,3 +773,29 @@ def test_cost_per_task_from_the_ledger(scheduler, monkeypatch):
     assert abs(got[("echo", "small")]["usd"] - 0.4) < 1e-9 and got[("echo", "small")]["tokens_in"] == 15.0
     spend.bind(None)
     assert spend.per_task() == {}
+
+
+def test_a_job_records_the_settings_it_ran_with_and_they_change_with_the_options(scheduler):
+    import dataclasses
+
+    reg = scheduler.registry
+    scheduler.submit("echo", {}, "a")
+    j = scheduler.step()
+    m = reg.models["small"]
+    assert j["options"] == m.options and j["settings_hash"] == m.settings_hash and len(j["settings_hash"]) == 12
+    assert (
+        scheduler.store.get(j["id"])["settings_hash"] == m.settings_hash
+    )  # kept on the row, not only in what step returned
+    reg.models["small"] = dataclasses.replace(m, options=dict(m.options, threshold=0.4))  # models.toml edited, same key
+    scheduler.submit("echo", {}, "a")
+    k = scheduler.step()
+    assert k["model"] == j["model"] and k["options"]["threshold"] == 0.4 and k["settings_hash"] != j["settings_hash"]
+    v = scheduler.submit("echo", {}, "evals", model="small", options=dict(tweak=2))
+    assert v["settings_hash"] is None  # recorded when it starts, so an edit while it waits counts
+    v = scheduler.step()
+    assert (
+        v["options"] == dict(m.options, threshold=0.4, tweak=2)
+        and v["settings_hash"] == reg.models[v["model"]].settings_hash
+    )
+    lease = scheduler.lease("x", vram_gb=1)
+    assert scheduler.step()["id"] == lease["id"] and scheduler.store.get(lease["id"])["settings_hash"] is None
