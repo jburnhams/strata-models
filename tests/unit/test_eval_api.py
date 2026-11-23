@@ -82,7 +82,9 @@ def test_media_only_for_files_a_dataset_names(client, tmp_path, setup):
         [
             dict(id="a", input=dict(path=str(wav), say="hello there"), reference=dict(text="hello there")),
             dict(id="b", input=dict(say="x"), reference=dict(text="x")),
-            dict(id="c", input=dict(image=str(scan)), reference=dict(text="x")),  # no recording: the picture candidates work from
+            dict(
+                id="c", input=dict(image=str(scan)), reference=dict(text="x")
+            ),  # no recording: the picture candidates work from
         ],
     )
     assert client.get("/api/evals/fake-asr/media/c").content == b"scan"
