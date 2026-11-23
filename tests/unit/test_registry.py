@@ -230,3 +230,23 @@ def test_cleanup_models_run_on_a_gpu_accounted_model():
     for c in spec["candidates"]:
         if (c.get("params") or {}).get("cleanup", {}).get("model"):
             assert c["model"] == "video-lanczos-cleanup", c["name"]
+
+
+def test_the_settings_hash_follows_runtime_file_and_options_not_their_order():
+    import dataclasses
+
+    from stratamodels.registry import settings_hash
+
+    r = Registry.load()
+    m = r.models["buffalo_l"]
+    assert m.settings_hash == settings_hash(m.runtime, m.name, dict(reversed(list(m.options.items()))))
+    assert dataclasses.replace(m, options=dict(m.options, det_size=1024)).settings_hash != m.settings_hash
+    assert dataclasses.replace(m, name="other.onnx").settings_hash != m.settings_hash
+    assert (
+        dataclasses.replace(m, vram_gb=9).settings_hash == m.settings_hash
+    )  # a budget figure does not change the output
+    assert settings_hash("x", "y", None) == settings_hash("x", "y", {})
+    roles = {x["key"]: x for x in r.to_json()["roles"]}
+    assert roles["faces"]["settings_hash"] == r.resolve("faces").settings_hash
+    r.roles["faces"] = dataclasses.replace(r.roles["faces"], model="gone")
+    assert {x["key"]: x for x in r.to_json()["roles"]}["faces"]["settings_hash"] is None

@@ -462,6 +462,26 @@ def test_model_judge_beside_a_person(client):
     assert (
         wait_judge(client, name, "fox")["result"]["judged"] == 0
     )  # pairs = judged: nothing new until people judge more
+    d = client.get(f"/api/evals/{name}/judges/fox/disagreements").json()  # the person said tie, the judge "better"
+    assert (
+        d["judge"] == "fox"
+        and len(d["pairs"]) == 1
+        and d["pairs"][0]["person"] == "tie"
+        and not d["pairs"][0]["borderline"]
+    )
+    assert client.get(f"/api/evals/{name}/judges/nope/disagreements").status_code == 404
+    jid = d["pairs"][0]["judgment_id"]
+    assert client.post(f"/api/evals/{name}/judgments/{jid}/borderline", json=dict(borderline=True)).json() == dict(
+        id=jid, borderline=True
+    )
+    assert client.get(f"/api/evals/{name}/judges/fox/disagreements").json()["pairs"][0]["borderline"]
+    assert client.post(f"/api/evals/{name}/judgments/999999/borderline", json=dict(borderline=True)).status_code == 404
+    for _ in range(200):
+        a = client.get(f"/api/evals/{name}").json()
+        if a["judges"]["fox"]["tally"].get("borderline") == 1:
+            break
+        time.sleep(0.05)
+    assert a["judges"]["fox"]["with_people"] == 0 and "ranking" in a["judges"]["fox"]
 
 
 def test_a_pair_comes_back_in_time_and_the_rest_are_scored_behind_it(client, scheduler, monkeypatch):

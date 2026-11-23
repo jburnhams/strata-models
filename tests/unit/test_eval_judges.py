@@ -282,8 +282,61 @@ def test_agreement_counts_the_latest_human_answer_and_ties():
     ]
     v = [(1, "b", "a", "a", 5.0), (2, "a", "b", "a", 5.0), (3, "a", "b", "a", 5.0), (9, "a", "b", "a", 5.0)]
     ag = J.agreement(p, v)
-    assert ag["n"] == 3 and ag["tally"] == dict(same_winner=1, opposite=1, judge_tie=0, person_tie=1, both_tie=0)
+    assert ag["n"] == 3 and ag["tally"] == dict(
+        same_winner=1, opposite=1, judge_tie=0, person_tie=1, both_tie=0, borderline=0
+    )
     assert ag["agree"]["k"] == 1 and ag["decided"]["n"] == 2 and ag["decided"]["value"] == pytest.approx(0.5)
+
+
+def test_borderline_pairs_are_left_out_of_agreement():
+    p = [(1, "a", "b", "a", 0.0), (2, "a", "b", "b", 0.0), (3, "a", "b", "a", 0.0)]
+    v = [(1, "a", "b", "b", 5.0), (2, "a", "b", "b", 5.0), (3, "a", "b", "a", 5.0)]
+    ag = J.agreement(p, v, frozenset({1}))
+    assert ag["n"] == 2 and ag["agree"]["k"] == 2 and ag["tally"]["borderline"] == 1 and ag["tally"]["opposite"] == 0
+
+
+def test_ranking_compares_the_order_not_each_pair():
+    """A judge that differs on close pairs but orders the field the same way has rho 1; one that reverses it has rho -1."""
+    people, same, reverse = [], [], []
+    names = ["a", "b", "c", "d"]
+    pid = 0
+    for i, m in enumerate(names):
+        for n in names[i + 1 :]:
+            for k in range(4):  # m beats n three times in four (the earlier name is stronger)
+                pid += 1
+                w = m if k else n
+                people.append((pid, m, n, w, 0.0))
+                same.append((pid, m, n, m if k != 1 else n, 1.0))  # disagrees on other close calls, same order overall
+                reverse.append((pid, m, n, n if k else m, 1.0))
+    r = J.ranking(people, same, b=50)
+    assert (
+        r["spearman"] == pytest.approx(1.0)
+        and r["kendall"] == pytest.approx(1.0)
+        and r["mean_shift"] == 0
+        and r["people"] == names == r["judge"]
+    )
+    assert (
+        J.agreement(people, same)["agree"]["value"] < 0.7
+        and r["low"] is not None
+        and r["n"] == 24
+        and r["candidates"] == 4
+    )
+    r = J.ranking(people, reverse, b=20)
+    assert (
+        r["spearman"] == pytest.approx(-1.0)
+        and r["kendall"] == pytest.approx(-1.0)
+        and r["max_shift"] == 3
+        and r["judge"] == names[::-1]
+    )
+    assert J.ranking([], same)["spearman"] is None and J.ranking(people[:1], same[:1], b=5)["candidates"] == 2
+    assert J._ranks(dict(a=2.0, b=1.0, c=1.0)) == dict(a=1, b=2.5, c=2.5)
+    kt = J._kendall(dict(a=1.0, b=1.0, c=3.0), dict(a=1.0, b=2.0, c=3.0), ["a", "b", "c"])
+    assert 0 < kt < 1  # one side's tie: tau-b below 1
+    assert J._spearman(dict(a=1), dict(a=1), ["a"]) != J._spearman(
+        dict(a=1), dict(a=1), ["a"]
+    )  # nan with one candidate
+    nan = J._kendall(dict(a=1.0, b=1.0), dict(a=1.0, b=1.0), ["a", "b"])
+    assert nan != nan  # nothing ordered on either side
 
 
 # ---- running -----------------------------------------------------------------------------------------------------------------------------
@@ -311,6 +364,7 @@ def test_judge_runs_on_pairs_people_judged_and_agreement_is_reported(ran, schedu
         )
     text = R.render(res)
     assert "## Model judges" in text and "| `j` | text | `other` | 9 |" in text and "people same" in text
+    assert "Spearman" in text and s["ranking"]["n"] == 9 and s["ranking"]["candidates"] == 3
     ran.judges = [judge_spec(criteria="other words")]  # a changed judge is a new judge: its old verdicts stop counting
     assert C.analyse(ran, engine)["judges"]["j"]["judged"] == 0
 
@@ -489,3 +543,37 @@ def test_a_vision_judge_sees_videos_as_region_stills_beside_the_tape():
     assert bare[2] == ["/g/x.1s.png", "/g/y.1s.png"] and "Whole frame, moment 1" in bare[1]
     text_judge = J.parse_judge(dict(name="t", kind="text"))
     assert J.prompt(spec, text_judge, item, x, y)[2] == []  # a text judge sees no pictures
+
+
+def test_disagreements_list_both_outputs_and_borderline_marks_leave_them_out(ran, scheduler):
+    engine = scheduler.store.engine
+    person(engine, ran, "better", "base", "better", 4)
+    person(engine, ran, "better", "same", lambda n: "same" if n < 2 else "better", 3)
+    J.run_judge(ran, engine, "j", ask_queue(scheduler), log=lambda m: None)
+    d = J.disagreements(ran, engine, "j")
+    assert (
+        len(d) == 2
+        and {x["person"] for x in d} == {"same"}
+        and all(set(x["outputs"]) == {"better", "same"} and x["outputs"]["better"] for x in d)
+    )
+    assert d[0]["input"] and not d[0]["borderline"] and d[0]["judge"] == "better"
+    s0 = C.analyse(ran, engine)["judges"]["j"]
+    assert s0["agree"]["n"] == 7 and s0["ranking"]["n"] == 7 and s0["ranking"]["candidates"] == 3
+    from stratamodels.evals import summaries as SU
+
+    sig = SU.signature(ran, engine)
+    assert J.mark_borderline(engine, ran.name, d[0]["judgment_id"]) == dict(id=d[0]["judgment_id"], borderline=True)
+    assert SU.signature(ran, engine) != sig  # the kept analysis goes stale on a mark
+    s1 = C.analyse(ran, engine)["judges"]["j"]
+    assert s1["agree"]["n"] == 6 and s1["tally"]["borderline"] == 1 and len(s1["disagreements"]) == 1
+    d2 = J.disagreements(ran, engine, "j")
+    assert len(d2) == 2 and sum(x["borderline"] for x in d2) == 1  # a marked pair stays listed, so it can be unmarked
+    J.mark_borderline(engine, ran.name, d[0]["judgment_id"], on=False)
+    assert C.analyse(ran, engine)["judges"]["j"]["agree"]["n"] == 7
+    with C.session(engine) as ses:
+        jid = ses.query(EvalJudgment).filter(EvalJudgment.judge.isnot(None)).first().id
+    for bad in (jid, 999999):
+        with pytest.raises(KeyError):
+            J.mark_borderline(engine, ran.name, bad)
+    with pytest.raises(KeyError):
+        J.mark_borderline(engine, "other", d[0]["judgment_id"])

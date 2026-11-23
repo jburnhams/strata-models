@@ -100,6 +100,21 @@ def run(role, params, app, priority="normal", model=None, timeout=None):
     return wait(submit(role, params, app, priority, model)["id"], timeout)
 
 
+def run_with_provenance(role, params, app, priority="normal", model=None, timeout=None):
+    """`run`, plus what the result was made with: (result, {model, options, settings_hash, job_id}) (see `provenance`)."""
+    job_id = submit(role, params, app, priority, model)["id"]
+    result = wait(job_id, timeout)
+    return result, provenance(_call("GET", f"/api/jobs/{int(job_id)}"))
+
+
+def provenance(job):
+    """What a run job's output was made with, from its row: {model, options, settings_hash, job_id}. `settings_hash` changes when the model's
+    runtime, file or load options do, even when its key stays the same (None on rows from before the service recorded it)."""
+    return dict(
+        model=job.get("model"), options=job.get("options"), settings_hash=job.get("settings_hash"), job_id=job["id"]
+    )
+
+
 def faces(path, app, priority="normal", model=None, **params):
     """Faces in one image: params max_side, det_thresh, fields. Several images: path=None and `paths=[...]`, giving {'images': [...]}."""
     if path is not None:
@@ -160,6 +175,13 @@ def role_model(role):
     """The model that serves `role` now (from the service's registry), or None for an unknown role. Apps key their caches on it, so output made
     by an earlier model is made again when an eval changes the role's model."""
     return next((r["model"] for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
+
+
+def role_settings(role):
+    """`role_model` with its settings hash: {model, settings_hash}, or None for an unknown role. A cache keyed on both is also made again when the
+    model's options change under the same key."""
+    r = next((r for r in _call("GET", "/api/registry").get("roles", []) if r["key"] == role), None)
+    return None if r is None else dict(model=r["model"], settings_hash=r.get("settings_hash"))
 
 
 def speak(text, app, priority="normal", model=None, **params):

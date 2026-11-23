@@ -73,6 +73,24 @@ def judges_section(judges, base):
             f" {j['with_people']} | {_share(j['agree'])} | {_share(j['decided'])} | {'n/a' if k is None or k != k else f'{k:.2f}'} | {_share(j['consistent'])} |"
         )
     L.append("")
+    ranked = [(n, j["ranking"]) for n, j in judges.items() if (j.get("ranking") or {}).get("spearman") is not None]
+    if ranked:
+        L += [
+            "Ranking: Bradley-Terry strengths of the candidates from the person's answers and from the judge's, on the pairs both judged (a pair"
+            " the person marked borderline counts as a tie for them), compared as orders: Spearman's rho [95 % interval over pairs], Kendall's"
+            " tau-b, and how many places a candidate moves on average and at most. A judge can differ on close calls and still rank alike.",
+            "",
+            "| Judge | Pairs | Candidates | Spearman | Kendall | Places moved (mean, max) | People's order | Judge's order |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for n, r in ranked:
+            ci = f" [{r['low']:.2f}, {r['high']:.2f}]" if r.get("low") is not None else ""
+            kt = r.get("kendall")
+            L.append(
+                f"| `{n}` | {r['n']} | {r['candidates']} | {r['spearman']:.2f}{ci} | {'n/a' if kt is None or kt != kt else f'{kt:.2f}'} |"
+                f" {r['mean_shift']:.1f}, {r['max_shift']:.1f} | {', '.join(r['people'])} | {', '.join(r['judge'])} |"
+            )
+        L.append("")
     scored = [(n, j) for n, j in judges.items() if j.get("metric") and j["metric"].get("n")]
     if scored:
         mn = scored[0][1]["metric"]["name"]
