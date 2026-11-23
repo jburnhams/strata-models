@@ -1103,6 +1103,17 @@ def _result_row(spec, ds, c, it, k, j, staged):
     )
 
 
+def _job_identity(params, sent=False):
+    """What makes two jobs the same for picking up a run's jobs after a restart: their params as the runtime gets them, and whether a model's
+    upsample step ran first. The scheduler drops `upsample` from the params it keeps and marks a job that waits for its step with `__after__`
+    (a different id each time), so a sent job (`sent`: `upsample` as asked, off unless true: evals.explicit) and a kept one are read alike."""
+    from stratamodels.scheduler import AFTER
+
+    p = dict(params)
+    on = bool(p.pop("upsample", False)) if sent else p.pop(AFTER, None) is not None
+    return (_canon(p), on)
+
+
 def done_job(engine, role, model, params, options=None):
     """A finished job of `role` on `model` whose params were exactly these (load options included, as the scheduler keeps them), with its
     result still kept (results go after a week): {id, status: done, result, run_s, load_s}, or None. Lets an eval run pick up the outputs of
@@ -1110,7 +1121,7 @@ def done_job(engine, role, model, params, options=None):
     from stratamodels.db.models import Job, JobResult
     from stratamodels.scheduler import OPTIONS
 
-    want = _canon({**params, **({OPTIONS: dict(options)} if options else {})})
+    want = _job_identity({**params, **({OPTIONS: dict(options)} if options else {})}, sent=True)
     with session(engine) as s:
         rows = s.execute(
             select(Job, JobResult)
@@ -1125,7 +1136,7 @@ def done_job(engine, role, model, params, options=None):
             .limit(500)
         ).all()
         for job, res in rows:
-            if _canon(job.params or {}) == want:
+            if _job_identity(job.params or {}) == want:
                 return dict(id=job.id, status="done", result=res.output, run_s=job.run_s, load_s=job.load_s)
     return None
 
@@ -1137,7 +1148,7 @@ def pending_job(engine, role, model, params, options=None):
     from stratamodels.db.models import Job
     from stratamodels.scheduler import OPTIONS
 
-    want = _canon({**params, **({OPTIONS: dict(options)} if options else {})})
+    want = _job_identity({**params, **({OPTIONS: dict(options)} if options else {})}, sent=True)
     with session(engine) as s:
         for job in s.scalars(
             select(Job)
@@ -1150,7 +1161,7 @@ def pending_job(engine, role, model, params, options=None):
             .order_by(Job.id.asc())
             .limit(500)
         ):
-            if _canon(job.params or {}) == want:
+            if _job_identity(job.params or {}) == want:
                 return job.id
     return None
 

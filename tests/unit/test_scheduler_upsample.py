@@ -111,3 +111,19 @@ def test_evals_turn_a_models_own_step_off_unless_asked():
     assert C.explicit(dict(prompt="x")) == dict(prompt="x", upsample=False) and C.explicit(
         dict(prompt="x", upsample=True)
     ) == dict(prompt="x", upsample=True)
+
+
+def test_recovery_after_a_restart_finds_jobs_with_and_without_the_step(sched):
+    """An eval run picks up its jobs by their params: `upsample` is dropped from the kept params and a job with its step carries `__after__`."""
+    from stratamodels.evals import core as C
+
+    eng = sched.store.engine
+    on = sched.submit("draw", dict(prompt="a cat", upsample=True), "evals")
+    off = sched.submit("draw", C.explicit(dict(prompt="a cat")), "evals")
+    assert C.pending_job(eng, "draw", "pic", dict(prompt="a cat", upsample=True)) == on["id"]
+    assert C.pending_job(eng, "draw", "pic", C.explicit(dict(prompt="a cat"))) == off["id"]
+    assert C.pending_job(eng, "draw", "pic", dict(prompt="a cat")) == off["id"]  # off unless asked
+    run_all(sched)
+    assert C.done_job(eng, "draw", "pic", dict(prompt="a cat", upsample=True))["id"] == on["id"]
+    assert C.done_job(eng, "draw", "pic", dict(prompt="a cat", upsample=False))["id"] == off["id"]
+    assert C.done_job(eng, "draw", "pic", dict(prompt="a dog", upsample=False)) is None
