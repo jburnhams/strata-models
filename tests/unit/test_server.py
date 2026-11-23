@@ -203,6 +203,12 @@ def test_generated_pictures_gallery_files_and_uploads(client, scheduler, tmp_pat
         and client.get("/api/images/file", params=dict(path=os.path.join(gen, "..", "..", "..", "x"))).status_code
         == 404
     )
+    # a page page-build drew (<data>/pages) is shown on an eval's Judge and Outputs tabs
+    pages = os.path.join(os.environ["STRATAMODELS_DATA"], "pages")
+    os.makedirs(pages, exist_ok=True)
+    with open(os.path.join(pages, "abc.png"), "wb") as f:
+        f.write(b"page")
+    assert client.get("/api/images/file", params=dict(path=os.path.join(pages, "abc.png"))).content == b"page"
     up = client.post("/api/images/upload", params=dict(name="ref.jpg"), content=b"jpegdata").json()["path"]
     assert up.endswith(".jpg") and client.get("/api/images/file", params=dict(path=up)).content == b"jpegdata"
     assert (

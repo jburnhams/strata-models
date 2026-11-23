@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Page-build pictures show on the eval tabs (branch `claude/project-thread-dvu0cz`)**
+The page-layout Judge tab said "Picture not found" for every pair: page-build writes its PDFs and rasters to `<data>/pages`, which `/api/images/file` did not serve (it served `generated`, `uploads` and the eval voices only). It now serves `<data>/pages` too; test in `test_server.py`.
+
 **font-match: Claude Sonnet proposes the shortlist (branch `claude/project-thread-01gj43`)**
 Jonathan chose Sonnet from the 2026-11-15 trial (class right on 75 % of real blocks against 22 % for every face, 8 s and about a cent a block).
 - `runtimes/fontfit.py`: the model's `propose` option (a registry model key) is asked for the shortlist (preset `font-propose-v1`, the block cut out when `box` is given) when a job gives no candidates; loaded once in-process, its spend counted by its own runtime. A failed call falls back to screening every face; the answer's `proposer` gives the model, seconds and cost or the error. `propose = false` turns it off.
