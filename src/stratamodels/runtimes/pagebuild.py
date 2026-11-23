@@ -27,6 +27,12 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   crop        cut each figure's picture out of the scan (`image`), its paper whitened, rather than leave its box empty
   rules       find the ruled lines the scan's ink holds (the border round the page, the rule under a running head) and draw each as a
               figure of kind rule cut from the scan: no reader is asked for them (page-layout-fix-v2 leaves the border out)
+  group       with `ocr` and no `groups`, on a model whose options name a layout model (`group`, as `pagebuild-opus-layout` does: the
+              page-build role's default since 2026-11-23): that vision model is shown the picture and Tesseract's numbered lines
+              (preset `group_preset`, default page-layout-fix-v2) and its answer is the `groups`, so an app sending a plain OCR answer
+              gets the page-layout eval's pick, not Tesseract's blocks. `group = false` draws Tesseract's blocks (the eval baselines name
+              model `pagebuild`, which has no layout model). A failed call (budget, network, no blocks) draws Tesseract's blocks and the
+              answer's `grouper` says why
   list_lines  with `ocr`: draw nothing, answer {text: Tesseract's lines numbered for page-layout-fix-v1, one a line: number, Tesseract's
               block, box [x0, y0, x1, y1] in thousandths, text; lines}
   image       the page picture: its size and dpi for `layout`, its dpi for `ocr` (the boxes stay in the ocr answer's pixels; an upscaled read
@@ -37,7 +43,8 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   fit         fit each line's spacing to its box (default true)
   out         the .pdf path to write (default: <data>/pages/<hash of the description>.pdf, so a rebuild is cached by what decides it)
   png         also write the PDF rasterised at the scan's dpi beside it (default true): what the blind judge and the ink metrics look at
-Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds}."""
+Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds,
+grouper ({model, seconds, cost_usd} or {model, seconds, error}; null when no layout model was asked), cost_usd (the layout model's, when it cost any)}."""
 
 import glob
 import hashlib
@@ -57,13 +64,74 @@ from strata_python.pages.render import rasterise, read_text, render
 from stratamodels import settings  # pyright: ignore[reportMissingTypeStubs]  (settings.py is not in the strict list yet)
 from stratamodels.runtimes import RunError  # pyright: ignore[reportMissingTypeStubs]  (the package __init__ is not in the strict list yet)
 
+GROUP_PRESET = "page-layout-fix-v2"  # page-layout's winner (2026-11-15): Opus regrouping Tesseract's lines, block_f1 96.5 % on 20 pages
+
 
 def load(model: Any, models_dir: str) -> dict[str, Any]:
-    return dict(key=model.key, options=dict(model.options))
+    return dict(key=model.key, options=dict(model.options), models_dir=models_dir)
 
 
 def unload(handle: dict[str, Any]) -> None:
+    undo = handle.get("grouper_unload")
+    if callable(undo):
+        undo()
     handle.clear()
+
+
+def _grouper(handle: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
+    """A callable that runs the model's layout model (options `group`, a vision-language model of the registry) on params: loaded once, in
+    this process, as font-match loads its proposer (a cloud model holds no GPU; its spend is counted by its own runtime)."""
+    if "grouper" not in handle:
+        from stratamodels import registry, runtimes  # pyright: ignore[reportMissingTypeStubs]  (not in the strict list yet)
+
+        key = str(handle["options"]["group"])
+        eng = cast(
+            "Any", settings
+        ).engine()  # the service's registry is the database's (models edited in the app); the files only without one
+        reg = cast("Any", registry).Registry.from_db(eng) if eng is not None else cast("Any", registry).Registry.load()
+        m = reg.models.get(key)
+        if m is None:
+            raise RunError(f"the layout model {key!r} is not in the registry")
+        rt = cast("Any", runtimes).get(m.runtime)
+        h = rt.load(m, handle.get("models_dir", ""))
+
+        def call(params: dict[str, Any]) -> Any:
+            return rt.run(h, params)
+
+        handle["grouper"] = call
+        handle["grouper_unload"] = lambda: rt.unload(h)
+    return cast("Callable[[dict[str, Any]], Any]", handle["grouper"])
+
+
+def group_lines(
+    handle: dict[str, Any], ocr: Mapping[str, Any], image: str
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    """The layout model's `groups` for Tesseract's lines (shown numbered, with the picture) and what the call cost; or (None, why) when it
+    fails, and the page is drawn in Tesseract's blocks: a refused or failed call costs the page its layout, never the job."""
+    opts = cast("Mapping[str, Any]", handle.get("options") or {})
+    model, t0 = str(opts.get("group")), time.monotonic()
+    try:
+        r = _grouper(handle)(
+            dict(
+                preset=str(opts.get("group_preset") or GROUP_PRESET),
+                context=list_lines(ocr),
+                image=image,
+                max_tokens=int(opts.get("group_tokens", 8192)),
+            )
+        )
+        r = cast("Mapping[str, Any]", r if isinstance(r, Mapping) else {"text": r})
+        groups = (
+            r.get("json")
+            if isinstance(r.get("json"), Mapping)
+            else _json(str(r.get("text") or ""), "layout model's answer")
+        )
+        if not isinstance(groups, Mapping) or not cast("Mapping[str, Any]", groups).get("blocks"):
+            raise RunError("the layout model gave no blocks")
+        return cast("Mapping[str, Any]", groups), dict(
+            model=model, seconds=round(time.monotonic() - t0, 2), cost_usd=r.get("cost_usd")
+        )
+    except Exception as e:  # budget, network, a bad answer: Tesseract's blocks instead
+        return None, dict(model=model, seconds=round(time.monotonic() - t0, 2), error=f"{type(e).__name__}: {e}"[:500])
 
 
 def _union(boxes: Sequence[Sequence[float]]) -> tuple[float, float, float, float]:
@@ -619,6 +687,24 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
             raise RunError("list_lines needs an ocr answer (ocr)")
         text = list_lines(cast("Mapping[str, Any]", ocr))
         return dict(text=text, lines=text.count("\n") + 1 if text else 0, model=handle.get("key"))
+    grouper: dict[str, Any] | None = None
+    opts = cast("Mapping[str, Any]", handle.get("options") or {})
+    if (
+        opts.get("group")
+        and params.get("group", True) is not False
+        and params.get("ocr")
+        and not any(params.get(k) for k in ("groups", "page", "layout"))
+    ):
+        ocr = _json(params.get("ocr"), "ocr answer")
+        image = params.get("image")
+        if isinstance(ocr, Mapping) and isinstance(image, str) and os.path.isfile(image):
+            groups, grouper = group_lines(handle, cast("Mapping[str, Any]", ocr), image)
+            if groups is not None:
+                params = {**params, "groups": groups}
+        elif isinstance(ocr, Mapping):
+            grouper = dict(
+                model=str(opts["group"]), seconds=0.0, error="the layout model reads the page: give its picture (image)"
+            )
     page = page_of(params)
     fonts: dict[str, str] = {}
     small_caps = [str(s) for s in cast("Sequence[Any]", params.get("small_caps_faces") or [])]
@@ -681,4 +767,6 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         lines=sum(len(b.lines) for b in page.blocks),
         seconds=round(time.monotonic() - t0, 3),
         model=handle.get("key"),
+        grouper=grouper,
+        **({"cost_usd": grouper["cost_usd"]} if grouper and isinstance(grouper.get("cost_usd"), (int, float)) else {}),
     )

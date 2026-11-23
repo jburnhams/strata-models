@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Page layout default: Opus regroups Tesseract's lines when a page is rebuilt (branch `claude/project-thread-dvu0cz`)**
+The page-layout eval's pick (opus-fix-v2, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, $0.033 a page) was never made the default, so an app sending a plain OCR answer still got Tesseract's blocks.
+- `runtimes/pagebuild.py`: a model whose options name a layout model (`group`, with `group_preset` and `group_tokens`) asks it for the `groups` of a plain `ocr` answer (the numbered lines and the picture), then draws as with given groups. `group = false` in a job draws Tesseract's blocks; a failed call (budget, network, no blocks, no picture) does too, and the answer's `grouper` says why. The answer carries the call's `cost_usd`.
+- `models.toml`: model `pagebuild-opus-layout` (`group = "claude-opus-5-5-api"`, preset page-layout-fix-v2) is the `page-build` role's model. `pagebuild` stays, drawing only: every eval candidate names it, so the page-layout and page-rebuild baselines and runs are unchanged.
+- Tests in `test_pagebuild.py`; `docs/evals.md` (Page rebuild).
+
 **Shot-boundaries role: ffmpeg scene-score baseline, cut metrics and the `shots-spliced` eval (branch `claude/project-thread-1p0er6`)**
 strata-reels, the new video editor, needs its tapes split into shots, and its model work belongs here. This serves the plain baseline on the CPU and sets up the eval that learned detectors will be measured by; no new dependencies.
 - `runtimes/scenes.py`: **new** runtime `ffmpeg-scenes`: per-frame scene scores from ffmpeg (yadif, 160 px), cuts at a threshold with a minimum shot length, black stretches, an optional clip and every frame's score on request. Answer times are the file's seconds.

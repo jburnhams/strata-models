@@ -3,6 +3,7 @@ synthetic descriptions, checked by what a reader of the PDF gets back (its text 
 
 import json
 import os
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -550,3 +551,111 @@ def test_the_rebuild_spec_climbs_one_step_a_candidate_and_its_presets_carry_thei
     fonts = [s for c in spec.candidates for s in c.stages if s["role"] == "font-match"]
     assert all(s["answer"] == "json" and s["into"] == "font_fit" and s["also"] == ["image"] for s in fonts)
     assert {c.name for c in spec.candidates if not c.judge} == {"layout", "layout-text"} and spec.pairs == "all"
+
+
+# ---- the role's default: a layout model regroups a plain ocr answer's lines (group) -------------------------------------------------------
+SPLIT_GROUPS = dict(blocks=[dict(lines=[1, 2], role="running-head"), dict(lines=[3, 4], role="body")], figures=[])
+
+
+def grouping(answer, asked):
+    """A handle whose layout model is a stand-in answering `answer` (or raising it), recording what it was asked."""
+    h = pagebuild.load(SimpleNamespace(key="pagebuild-opus-layout", options=dict(group="claude-opus-5-5-api")), "")
+
+    def call(params):
+        asked.append(params)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    h["grouper"] = call
+    return h
+
+
+def scan(tmp_path):
+    pic = str(tmp_path / "p.png")
+    Image.new("L", (1000, 500), 255).save(pic, dpi=(200, 200))
+    return pic
+
+
+def test_a_plain_ocr_answer_is_regrouped_by_the_models_layout_model(tmp_path):
+    asked = []
+    h = grouping(dict(text="```json\n" + json.dumps(SPLIT_GROUPS) + "\n```", cost_usd=0.03), asked)
+    out = pagebuild.run(h, dict(ocr=SPLIT, image=scan(tmp_path), out=str(tmp_path / "g.pdf")))
+    assert [b.get("role", "body") for b in out["page"]["blocks"]] == ["running-head", "body"]
+    assert out["grouper"]["model"] == "claude-opus-5-5-api" and out["cost_usd"] == 0.03
+    (p,) = asked
+    assert (
+        p["preset"] == "page-layout-fix-v2"
+        and p["context"] == pagebuild.list_lines(SPLIT)
+        and p["image"].endswith("p.png")
+    )
+    # a structured answer is read from its json; groups given, group = false, list_lines: no call
+    h = grouping(dict(text="", json=SPLIT_GROUPS), asked)
+    assert pagebuild.run(h, dict(ocr=SPLIT, image=scan(tmp_path), out=str(tmp_path / "j.pdf")))["blocks"] == 2
+    for extra in (dict(groups=SPLIT_GROUPS), dict(group=False), dict(list_lines=True)):
+        out = pagebuild.run(h, dict(ocr=SPLIT, image=scan(tmp_path), out=str(tmp_path / "n.pdf"), **extra))
+        assert out.get("grouper") is None
+    assert len(asked) == 2
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        (RuntimeError("budget refused"), "budget refused"),
+        (dict(text="I cannot read this page."), "not valid JSON|no such"),
+        (dict(text=json.dumps(dict(blocks=[]))), "no blocks"),
+    ],
+)
+def test_a_failed_layout_call_draws_tesseracts_blocks_and_says_why(tmp_path, answer, why):
+    out = pagebuild.run(grouping(answer, []), dict(ocr=SPLIT, image=scan(tmp_path), out=str(tmp_path / "f.pdf")))
+    assert out["blocks"] == 4 and "cost_usd" not in out  # Tesseract's four blocks
+    assert out["grouper"]["model"] == "claude-opus-5-5-api" and re.search(why, out["grouper"]["error"])
+
+
+def test_without_the_picture_the_layout_model_is_not_asked(tmp_path):
+    asked = []
+    out = pagebuild.run(grouping(dict(json=SPLIT_GROUPS), asked), dict(ocr=SPLIT, dpi=200, out=str(tmp_path / "d.pdf")))
+    assert asked == [] and "picture" in out["grouper"]["error"] and out["blocks"] == 4
+
+
+def test_the_layout_model_is_loaded_from_the_registry_once_and_unloaded(monkeypatch):
+    from stratamodels import runtimes
+
+    calls = []
+
+    class RT:
+        @staticmethod
+        def load(m, d):
+            calls.append(("load", m.key))
+            return {"m": m.key}
+
+        @staticmethod
+        def run(h, params):
+            calls.append(("run", h["m"]))
+            return {"json": SPLIT_GROUPS}
+
+        @staticmethod
+        def unload(h):
+            calls.append(("unload", h["m"]))
+
+    monkeypatch.setattr(settings, "engine", lambda: None)
+    monkeypatch.setattr(runtimes, "get", lambda name: RT)
+    h = pagebuild.load(SimpleNamespace(key="pagebuild-opus-layout", options=dict(group="claude-opus-5-5-api")), "")
+    f = pagebuild._grouper(h)
+    assert f({}) == {"json": SPLIT_GROUPS} and pagebuild._grouper(h) is f
+    pagebuild.unload(h)
+    assert calls == [("load", "claude-opus-5-5-api"), ("run", "claude-opus-5-5-api"), ("unload", "claude-opus-5-5-api")]
+    groups, why = pagebuild.group_lines(dict(options=dict(group="no-such-model")), SPLIT, "p.png")
+    assert groups is None and "not in the registry" in why["error"]
+
+
+def test_the_page_build_role_defaults_to_opus_regrouping_and_the_evals_draw_only():
+    from stratamodels import registry
+
+    reg = registry.Registry.load()
+    m = reg.resolve("page-build")
+    assert m.key == "pagebuild-opus-layout" and m.options["group"] == "claude-opus-5-5-api"
+    assert "vision-language" in reg.models["claude-opus-5-5-api"].roles
+    assert (
+        reg.models["pagebuild"].options.get("group") is None
+    )  # what the eval candidates name: their baselines stay Tesseract's blocks
