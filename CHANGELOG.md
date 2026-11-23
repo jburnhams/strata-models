@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-23
 
+**Evals API: an experiment that cannot be read is a 400 everywhere (branch `claude/project-thread-01gj43`)**
+The font-match page on omarchy broke because its dataset was never built into the service's data folder (the trial ran in a scratch clone): `/api/evals/font-match` said so (400), but `/report`, `/outputs` and `/pair` raised the same `EvalError` as a bare 500. `evals/api.py` now turns any `EvalError` into a 400 with the reason.
+
 **Page-build pictures show on the eval tabs (branch `claude/project-thread-dvu0cz`)**
 The page-layout Judge tab said "Picture not found" for every pair: page-build writes its PDFs and rasters to `<data>/pages`, which `/api/images/file` did not serve (it served `generated`, `uploads` and the eval voices only). It now serves `<data>/pages` too; test in `test_server.py`.
 

@@ -107,6 +107,9 @@ def test_broken_specs_and_datasets_are_reported(client, setup):
         and client.get("/api/evals/bad").status_code == 400
     )
     assert client.get("/api/evals/nodata").status_code == 400
+    for path in ("report", "outputs"):  # a missing dataset is the request's fault on every page, never a 500
+        r = client.get(f"/api/evals/nodata/{path}")
+        assert r.status_code == 400 and "no dataset" in r.json()["detail"]
     one = os.path.join(folder, "one.toml")
     open(one, "w").write(
         'name = "one"\nquestion = "q"\nrole = "echo"\ndataset = "speech"\nmetrics = ["wer"]\n[[candidates]]\nname = "a"\nmodel = "small"\n'
