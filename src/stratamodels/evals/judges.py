@@ -429,9 +429,7 @@ def todo(spec, engine, j, only=None):
     else:
         from stratamodels.evals import similarity as SIM
 
-        names = [
-            c.name for c in spec.candidates if c.judge
-        ]  # a candidate culled from judging (`judge = false`) is in no new pair
+        names = [c.name for c in spec.candidates]
         for i in range(len(ds.items)):
             here = [n for n in names if ok(i, n)]
             for k, a in enumerate(here):
@@ -443,11 +441,16 @@ def todo(spec, engine, j, only=None):
                     oa, ob = C.without_pipeline(outs[a][i][0]), C.without_pipeline(outs[b][i][0])
                     if SIM.similarity(oa, ob, spec.similarity or None) < 0.9999:  # identical answers teach nothing
                         cands.append((i, a, b))
+    judging = {
+        c.name for c in spec.candidates if c.judge
+    }  # a candidate culled from judging (`judge = false`) is in no pair, in every mode
     out = []
     for i, a, b in cands:
         iid = ds.items[i]["id"]
         if (
-            a in outs
+            a in judging
+            and b in judging
+            and a in outs
             and b in outs
             and ok(i, a)
             and ok(i, b)
