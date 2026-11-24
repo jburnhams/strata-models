@@ -395,3 +395,34 @@ def test_the_proposer_comes_from_the_database_registry_when_the_service_has_one(
     monkeypatch.setattr(registry.Registry, "from_db", classmethod(lambda cls, e: seen.append(e) or Reg))
     monkeypatch.setattr(runtimes, "get", lambda name: RT)
     assert F._proposer(dict(propose="db-only-vl", models_dir=models))({}) == {"text": "tinos"} and seen == ["ENGINE"]
+
+
+def test_rendered_words_are_kept_by_their_bytes_not_their_number(ttf, monkeypatch):
+    """A word of display type is megabytes: a cache of so many words, whatever their size, grew until the service was killed."""
+    cache = F.ByteCache(3_000_000)
+    monkeypatch.setattr(F, "_WORDS", cache)
+    for size in range(60, 200):
+        F.render_word(ttf, "WOODEN", float(size), 1.0, 0.0, 0.5)
+        assert cache.used <= cache.limit
+    assert cache.used == sum(v[0].nbytes for v in cache._d.values())
+    last = (ttf, "WOODEN", 199.0, 1.0, 0.0, 0.5, False)
+    assert cache.get(last) is not None  # the latest is kept, the first is gone
+    assert cache.get((ttf, "WOODEN", 60.0, 1.0, 0.0, 0.5, False)) is None
+    assert F.render_word(*last) is F.render_word(*last)
+    huge = F.ByteCache(10)
+    huge.put("k", F.render_word(*last))
+    assert huge.used == 0
+    assert huge.get("k") is None
+
+
+def test_the_least_recently_used_word_goes_first():
+    a = (np.zeros(100, bool), 0, 0)
+    c = F.ByteCache(250)
+    c.put("a", a)
+    c.put("b", a)
+    c.put("b", a)  # again: counted once
+    assert c.used == 200
+    assert c.get("a") is a  # now newer than b
+    c.put("c", a)
+    assert c.get("b") is None
+    assert c.get("a") is a

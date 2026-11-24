@@ -43,12 +43,14 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Any
 
@@ -231,8 +233,52 @@ def x_ratio(path):
     return xh, ch, max(0.0, pb[3]) / 200.0
 
 
-@lru_cache(maxsize=65536)
+CACHE_BYTES = 512 * 2**20  # rendered words kept between fits, by size: see ByteCache
+
+
+class ByteCache:
+    """A least-recently-used cache of arrays bounded by their bytes, not their number. A word of display type is megabytes of mask (400 px:
+    2.9 MB), so an lru_cache of 65536 words grew past 100 GB on a title page and systemd-oomd killed the whole service (2026-11-24). An array
+    bigger than the bound is never kept. Safe from several threads: a job's renders may be."""
+
+    def __init__(self, limit):
+        self.limit, self.used, self._d, self._lock = limit, 0, OrderedDict(), threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            v = self._d.get(key)
+            if v is not None:
+                self._d.move_to_end(key)
+            return v
+
+    def put(self, key, value):
+        n = value[0].nbytes
+        if n > self.limit:
+            return
+        with self._lock:
+            if key in self._d:
+                return
+            self._d[key] = value
+            self.used += n
+            while self.used > self.limit:
+                _, old = self._d.popitem(last=False)
+                self.used -= old[0].nbytes
+
+
+_WORDS = ByteCache(CACHE_BYTES)
+
+
 def render_word(path, text, size, hscale, tracking, threshold, synth_sc=False):
+    """`_render_word`, kept by what decides it (a fit asks for the same word at the same size again and again)."""
+    key = (path, text, size, hscale, tracking, threshold, synth_sc)
+    v = _WORDS.get(key)
+    if v is None:
+        v = _render_word(*key)
+        _WORDS.put(key, v)
+    return v
+
+
+def _render_word(path, text, size, hscale, tracking, threshold, synth_sc=False):
     """(ink mask, ink left x, baseline row) of a word set in one font: kerned (Raqm or basic layout), `tracking` ems added after each glyph,
     stretched by `hscale`, and black where the anti-aliased coverage passes `threshold` (lower = heavier). synth_sc: lowercase letters drawn as
     capitals at x-height (small capitals for a face without them)."""
@@ -274,7 +320,7 @@ def render_word(path, text, size, hscale, tracking, threshold, synth_sc=False):
     a = np.asarray(im) >= int(255 * threshold)
     cols = np.flatnonzero(a.any(0))
     if not len(cols):
-        return a[:, :1], 0, base
+        return a[:, :1].copy(), 0, base  # a copy, or the one column would keep the whole picture in memory
     left = int(cols[0])
     return a, left, base
 

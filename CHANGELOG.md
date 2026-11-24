@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**font-match: rendered words kept by their bytes, not their number**
+A strata-scan rebuild of a title page grew the service to 33 GB of RAM and 69 GB of swap, and systemd-oomd killed it at 07:37. `render_word` kept the last 65536 words whatever their size, across jobs, and a word of display type is megabytes of mask (measured: 2.9 MB at 400 px).
+- `runtimes/fontfit.py`: `ByteCache`, least recently used, bounded at 512 MB (`CACHE_BYTES`), replaces the `lru_cache`. An array bigger than the bound is not kept. A word with no ink no longer keeps its whole picture alive through a one-column view.
+- `tests/unit/test_fontfit.py`: the bound holds over growing words; eviction order.
+
 **Eval speak-consonants: the default cut is the baseline**
 The first live run (2026-11-24, 150 jobs, none failed) scored sound_pure 100 % for kokoro-alice-cut, 96 % for emma-cut and emma-cut-short, 88 % for emma-cut-i, 76 % for lewis-cut and 0 % for the sound said alone. Blind pairs against that 0 % baseline could not tell the cuts apart, so `kokoro-emma-cut` is now the baseline and the pairs compare the cuts with each other. kokoro-emma-alone stays as a candidate for the metrics, with `judge = false` so it is in no new pair.
 
