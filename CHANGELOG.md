@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**font-match: masks bounded by bytes and no fit on misread streaks; eval candidates can leave item inputs out (branch `claude/project-thread-dvu0cz`)**
+At 07:37 the kernel stopped the whole service: a strata-scan font-match job held 33 GB of RAM and 69 GB of swap. Tesseract had read a 40 x 1,863 px streak as "Seater", the fit sized it at 4,140 px (up to 143 MB a mask), and `render_word`'s cache was bounded by its count (65,536), not by bytes. Separately, ocr-lines' cloud readers failed every page with `unknown params ['ocr']`: the page-layout items carry a Tesseract reading for page-build.
+- `runtimes/fontfit.py`: `render_word` keeps its masks least recently used first within 512 MB (`RENDER_CACHE_BYTES`; a mask over an eighth of that is answered but not kept). `Scan` drops a word of three or more letters whose ink is over 3 times taller than wide, and a line whose x-height is over 8 times the page's median or which is over a quarter of the page high; the answer's new `skipped_lines` names them.
+- `evals/core.py`: a candidate's `without = [...]` leaves those item input fields out of its job (after its stages too), and so out of its result key. `evals/specs/ocr-lines.toml`: the three cloud candidates have `without = ["ocr"]`, so their failed rows are not reused: the next run makes them anew.
+- Tests in `test_fontfit.py` and `test_eval_pipeline.py`.
+
 **ocr: answers keep the layout the reader found, docTR as a detect-then-read reader, and eval ocr-lines (branch `claude/project-thread-dvu0cz`)**
 Jonathan: the `ocr` capability is flawed if it can miss text, and are we losing what the model knows by keeping only text? Tesseract psm 3 never read the last line of the leaf034 advert ("AND GUTTA PERCHA GOODS."); docTR, which finds each word with a detector before reading it, read every line of that page (and BLITZ where Tesseract read BUOITZ). The answer kept lines and words with boxes but dropped the rest: Tesseract's paragraphs and its picture blocks, docTR's blocks.
 - `runtimes/tesseract.py`: lines carry `para`; the answer has `blocks` (every block of Tesseract's layout analysis, kind "text" or "picture" when nothing was read in it) and `unread` (always empty: Tesseract reads every word it finds).

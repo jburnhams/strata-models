@@ -395,3 +395,46 @@ def test_the_proposer_comes_from_the_database_registry_when_the_service_has_one(
     monkeypatch.setattr(registry.Registry, "from_db", classmethod(lambda cls, e: seen.append(e) or Reg))
     monkeypatch.setattr(runtimes, "get", lambda name: RT)
     assert F._proposer(dict(propose="db-only-vl", models_dir=models))({}) == {"text": "tinos"} and seen == ["ENGINE"]
+
+
+def test_a_streak_read_as_a_word_and_a_giant_line_are_not_fitted(tmp_path, ttf, models):
+    """2026-11-24: Tesseract read a 1,863 px streak as "Seater"; fitted, its masks took one font-match job to 33 GB."""
+    p, lines = block(tmp_path, ttf)
+    ink = np.asarray(Image.open(p)) < 128
+    ink = np.pad(ink, ((0, 3000), (0, 0)))  # a tall page below the block, for the streak and the giant
+    ink[200:2063, 600:640] = True  # the streak: 40 x 1863
+    ink[2200:2900, 20:600] = True  # a slab 700 px high: its x-height is far over BIG times the type's
+    streak = dict(
+        text="Seater",
+        box=[600, 200, 40, 1863],
+        conf=80.0,
+        words=[dict(text="Seater", box=[600, 200, 40, 1863], conf=80.0)],
+    )
+    giant = dict(
+        text="Punch",
+        box=[20, 2200, 580, 700],
+        conf=80.0,
+        words=[dict(text="Punch", box=[20, 2200, 580, 700], conf=80.0)],
+    )
+    scan = F.Scan(ink, [*lines, streak, giant], 300.0)
+    assert [ln["text"] for ln in scan.lines] == ["Punch and Judy", "with the Baby"]
+    assert scan.skipped == ["Punch"]  # the streak's only word was dropped, so its line never formed
+    with pytest.raises(RunError, match="no words"):
+        F.Scan(ink, [streak], 300.0)
+
+
+def test_rendered_words_are_kept_within_a_byte_budget(ttf, monkeypatch):
+    monkeypatch.setattr(F, "_renders", type(F._renders)())
+    monkeypatch.setattr(F, "_render_bytes", [0])
+    first = F.render_word(ttf, "Punch", 40.0, 1.0, 0.0, 0.5)
+    monkeypatch.setattr(F, "RENDER_CACHE_BYTES", first[0].nbytes * 200)
+    assert F.render_word(ttf, "Punch", 40.0, 1.0, 0.0, 0.5) is first  # a hit
+    for size in range(41, 120):
+        F.render_word(ttf, "Punch", float(size), 1.0, 0.0, 0.5)
+    assert (
+        F._render_bytes[0] <= F.RENDER_CACHE_BYTES
+        and sum(v[0].nbytes for v in F._renders.values()) == F._render_bytes[0]
+    )
+    assert (ttf, "Punch", 40.0, 1.0, 0.0, 0.5, False) not in F._renders  # the oldest went first
+    big = F.render_word(ttf, "Punch", 800.0, 1.0, 0.0, 0.5)  # over an eighth of the budget: answered, not kept
+    assert big[0].nbytes > F.RENDER_CACHE_BYTES // 8 and (ttf, "Punch", 800.0, 1.0, 0.0, 0.5, False) not in F._renders

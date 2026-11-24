@@ -49,6 +49,7 @@ note = "the same, with docTR's layout regions in the answer (scored by page-layo
 
 [[candidates]]
 name = "doctr-haiku-fix-v2"
+without = ["ocr"]                # the item's Tesseract reading is for page-build: a cloud reader refuses it
 model = "claude-haiku-5-5-api"
 params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
 note = "Haiku corrects docTR's text against the page: its text only, so no print_read"
@@ -62,11 +63,13 @@ into = "prompt"
 
 [[candidates]]
 name = "haiku-read-v2"
+without = ["ocr"]                # the item's Tesseract reading is for page-build: a cloud reader refuses it
 model = "claude-haiku-5-5-api"
 params = { system_preset = "ocr-read-v2", prompt = "Transcribe this page.", max_tokens = 4096 }
 note = "a vision model reading the whole page: text, no boxes"
 
 [[candidates]]
 name = "sonnet-read"
+without = ["ocr"]                # the item's Tesseract reading is for page-build: a cloud reader refuses it
 model = "claude-sonnet-5-5-api"
 params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }

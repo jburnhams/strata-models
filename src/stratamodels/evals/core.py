@@ -37,6 +37,9 @@ A dataset is JSON lines in `<data>/evals/datasets/<name>.jsonl`, one item per li
 {what the metrics read}, "tags": {...}}. Its version is the hash of the file, written in every report. Datasets stay out of git: they name
 private files.
 
+Inputs: a candidate's job gets every field of the item's input; `without = ["ocr"]` leaves the named ones out (a page-layout item carries a
+Tesseract reading for page-build, which a cloud reader refuses as an unknown param). It is part of the job, so of the result key.
+
 Samples: a candidate with `items = N` runs on the dataset's first N items only (`items = "<dataset>"`: on the items of that other dataset;
 `items = ["id", ...]`: on the items named),
 for a model whose every call is dear (a cloud model on a plan's small allowance). The analysis pairs each candidate with the baseline on the
@@ -275,6 +278,9 @@ class Candidate:
     sources: list = dataclasses.field(
         default_factory=list
     )  # `from`: candidates whose outputs this one is made from (their paths are its job's `sources`), see "Made from other candidates"
+    without: list = dataclasses.field(
+        default_factory=list
+    )  # `without = ["ocr"]`: item input fields this candidate's job is not given (a cloud reader refuses a Tesseract reading it has no use for)
     judge: bool = True  # `judge = false`: culled from blind judging (shown in no new pair, people's or a model judge's) once the judgments so
     # far put it clearly behind; its metrics, outputs and the judgments already made still count
 
@@ -286,6 +292,8 @@ class Candidate:
             d.pop("sources")
         if not self.stages:
             d.pop("stages")
+        if not self.without:
+            d.pop("without")
         if self.items is None:
             d.pop("items")
         return d
@@ -405,6 +413,14 @@ def sample(c, items, engine=None):
     return [it for it in items if it["id"] in ids]
 
 
+def _names(v, what):
+    if v is None:
+        return []
+    if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
+        raise ValueError(f"{what} is a list of input field names, not {v!r}")
+    return list(v)
+
+
 def _flag(v, what):
     if not isinstance(v, bool):
         raise ValueError(f"{what} is true or false, not {v!r}")
@@ -424,6 +440,7 @@ def parse_spec(d, source=""):
                 stages=[parse_stage(x) for x in c.get("stages") or []],
                 items=_sample_size(c.get("items")),
                 sources=[str(x) for x in (c.get("from") or [])],
+                without=_names(c.get("without"), f"candidate {c.get('name')}: without"),
                 judge=_flag(c.get("judge", True), f"candidate {c.get('name')}: judge"),
             )
             for c in d["candidates"]
@@ -620,8 +637,11 @@ def expand_params(params: dict) -> dict:
     return {k: expand(v) for k, v in params.items()}
 
 
-def job_params(spec, cand, item):
-    return {**expand_params(cand.params), **item["input"]}
+def job_params(spec, cand, item, inp=None):
+    """The candidate's job: its params and the item's input (or what its stages made of it), less the fields named in `without`."""
+    got = {**expand_params(cand.params), **(item["input"] if inp is None else inp)}
+    drop = getattr(cand, "without", None) or ()  # a stand-in candidate (scripts/evals/record_cloud.py's) has none
+    return {k: v for k, v in got.items() if k not in drop}
 
 
 def result_key(spec, cand, item):
@@ -898,7 +918,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
                         engine,
                         c,
                         it,
-                        {**expand_params(c.params), **staged[k][0]} if k in staged else job_params(spec, c, it),
+                        job_params(spec, c, it, staged[k][0]) if k in staged else job_params(spec, c, it),
                     ),
                     c,
                     it,
