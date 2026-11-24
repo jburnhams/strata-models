@@ -40,6 +40,7 @@ def test_list_run_analyse_and_report(client):
         client.post("/api/evals/fake-asr/run").status_code == 202
         and wait_run(client, "fake-asr")["result"]["ran"] == 90
     )
+    assert client.get("/api/evals").json()["experiments"][0]["outputs"] == 120
     a = client.get("/api/evals/fake-asr").json()
     assert a["decision"]["recommendation"] == "better" and a["dataset"]["compared"] == 40
     r = client.get("/api/evals/fake-asr/report")
