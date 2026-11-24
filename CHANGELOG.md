@@ -4,6 +4,10 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Role `write`: new short texts to a brief, for strata-voice's recording prompts (branch `claude/project-thread-cvjjmf`)**
+strata-voice's step 3 has a cloud model write candidate recording prompts (natural en-GB sentences aimed at sounds, sentence types and styles its recordings still lack), which a local coverage ranker then orders. An app asks for a role, so the choice of writer belongs here rather than in the app.
+- `src/stratamodels/models.toml`: role `write` (Claude Sonnet 5.5 by default, not yet measured against Haiku), and `write` in the roles of the cloud text models (Claude Haiku, Sonnet and Opus, Gemini Flash and Argon, Nemotron) so a job may name one of them instead. No runtime change: `claude-api` already takes `prompt`, `system` and `schema`.
+
 **font-match: masks bounded by bytes and no fit on misread streaks; eval candidates can leave item inputs out (branch `claude/project-thread-dvu0cz`)**
 At 07:37 the kernel stopped the whole service: a strata-scan font-match job held 33 GB of RAM and 69 GB of swap. Tesseract had read a 40 x 1,863 px streak as "Seater", the fit sized it at 4,140 px (up to 143 MB a mask), and `render_word`'s cache was bounded by its count (65,536), not by bytes. Separately, ocr-lines' cloud readers failed every page with `unknown params ['ocr']`: the page-layout items carry a Tesseract reading for page-build.
 - `runtimes/fontfit.py`: `render_word` keeps its masks least recently used first within 512 MB (`RENDER_CACHE_BYTES`; a mask over an eighth of that is answered but not kept). `Scan` drops a word of three or more letters whose ink is over 3 times taller than wide, and a line whose x-height is over 8 times the page's median (not the picture's height: a cropped one-line block is all line); the answer's new `skipped_lines` names them.
