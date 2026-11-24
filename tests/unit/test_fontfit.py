@@ -421,6 +421,12 @@ def test_a_streak_read_as_a_word_and_a_giant_line_are_not_fitted(tmp_path, ttf, 
     assert scan.skipped == ["Punch"]  # the streak's only word was dropped, so its line never formed
     with pytest.raises(RunError, match="no words"):
         F.Scan(ink, [streak], 300.0)
+    one = F.Scan(
+        ink[2150:2950],
+        [dict(giant, box=[20, 50, 580, 700], words=[dict(giant["words"][0], box=[20, 50, 580, 700])])],
+        300.0,
+    )
+    assert [ln["text"] for ln in one.lines] == ["Punch"]  # a cropped block of one big line is all line: kept
 
 
 def test_rendered_words_are_kept_within_a_byte_budget(ttf, monkeypatch):

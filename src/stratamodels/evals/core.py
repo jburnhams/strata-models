@@ -652,6 +652,10 @@ def result_key(spec, cand, item):
     )
     if cand.stages:
         d["stages"] = cand.stages
+        if (
+            cand.without
+        ):  # a field a stage makes is not in the params above, so leaving it out must show in the key some other way
+            d["without"] = sorted(cand.without)
     if cand.sources:  # made from other candidates' outputs: a new output of any of them makes this one anew
         d["from"] = [result_key(spec, spec.candidate(n), item) for n in cand.sources]
     return _h(_canon(d), 32)

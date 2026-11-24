@@ -1,6 +1,7 @@
 """Pipeline candidates (stages before a candidate's own job, stratamodels.evals.core): each stage cached on its own, the trace kept with the end
 result, a failed stage fails the output, judges see only the end result, the Outputs API and the write-up show every step."""
 
+import dataclasses
 import json
 import os
 
@@ -347,6 +348,11 @@ def test_without_leaves_item_fields_out_of_the_candidates_job_and_its_key(pipe, 
     it = C.load_dataset(s.dataset).items[0]
     assert raw.without == ["seed"] and "seed" not in C.job_params(s, raw, it)
     assert C.result_key(s, raw, it) != C.result_key(pipe, pipe.candidates[0], it)
+    staged = s.candidates[1]
+    other = dataclasses.replace(
+        staged, without=["seed", "prompt"]
+    )  # "prompt" is made by its stage: not in the item's input
+    assert C.result_key(s, other, it) != C.result_key(s, staged, it)
     assert "without" not in pipe.candidates[0].to_json() and raw.to_json()["without"] == ["seed"]
     stop = scheduler.start()
     try:

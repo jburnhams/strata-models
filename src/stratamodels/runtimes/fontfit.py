@@ -31,8 +31,7 @@ Answer: {face, class, style, size_pt, ink_f1, precision, recall, path (the rende
 faces: [{face, class, ink_f1}] (ranked), blocks: [{box, face, class, ink_f1, lines: [{text, box, baseline_y, size_px, size_pt, hscale,
 tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta, stroke_em}]}]}],
 proposed, proposer ({model, seconds, cost_usd} or {model, seconds, error}; null when none was asked), skipped_lines (the text of lines left
-unfitted and undrawn as no type: a word of three letters taller than wide, an x-height over BIG times the page's, a line over a quarter of the
-page high), mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
+unfitted and undrawn as no type: a word of three letters taller than wide, or an x-height over BIG times the page's median), mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
 summary; a renderer sets each word with the word's own: `size_pt` (or size_px at the scan's dpi), stretched by `hscale`, `tracking_em` times
 the size added after every glyph, its baseline at `baseline_y` and its left ink edge at `x` (that is the rendering's geometry exactly, so a
 rebuild reproduces what was scored); weight_delta > 0 means the
@@ -386,7 +385,9 @@ class Scan:
         # is at most about 5 times the body's x-height.
         if self.lines:
             med = float(np.median([ln["xh"] for ln in self.lines]))
-            keep = [ln for ln in self.lines if ln["xh"] <= BIG * med and ln["box"][3] <= H / 4]
+            keep = [
+                ln for ln in self.lines if ln["xh"] <= BIG * med
+            ]  # relative only: a cropped block of one line is all line
             self.skipped = [ln["text"] for ln in self.lines if ln not in keep]
             self.lines = keep
         if not self.lines:
