@@ -155,7 +155,9 @@ def ref(tmp_path):
 def test_kokoro_respeaks_at_the_speed_that_lands_on_a_target(kokoro, stretched, tmp_path):
     r = T.run(dict(text="Two hundred kilometres behind me.", wpm=160, out_dir=str(tmp_path)))
     assert len(kokoro.calls) == 2 and kokoro.calls[1]["speed"] != 1.0
-    assert len(stretched) == 1  # the fake says every speed at one length, so the stretch closes the rest (and runs no ffmpeg here)
+    assert (
+        len(stretched) == 1
+    )  # the fake says every speed at one length, so the stretch closes the rest (and runs no ffmpeg here)
     assert r["fit"] in ("ok", "long", "short") and "speed" in r and "target_s" in r
 
 
