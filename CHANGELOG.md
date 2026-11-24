@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**shot-boundaries and scene-describe on a real VHS tape: threshold 0.2, the lost signal, preset v2 (branch `shots-vhs`)**
+strata-reels' pipeline ran on a real 21-minute tape on omarchy; numbers in `docs/progress.md`.
+- `runtimes/scenes.py`: stretches with no picture (`row_variation`, `blank_runs`, `widen_blank`; params `blank`, `blank_min_s`) count as black, and one that flashes is one stretch with no cut inside: the lost signal at a tape's end made 7 false cuts. One ffmpeg run, its frames split into the scored stream and 16x12 grey.
+- `models.toml`: `ffmpeg-scene-score` threshold 0.3 to 0.2 (49 of 50 cuts of the tape against 46, 70 of 84 of the spliced race files against 54, none false). `min_shot_s` stays 0.6: 0.2 finds the fiftieth cut, but one tape is little to split torn restarts on.
+- `scripts/evals/marked_shots.py`, `evals/specs/shots-vhs.toml`, `tests/unit/test_marked_shots_builder.py`: **new**. Eval `shots-vhs`: windows of one real tape whose cuts were marked by eye (private, in the data directory).
+- `runtimes/presets/scene-describe-v2.md`, `.schema.json`: **new**, the role's preset now. v1 talked of tracking lines, so it found them in all 40 scenes; v2 says what each fault means and that the frames are of one scene the camera moves through, and does not count people in photographs. v1 stays for what was asked with it.
+- Tests: `test_scenes_runtime.py` (unit and integration: a flashing, snowy stretch is one black shot), `test_llama.py`, `test_real_runtimes.py` (preset v2).
+
 **ocr-fix: a reader's boxes with a Claude model's text, one `ocr` answer (branch `claude/project-thread-dvu0cz`)**
 ocr-lines on omarchy (20 pages): Sonnet reading found every printed line (0.01 % character errors, $0.015 a page) and Haiku 99.8 % (0.3 %, $0.0008), but neither gives boxes; docTR boxes 99 % of the print with 1.1 % character errors. Jonathan: continue, so both in one answer.
 - `runtimes/ocrfix.py` (**new**, runtime `ocr-fix`, CPU lane): reads the page with its `reader` model (or corrects a given `ocr` answer), shows its fixer (a vision-language model) the page and the numbered lines (preset page-text-fix-v1), and answers the reader's answer with each corrected line's text: words keep their boxes when the count is the same, else share the line's box by length; an emptied line goes to `unread`. A failed fix answers the reader's text (`fixer.error`). `cost_usd` is the fixer's.

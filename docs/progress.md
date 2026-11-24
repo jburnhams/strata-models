@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-11-24: shot-boundaries and scene-describe on a real tape
+strata-reels' whole analysis ran on a real digitised family tape (PAL, 21 min, interlaced, torn restarts, a lost signal at the end). Every frame was scored and every candidate down to a scene score of 0.09 looked at by eye: 50 cuts, two of them where the signal comes and goes, one only six frames after another (under `min_shot_s`, so no setting with 0.6 s finds it).
+
+| Setting | Tape: found of 50 | Tape: false | Spliced race files: found of 84 (files, far, near) | false |
+|---|---|---|---|---|
+| 0.3, as served before | 46 | 7 | 54 (26, 14, 14) | 0 |
+| 0.3, lost signal found | 46 | 0 | 54 (26, 14, 14) | 0 |
+| 0.25 | 47 | 0 | 66 (28, 20, 18) | 0 |
+| **0.2** | 49 | 0 | 70 (28, 21, 21) | 0 |
+| 0.15 | 49 | 8 | 74 (28, 22, 24) | 0 |
+| 0.2, `min_shot_s` 0.2 | 50 | 0 | 70 (28, 21, 21) | 0 |
+
+(Run in process from the branch, not yet through the evals; the spliced files are 28 cuts of each kind.)
+
+- 0.2 serves now. The three cuts 0.3 missed scored 0.21 (a torn first frame), 0.28 and 0.25; the highest frame that is not a cut (fast motion over stripes, 0.19) is close under it, so 0.2 has no room to spare: another tape may want another number.
+- The 7 false cuts at 0.3 are all in the last 7 s: rolling grey bars between black frames where the recording has ended. blackdetect calls none of it black for long. Frames that do not vary along their rows are no picture; shrunk to 16x12 grey the lost signal measured up to 1.1 (standard deviation along a row), the flattest real picture 5.8, and 2 was chosen: at 4, head-torch footage of night races (the spliced files) was taken for lost signal for a second at a time. Generated snow measured 2.8 a frame and 1.3 over the mean of five, hence the mean. A stretch that does not flash adds no cut, so pitch-dark footage is marked black and not cut out.
+- Head-switching noise along the bottom lines, chroma flashes on a restart's first frames and fast pans over stripes made no false cut at 0.2.
+- `scene-describe-v1` called all 40 real scenes "noisy" with "tracking lines", 37 "blurry" and 32 "poor": its own prompt said tapes often are. v2 says what each fault means, what a tape looks like anyway, and that the frames are of one scene the camera moves through. On 11 scenes: v1 listed tracking lines on all 11, v2 on none (the tape has none), and people in photographs no longer count as people.
+
 ## 2026-11-23: shot-boundaries role, for strata-reels
 strata-reels (the video editor that will replace strata-360; family VHS tapes first) splits a tape into shots before anything else, and Jonathan's rule is that all its model work lives here. The role starts with the plain baseline: ffmpeg's `select` scene score, every frame against the one before, after yadif (one frame per frame, so an interlaced tape's two fields do not read as motion) at 160 px across, cut at 0.3, of cuts under 0.6 s apart the strongest; blackdetect's stretches come back beside the cuts. On a generated 7 s video (test pattern, black, fractal, bars) it finds the three cuts to the frame, in 0.16 s. Its eval does not need cuts marked by hand: Jonathan's idea was to splice uncut camera files (the race footage) so every cut is known, and to take cuts from within one file so both sides look alike (`scripts/evals/spliced_shots.py`, eval `shots-spliced`). On two generated camera files the baseline finds every `files` cut to the frame. Learned detectors (TransNetV2, PySceneDetect's adaptive detector) come next as venv workers, so their libraries never join this service's (Jonathan: no domain-specific libraries in strata-models).
 

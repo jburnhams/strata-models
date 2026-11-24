@@ -386,7 +386,7 @@ def test_scene_describe_on_the_gpu(tmp_path):
         Registry.load().resolve("scene-describe"),
         dict(
             images=frames,
-            preset="scene-describe-v1",
+            preset="scene-describe-v2",
             context=dict(seconds=12.0, shots=1, speech="Happy birthday to you"),
             temperature=0.0,
         ),

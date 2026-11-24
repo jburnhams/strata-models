@@ -32,7 +32,7 @@ description = "Classify a photo into flat fields (setting, people, light, sharpn
 model = "qwen3.5-9b-vl"                      # eval photo-fields-v2, 2026-11-14: 84.8 % agreement with the Sonnet tags at 3.7 s (Gemma 4 12B 86.5 %, no clear difference; Qwen shares residency with vision-language)
 
 [roles.scene-describe]
-description = "What happens in one scene of a home video, from its frames and speech, with preset scene-describe-v1: what is seen kept apart from what is guessed (for strata-reels)"
+description = "What happens in one scene of a home video, from its frames and speech, with preset scene-describe-v2: what is seen kept apart from what is guessed (for strata-reels)"
 model = "qwen3.5-9b-vl"                      # first pick (2026-11-24): local, as family tapes stay on this machine; an eval against a cloud reader on scenes a person has judged is to come
 
 [roles.photo-caption]
@@ -455,7 +455,7 @@ vram_gb = 0.0
 licence = "LGPL/GPL (ffmpeg)"
 source = "https://ffmpeg.org/ffmpeg-filters.html#select_002c-aselect"
 used_by = ["strata-reels"]
-options = { threshold = 0.3, min_shot_s = 0.6, width = 160, deinterlace = true }
+options = { threshold = 0.2, min_shot_s = 0.6, width = 160, deinterlace = true }   # 0.2: eval shots-vhs, 2026-11-24 (0.3 missed 3 more of 50 real cuts, 0.15 made 8 false ones)
 
 [models.pagebuild]
 runtime = "page-build"

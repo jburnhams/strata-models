@@ -337,7 +337,7 @@ def test_the_scene_preset_carries_the_scene_and_keeps_guesses_apart(setup):
     body, schema = llama.request(
         dict(
             images=[str(img), str(img)],
-            preset="scene-describe-v1",
+            preset="scene-describe-v2",
             context=dict(seconds=42.5, shots=3, speech="happy birthday"),
         )
     )

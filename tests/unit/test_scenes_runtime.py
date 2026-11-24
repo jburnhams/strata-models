@@ -3,9 +3,22 @@ marks, and refusing bad params. tests/integration/test_scenes_runtime.py runs th
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from stratamodels.runtimes import RunError, scenes
+
+
+def picture(low=0, high=200):
+    """One frame's small greys: a picture that varies along its rows."""
+    return bytes([low, high] * (scenes.BLANK_W * scenes.BLANK_H // 2))
+
+
+def bars(top=40, bottom=200):
+    """One frame with no picture: a rolling bar, each row one grey."""
+    half = scenes.BLANK_W * scenes.BLANK_H // 2
+    return bytes([top] * half + [bottom] * half)
+
 
 LISTING = """frame:0    pts:0       pts_time:0
 lavfi.scene_score=0.000000
@@ -134,14 +147,16 @@ def test_the_filter_and_answer_from_a_listing(monkeypatch, tmp_path):
         seen["cmd"] = cmd
         with open(f"{cwd}/frames.txt", "w", encoding="utf8") as f:
             f.write(LISTING.replace("lavfi.black_end=0.12\n", ""))
+        with open(f"{cwd}/grey.raw", "wb") as f:
+            f.write(picture() * 4)
         return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setattr(scenes.subprocess, "run", fake_run)
     r = scenes.run(dict(HANDLE), {"path": str(video), "clip": [10, 20], "scores": True, "min_shot_s": 0, "width": 201})
-    vf = seen["cmd"][seen["cmd"].index("-vf") + 1]
-    assert vf.startswith("yadif=mode=0,scale=200:-2,blackdetect=") and vf.endswith(
-        "metadata=mode=print:file=frames.txt"
-    )
+    graph = seen["cmd"][seen["cmd"].index("-filter_complex") + 1]
+    assert graph.startswith("[0:v:0]yadif=mode=0,scale=200:-2,split[s][b];[s]blackdetect=")
+    assert "metadata=mode=print:file=frames.txt[scored]" in graph and graph.endswith("format=gray[grey]")
+    assert seen["cmd"].count("passthrough") == 2  # both outputs keep every frame, so they pair up
     assert seen["cmd"][seen["cmd"].index("-ss") + 1] == "10.000000"
     assert r["cuts"] == [{"time": 10.08, "frame": 2, "score": 0.9}, {"time": 10.12, "frame": 3, "score": 0.7}]
     assert r["shots"][0] == {"start": 10.0, "end": 10.08} and r["shots"][-1]["end"] == 10.16
@@ -163,3 +178,80 @@ def test_no_frames_is_a_run_error(monkeypatch, tmp_path):
     monkeypatch.setattr(scenes.subprocess, "run", fake_run)
     with pytest.raises(RunError, match="no video frames"):
         scenes.run(dict(HANDLE), {"path": str(video)})
+
+
+def test_frames_with_no_picture_are_the_ones_flat_along_their_rows():
+    v = scenes.row_variation(picture() * 3 + bars() + bytes(scenes.BLANK_W * scenes.BLANK_H) + b"half a frame")
+    assert len(v) == 5 and min(v[:3]) > 50 and v[3:] == [0, 0]
+    assert len(scenes.row_variation(b"")) == 0
+    # snow varies in every frame, but not in the mean of a few
+    rng = np.random.default_rng(1)
+    snow = np.clip(rng.normal(125, 3, 20 * scenes.BLANK_W * scenes.BLANK_H), 0, 255).astype(np.uint8).tobytes()
+    assert max(scenes.row_variation(snow)) < scenes.BLANK_ROW
+    edge = bytearray(bars())
+    edge[-scenes.BLANK_W :] = bytes([0, 255] * (scenes.BLANK_W // 2))  # head-switching noise in the bottom line
+    assert scenes.row_variation(bytes(edge))[0] == 0
+
+
+def test_blank_runs_are_long_enough_stretches_at_either_end_or_inside():
+    v = [0.0, 0, 0, 9, 0, 9, 9, 0, 0]
+    assert scenes.blank_runs(v, 2) == [(0, 3), (7, 9)]
+    assert scenes.blank_runs(v, 1) == [(0, 3), (4, 5), (7, 9)]
+    assert scenes.blank_runs([9.0] * 5, 1) == [] and scenes.blank_runs([0.0] * 5, 1) == [(0, 5)]
+
+
+def test_a_blank_run_takes_the_torn_frames_at_its_ends():
+    times = [i / 25 for i in range(100)]
+    scores = [0.0] * 100
+    scores[38] = scores[40] = 0.8  # the signal goes: two frames of another picture, then nothing
+    scores[60] = scores[62] = 0.5  # it comes back rolling, and locks at 62
+    assert scenes.widen_blank([(40, 60)], scores, times, 0.2, 0.6) == [(38, 62)]
+    assert scenes.widen_blank([(40, 60)], scores, times, 0.9, 0.6) == [(40, 60)]
+    assert scenes.widen_blank([(0, 30), (60, 100)], [0.0] * 100, times, 0.2, 0.6) == [(0, 30), (60, 100)]
+    scores[35] = 0.5  # between two runs nearer than that: one
+    assert scenes.widen_blank([(20, 34), (40, 60)], scores, times, 0.2, 0.6) == [(20, 62)]
+
+
+def test_stretches_that_touch_are_merged():
+    a, b, c = {"start": 0.0, "end": 2.0}, {"start": 1.5, "end": 3.0}, {"start": 4.0, "end": 5.0}
+    assert scenes.merge([c, b, a]) == [{"start": 0.0, "end": 3.0}, c]
+
+
+def test_the_lost_signal_at_a_tapes_end_is_one_black_stretch_with_no_cuts_in_it(monkeypatch, tmp_path):
+    """50 frames of picture, two torn ones, then 48 with no picture that flash as they roll."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    score = {25: 0.9, 50: 0.8, 52: 0.5, 70: 0.9, 90: 1.0}
+
+    def fake_run(cmd, cwd, **kw):
+        with open(f"{cwd}/frames.txt", "w", encoding="utf8") as f:
+            for i in range(100):
+                f.write(f"frame:{i} pts:{i} pts_time:{i / 25}\nlavfi.scene_score={score.get(i, 0.01)}\n")
+        with open(f"{cwd}/grey.raw", "wb") as f:
+            f.write(picture() * 52 + bars() * 48)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(scenes.subprocess, "run", fake_run)
+    r = scenes.run(dict(HANDLE), {"path": str(video)})
+    assert [c["frame"] for c in r["cuts"]] == [25, 50]
+    assert r["black"] == [{"start": 2.0, "end": 4.0}] and r["shots"][-1] == {"start": 2.0, "end": 4.0}
+    r = scenes.run(dict(HANDLE), {"path": str(video), "blank_min_s": 3})  # too short to be a gap
+    assert [c["frame"] for c in r["cuts"]] == [25, 50, 70, 90] and r["black"] == []
+
+
+def test_footage_too_dark_to_see_is_black_but_not_a_shot_of_its_own(monkeypatch, tmp_path):
+    """No picture from 1 to 3 s and nothing flashes in it: a night run through the dark, marked black and not cut out."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    def fake_run(cmd, cwd, **kw):
+        with open(f"{cwd}/frames.txt", "w", encoding="utf8") as f:
+            for i in range(100):
+                f.write(f"frame:{i} pts:{i} pts_time:{i / 25}\nlavfi.scene_score={0.8 if i == 25 else 0.01}\n")
+        with open(f"{cwd}/grey.raw", "wb") as f:
+            f.write(picture() * 25 + bytes(scenes.BLANK_W * scenes.BLANK_H) * 50 + picture() * 25)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(scenes.subprocess, "run", fake_run)
+    r = scenes.run(dict(HANDLE), {"path": str(video)})
+    assert [c["frame"] for c in r["cuts"]] == [25] and r["black"] == [{"start": 1.0, "end": 3.0}]
