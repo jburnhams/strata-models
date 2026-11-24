@@ -124,8 +124,9 @@ to 12 s away, forward or back: both sides show nearly the same picture, the cut 
 when an answered cut lies within 0.5 s of it (the item's `tolerance_s` overrides), one to one, nearest pairs first: `cut_miss` (reference
 cuts not found), `cut_false` (answered cuts matching none) and `cut_f1` per item, the primary. A missed cut is the costlier error for the
 editor (two shots it cannot split), so read `cut_miss` beside F1. The spliced video is progressive, so deinterlacing is not compared here.
-The first candidates tune the ffmpeg baseline (threshold, width); learned detectors (TransNetV2, PySceneDetect) join as venv workers
-(`runtimes/worker.py`), their libraries in a venv of their own, never in this service's dependencies.
+The first candidates tune the ffmpeg baseline (threshold, width); the rivals (2026-11-24) are TransNet V2 on the GPU and the CPU and
+PySceneDetect's adaptive and content detectors, one venv worker (`workers/shots.py`, venv `shots`) that sees the same deinterlaced frames,
+finds the same black stretches and applies the same minimum shot length as the baseline, so only the detector differs.
 
 **Subjective cuts** (later, role `cut-points`): where to cut inside one shot, which has no single right answer. Two ways to measure it: a
 score from what the cut lands on (does it break a spoken phrase: word times from transcription; does it interrupt a movement: motion just
