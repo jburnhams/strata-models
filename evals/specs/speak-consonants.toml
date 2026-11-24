@@ -6,8 +6,8 @@ metrics = ["judged", "sound_pure", "vowel_leak", "failed"]
 judge = true                        # listen, blind: is it the sound, said on its own, and does a held sound sound natural?
 
 [decision]
-primary = "judged"                  # share of blind pairs won against Kokoro saying the sound alone (what the role gave before, PR #110)
-baseline = "kokoro-emma-alone"
+primary = "judged"                  # share of blind pairs won against the default cut (bf_emma, /Cɑː/, held 0.5 s)
+baseline = "kokoro-emma-cut"        # not the sound said alone: it scores 0 % sound_pure, so every pair against it was one-sided (run 2026-11-24)
 min_effect = 0.1
 guards = { failed = 1.0 }
 

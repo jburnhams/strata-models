@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Eval speak-consonants: the default cut is the baseline**
+The first live run (2026-11-24, 150 jobs, none failed) scored sound_pure 100 % for kokoro-alice-cut, 96 % for emma-cut and emma-cut-short, 88 % for emma-cut-i, 76 % for lewis-cut and 0 % for the sound said alone. Blind pairs against that 0 % baseline could not tell the cuts apart, so `kokoro-emma-cut` is now the baseline and the pairs compare the cuts with each other. kokoro-emma-alone stays as a candidate.
+
 **speak: `sound`, a phonics consonant said pure ("mmm", not "muh"), and eval speak-consonants (#111)**
 Kokoro asked for a lone consonant in IPA gives about 20 ms of it and then a vowel (#110). Said at the start of a syllable it comes out whole, so the role now says a carrier (the sound then /ɑː/) and cuts the sound from before the vowel. Tried on the 25 consonants of Letters and Sounds in a cloud container (CPU, kokoro-onnx 0.6): with bf_emma 24 pass the purity check (none said alone); bf_alice 25, bf_isabella 22, bm_lewis 19, bm_george 13 to 16 (Kokoro's male voices give weaker nasals and h). Not yet listened to: the eval's blind judging decides.
 - `workers/phonics.py` (**new**, numpy only, shared by the worker and the metrics): the 25 consonants and how each is said; the vowel onset (each frame's log spectrum against the vowel's, the loud frames); within it a hiss's high-band run or a nasal's low-band run; `hold` (grains at whole pitch periods for a voiced sound, at random for noise); `measure` (high, low, voiced, vowel_leak) and `pure` (a rough pass or fail per kind).
