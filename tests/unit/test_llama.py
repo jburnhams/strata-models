@@ -349,3 +349,16 @@ def test_the_scene_preset_carries_the_scene_and_keeps_guesses_apart(setup):
     ]  # fmt: skip
     assert schema["properties"]["inferred"]["items"]["required"] == ["guess", "because"]
     assert body["response_format"]["json_schema"]["schema"] is schema
+
+
+def test_the_chapter_preset_is_text_only_and_keeps_guesses_apart():
+    scenes = [
+        dict(start="0:00", seconds=40.0, summary="children open presents", tags=["christmas"], speech="look at this")
+    ]
+    body, schema = llama.request(dict(preset="chapter-name-v1", context=dict(scenes=scenes)))
+    content = body["messages"][0]["content"]
+    assert [c["type"] for c in content] == ["text"]
+    assert "children open presents" in content[-1]["text"] and "{context}" not in content[-1]["text"]
+    assert schema["required"] == ["title", "summary", "inferred", "tags", "mixed"]
+    assert schema["properties"]["inferred"]["items"]["required"] == ["guess", "because"]
+    assert body["response_format"]["json_schema"]["schema"] is schema

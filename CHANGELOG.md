@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Role `chapter-name` and preset `chapter-name-v1`, for strata-reels' chapters (branch `claude/project-thread-fejz06`)**
+strata-reels now groups a tape's scenes into chapters (runs of scenes of one occasion) with its own deterministic code, and asks for each chapter's title and summary. The prompt is model work, so it lives here as `scene-describe`'s does, and a role lets an eval change the model without touching the app. It reads text only: the scenes' descriptions and speech, never the frames again.
+- `src/stratamodels/runtimes/presets/chapter-name-v1.md`, `chapter-name-v1.schema.json`: **new**. `{context}` is the chapter's scenes in order (start, length, summary, activity, setting, tags, guesses, people and speech). It answers `title`, `summary`, `inferred` (each guess with what it rests on: spec S4), `tags` and `mixed` (the scenes look like more than one occasion, so the app can show the grouping is doubtful). Real people are never named.
+- `src/stratamodels/models.toml`: role `chapter-name` on Qwen3.5-9B (local: family tapes), and the role added to Qwen3.5-9B and Claude Haiku 5.5 so an eval can compare them.
+- `tests/unit/test_llama.py`: the preset sends no image, fills the context and carries its schema.
+- `README.md`: the role's row. Not measured: the eval needs chapters a person has named.
+
 **shot-boundaries and scene-describe on a real VHS tape: threshold 0.2, the lost signal, preset v2 (branch `shots-vhs`)**
 strata-reels' pipeline ran on a real 21-minute tape on omarchy; numbers in `docs/progress.md`.
 - `runtimes/scenes.py`: stretches with no picture (`row_variation`, `blank_runs`, `widen_blank`; params `blank`, `blank_min_s`) count as black, and one that flashes is one stretch with no cut inside: the lost signal at a tape's end made 7 false cuts. One ffmpeg run, its frames split into the scored stream and 16x12 grey.
