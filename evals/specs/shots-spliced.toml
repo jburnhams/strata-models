@@ -36,3 +36,41 @@ name = "ffmpeg-0.3-320"
 model = "ffmpeg-scene-score"
 params = { threshold = 0.3, width = 320 }
 note = "twice the analysis width"
+
+# The rivals (2026-11-24): each at its library's default first. All share the baseline's min_shot_s (0.6 s, strongest cut wins) and
+# yadif, so only the detector differs; black stretches come from the same blackdetect in every one.
+
+[[candidates]]
+name = "transnetv2-0.5"
+model = "transnetv2"
+params = { threshold = 0.5 }
+note = "TransNet V2 on the GPU at its authors' threshold: a network trained on cuts and dissolves, 48 x 27 px frames, 100 at a time"
+
+[[candidates]]
+name = "transnetv2-0.3"
+model = "transnetv2"
+params = { threshold = 0.3 }
+note = "lower threshold: the near cuts, where both sides look alike, may peak below 0.5"
+
+[[candidates]]
+name = "transnetv2-cpu"
+model = "transnetv2-cpu"
+params = { threshold = 0.5 }
+note = "the same network on the CPU lane: what not waiting for the GPU costs in latency_s"
+
+[[candidates]]
+name = "adaptive-3"
+model = "pyscenedetect-adaptive"
+params = { threshold = 3.0 }
+note = "PySceneDetect's AdaptiveDetector at its default ratio: a frame's difference over its neighbours', so a pan is not a cut"
+
+[[candidates]]
+name = "adaptive-2"
+model = "pyscenedetect-adaptive"
+params = { threshold = 2.0 }
+
+[[candidates]]
+name = "content-27"
+model = "pyscenedetect-content"
+params = { threshold = 27.0 }
+note = "PySceneDetect's ContentDetector at its default: HSV and edges, against a fixed threshold"

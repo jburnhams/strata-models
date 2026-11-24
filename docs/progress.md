@@ -1,5 +1,22 @@
 # Progress
 
+## 2026-11-24: rival shot detectors
+TransNet V2 (the PyTorch port with the authors' weights) and PySceneDetect's AdaptiveDetector and ContentDetector now run as one venv worker (`workers/shots.py`, venv `shots`) and answer in the baseline's shape, so eval `shots-spliced` can compare them and strata-reels could switch without a code change. To keep the comparison about the detector, every engine sees frames from the same ffmpeg pass (yadif first), gets the same black stretches, and has the baseline's minimum-shot rule applied afterwards (the libraries' own minimum lengths are off). TransNet V2 puts a hard cut's peak on the old shot's last frame (frames 49, 74 and 124 on the four-shot test video), so its cut is the frame after the peak. On that video all three find the cuts at 2, 3 and 5 s to the frame, on the CPU, TransNet V2 in 1.9 s for 7 s of video (cold) against the adaptive detector's 0.4 s. 
+Scored on omarchy the same day (worker and runtime called directly, not through the eval runner; the machine was busy, so times are high). Tape: 50 cuts of one real 21-minute PAL VHS tape marked by eye; spliced: the 84 cuts of `shots-spliced` (28 per kind); both matched within 0.5 s.
+
+| Detector | Tape found / false | s on the tape | Spliced found (files, far, near) / false |
+|---|---|---|---|
+| ffmpeg 0.3 | 46 / 7 | 137 | 54 (26, 14, 14) / 0 |
+| ffmpeg 0.2, lost signal found (#124) | 49 / 0 | 113 | 70 (28, 21, 21) / 0 |
+| ffmpeg 0.15, lost signal found | 49 / 8 | 116 | 74 (28, 22, 24) / 0 |
+| TransNet V2 0.5 | 47 / 2 | 477 CPU, 134 GPU | 78 (28, 26, 24) / 1 |
+| TransNet V2 0.3 | 49 / 7 | 480 CPU | 82 (28, 27, 27) / 2 |
+| adaptive 3 | 43 / 1 | 119 | 64 (27, 20, 17) / 0 |
+| adaptive 2 | 49 / 11 | 115 | 82 (28, 26, 28) / 2 |
+| content 27 | 49 / 134 | 115 | 83 (28, 27, 28) / 84 |
+
+The learned and adaptive detectors find far more of the spliced near and far cuts (TransNet V2 0.3 and adaptive 2: 82 of 84 against the tuned baseline's 70), but on the tape the tuned baseline is the only one with no false cut; TransNet V2's are fast pans, something passing the lens and the colour locking as the tape starts, and at 0.5 it missed two restarts in almost the same framing. The baseline's threshold was tuned on this tape, so its tape row flatters it, and the rivals have no search for lost signal yet (with #124's they would lose their false cuts in the tape's last 7 s). So the role stays on the retuned ffmpeg for tapes; one tape is too few to choose on, and eval `shots-vhs` (#124) is where these candidates go next. Two fixes from the run: the PySceneDetect engines' size probe failed on the spliced MP4s (ffprobe's csv listed the stream twice; the probe is JSON now, taking the first stream), and TransNet V2's `vram_gb` was 0.5 where torch reserved 1.47 GB on the tape (now 1.6).
+
 ## 2026-11-23: shot-boundaries role, for strata-reels
 strata-reels (the video editor that will replace strata-360; family VHS tapes first) splits a tape into shots before anything else, and Jonathan's rule is that all its model work lives here. The role starts with the plain baseline: ffmpeg's `select` scene score, every frame against the one before, after yadif (one frame per frame, so an interlaced tape's two fields do not read as motion) at 160 px across, cut at 0.3, of cuts under 0.6 s apart the strongest; blackdetect's stretches come back beside the cuts. On a generated 7 s video (test pattern, black, fractal, bars) it finds the three cuts to the frame, in 0.16 s. Its eval does not need cuts marked by hand: Jonathan's idea was to splice uncut camera files (the race footage) so every cut is known, and to take cuts from within one file so both sides look alike (`scripts/evals/spliced_shots.py`, eval `shots-spliced`). On two generated camera files the baseline finds every `files` cut to the frame. Learned detectors (TransNetV2, PySceneDetect's adaptive detector) come next as venv workers, so their libraries never join this service's (Jonathan: no domain-specific libraries in strata-models).
 

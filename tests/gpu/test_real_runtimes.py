@@ -644,3 +644,31 @@ def test_write_role_follows_a_brief_and_a_schema():
     prompts = out["json"]["prompts"]
     assert len(prompts) == 3 and all(p["style"] in {"neutral", "happy", "surprised"} for p in prompts)
     assert all(6 <= len(p["text"].split()) <= 15 and not any(c.isdigit() for c in p["text"]) for p in prompts)
+
+
+@pytest.mark.skipif(
+    not os.path.isdir(os.path.join(MODELS, "venvs", "shots")),
+    reason="needs the shots worker venv (scripts/setup_worker_venv.sh shots)",
+)
+@pytest.mark.parametrize("key", ["transnetv2", "transnetv2-cpu", "pyscenedetect-adaptive", "pyscenedetect-content"])
+def test_shot_detectors_find_the_cuts_to_the_frame(key, tmp_path):
+    """The rivals to ffmpeg's scene score on the four-shot video of tests/integration/test_scenes_runtime.py: cuts at 2, 3 and 5 s, black
+    from 2 to 3 s, in the baseline's answer shape. TransNet V2 is on the GPU unless the model says the CPU."""
+    import subprocess
+
+    path = tmp_path / "four-shots.mp4"
+    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y"]
+    for s in [
+        "testsrc=s=320x240:r=25:d=2",
+        "color=black:s=320x240:r=25:d=1",
+        "mandelbrot=s=320x240:r=25",
+        "smptebars=s=320x240:r=25:d=2",
+    ]:
+        cmd += ["-f", "lavfi", "-i", s]
+    graph = "[2]trim=duration=2,setpts=PTS-STARTPTS[m];[0][1][m][3]concat=n=4:v=1[v]"
+    subprocess.run(
+        cmd + ["-filter_complex", graph, "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True
+    )
+    out, _ = measure(Registry.load().models[key], dict(path=str(path)))
+    assert [c["time"] for c in out["cuts"]] == [2.0, 3.0, 5.0] and out["black"] == [{"start": 2.0, "end": 3.0}]
+    assert out["model"] == key and out["device"] == ("cuda" if key == "transnetv2" else "cpu")
