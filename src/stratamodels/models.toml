@@ -384,6 +384,29 @@ source = "https://github.com/tesseract-ocr/tesseract (pacman -S tesseract tesser
 used_by = ["strata-scan"]
 options = { psm = 3, oem = 1 }
 
+# docTR (workers/ocr.py, venv `ocr`): a text detector finds the words, a recogniser reads each, so a line Tesseract's layout analysis misses
+# (display type, an advert's last line) is still found. Weights download into <models>/doctr on first load. Eval: ocr-hard, ocr-lines.
+[models.doctr-db-parseq]
+runtime = "venv-worker"
+name = "doctr"
+roles = ["ocr"]
+vram_gb = 1.0
+licence = "Apache-2.0"
+source = "https://github.com/mindee/doctr"
+used_by = []
+options = { worker = "ocr", venv = "ocr", det = "db_resnet50", reco = "parseq" }
+
+[models.doctr-db-parseq-layout]
+runtime = "venv-worker"
+name = "doctr"
+roles = ["ocr"]
+vram_gb = 1.2
+licence = "Apache-2.0"
+source = "https://github.com/mindee/doctr"
+used_by = []
+# the same, with docTR's layout detector (lw_detr_s, DocLayNet classes) as the answer's `regions`
+options = { worker = "ocr", venv = "ocr", det = "db_resnet50", reco = "parseq", layout = true }
+
 [models.ffmpeg-scene-score]
 runtime = "ffmpeg-scenes"
 name = "scene score (ffmpeg select)"

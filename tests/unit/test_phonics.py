@@ -90,6 +90,7 @@ def test_period_of_a_tone_and_of_noise():
     assert P.period(hum(0.05, f0=150), SR) == 160
     assert P.period(hiss(0.05), SR) is None
     assert P.period(np.zeros(1000), SR) is None
+    assert P.period(hum(0.2, f0=100), SR) == 240  # many periods fit: still the shortest, not a multiple of it
 
 
 def test_measure_of_silence():

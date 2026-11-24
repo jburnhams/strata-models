@@ -43,9 +43,11 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   fit         fit each line's spacing to its box (default true)
   out         the .pdf path to write (default: <data>/pages/<hash of the description>.pdf, so a rebuild is cached by what decides it)
   png         also write the PDF rasterised at the scan's dpi beside it (default true): what the blind judge and the ink metrics look at
-Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds,
+Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds, scan_figures (the
+indexes of page.figures found in the scan here, by `rules`, not named by a reader),
 grouper ({model, seconds, cost_usd} or {model, seconds, error}; null when no layout model was asked), cost_usd (the layout model's, when it cost any)}."""
 
+import functools
 import glob
 import hashlib
 import itertools
@@ -283,6 +285,44 @@ def _styled(
     return (style if style == "small-caps" else "roman"), f"{face}:roman"
 
 
+OVERRUN = 1.05  # a fitted word may be drawn this much wider than Tesseract's box for it before it is set smaller
+
+
+@functools.lru_cache(maxsize=64)
+def _metrics(path: str) -> Any:
+    """The font at 1000 px, to measure advances with (None when it cannot be read: no shrinking then)."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype(path, 1000)
+    except OSError:
+        return None
+
+
+def _shrink(
+    parts: Sequence[str], fitted: Sequence[Mapping[str, Any]], files: Sequence[str], boxes: Sequence[Any]
+) -> list[float]:
+    """A factor for each word's fitted size, so no word is drawn much wider than Tesseract's box for it. A fit takes a line's size from
+    its first word, so one bad box (Tesseract joining a capital to a descender of the line above: a box twice the type's height) sets
+    the whole line twice too big, and it runs off the page over its neighbours (page-rebuild, 2026-11-24: ward1874-leaf034). Overrun
+    shared by the line (its median) scales the whole line; a word still too wide after that (a corrected word longer than the one read)
+    is set smaller on its own."""
+    ratios: list[float] = []
+    for t, wd, path, box in zip(parts, fitted, files, boxes, strict=True):
+        font = _metrics(path) if path else None
+        px, w = float(wd.get("size_px") or 0.0), float(cast("Sequence[Any]", box)[2])
+        if font is None or px <= 0 or w <= 0:
+            ratios.append(1.0)
+            continue
+        drawn = float(font.getlength(t)) / 1000 * px * float(wd.get("hscale") or 1.0) + float(
+            wd.get("tracking_em") or 0.0
+        ) * px * max(0, len(t) - 1)
+        ratios.append(drawn / w)
+    line = statistics.median(ratios) if ratios else 1.0
+    f = 1 / line if line > OVERRUN else 1.0
+    return [min(f, OVERRUN / r) if r * f > OVERRUN else f for r in ratios]
+
+
 def line_maker(
     texts: Mapping[int, str] | None = None,
     fit: tuple[str, Mapping[tuple[int, ...], Mapping[str, Any]], Mapping[str, str]] | None = None,
@@ -308,14 +348,16 @@ def line_maker(
         parts = text.split()
         if len(parts) == len(own) and len(known) == len(got):
             spans: list[Span] = []
+            styled = [_styled(face, fonts, wd, keep) for wd in known]
+            shrink = _shrink(parts, known, [fonts.get(key, "") for _st, key in styled], [w["box"] for w in own])
             for i, (t, wd) in enumerate(zip(parts, known, strict=True)):
-                style, key = _styled(face, fonts, wd, keep)
+                style, key = styled[i]
                 spans.append(
                     Span(
                         t + (" " if i < len(parts) - 1 else ""),
                         style=style,
                         face=key,
-                        size_pt=float(wd["size_pt"]),
+                        size_pt=float(wd["size_pt"]) * shrink[i],
                         tracking_em=float(wd.get("tracking_em") or 0.0),
                         hscale=float(wd.get("hscale") or 1.0),
                         stroke_em=float(wd.get("stroke_em") or 0.0),
@@ -814,6 +856,7 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     fonts.update(_fonts(params))
     fonts = {k: truetype(v) for k, v in fonts.items()}
     image = params.get("image")
+    readers = len(page.figures)  # the figures a reader named; those after are found in the scan here (rules)
     if params.get("crop") or params.get("rules"):
         if not isinstance(image, str) or not os.path.isfile(image):
             raise RunError("crop and rules cut from the scan: give its picture (image)")
@@ -865,5 +908,6 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         seconds=round(time.monotonic() - t0, 3),
         model=handle.get("key"),
         grouper=grouper,
+        scan_figures=list(range(readers, len(page.figures))),
         **({"cost_usd": grouper["cost_usd"]} if grouper and isinstance(grouper.get("cost_usd"), (int, float)) else {}),
     )

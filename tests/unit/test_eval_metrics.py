@@ -451,3 +451,48 @@ def test_shot_cut_metrics_match_one_to_one_within_the_tolerance():
     assert M.METRICS["cut_miss"].score({"reference": {}}, out, None) is None
     assert M.METRICS["cut_false"].score({}, out, None) is None and M.METRICS["cut_f1"].score({}, out, None) is None
     assert M.METRICS["cut_f1"].better == "higher" and M.METRICS["cut_miss"].better == "lower"
+
+
+def test_line_recall_counts_whole_lines_found_in_any_order():
+    ref = dict(reference=dict(text="SIGNOR BLITZ\nthe house that Jack built\n\nAND GUTTA PERCHA GOODS."))
+    m = M.METRICS["line_recall"]
+    assert m.score(ref, dict(text="SIGNOR BLITZ the house that Jack built AND GUTTA PERCHA GOODS."), None) == (3, 3)
+    assert m.score(ref, dict(text="SIGNOR BUOITZ\nthe house that Jack built"), None) == (
+        2,
+        3,
+    )  # half a line is found; the last is missed
+    assert m.score(ref, dict(text="AND GUTTA PERCHA GOODS.\nSIGNOR BLITZ"), None) == (
+        2,
+        3,
+    )  # read out of order: still found
+    # a common word is credited once: "the" read once does not find two lines that are only "the ..."
+    two = dict(reference=dict(text="the end\nthe sea"))
+    assert m.score(two, dict(text="the"), None) == (1, 2)
+    assert m.score(ref, None, "boom") == (0, 3)
+    assert m.score({}, dict(text="x"), None) is None
+    assert M.found_words(["a", "b", "a"], ["a"]) == [True, False, False]
+
+
+def test_print_read_is_the_inked_share_of_the_text_blocks_inside_the_reading_s_lines(tmp_path):
+    from PIL import Image, ImageDraw
+
+    im = Image.new("L", (400, 300), 235)
+    d = ImageDraw.Draw(im)
+    for bar in [(50, 50, 349, 59), (50, 80, 349, 89)]:  # two printed lines of equal ink
+        d.rectangle(bar, fill=20)
+    scan = str(tmp_path / "scan.png")
+    im.save(scan, dpi=(200, 200))
+    item = dict(
+        input=dict(image=scan),
+        reference=dict(page=dict(width=400, height=300, dpi=200, blocks=[dict(box=[50, 50, 300, 40])])),
+    )
+    m = M.METRICS["print_read"]
+    both = dict(width=400, lines=[dict(box=[50, 50, 300, 10]), dict(box=[50, 80, 300, 10])])
+    assert m.score(item, both, None) == pytest.approx(1.0)
+    assert m.score(item, dict(width=400, lines=[dict(box=[50, 50, 300, 10])]), None) == pytest.approx(0.5, abs=0.02)
+    assert m.score(item, dict(width=800, lines=[dict(box=[100, 100, 600, 20])]), None) == pytest.approx(
+        0.5, abs=0.02
+    )  # upscaled reading
+    assert m.score(item, dict(text="no boxes"), None) is None
+    assert m.score(item, None, "boom") == 0.0
+    assert m.score(dict(input=dict(image=scan), reference={}), both, None) is None

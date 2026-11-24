@@ -4,6 +4,21 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**ocr: answers keep the layout the reader found, docTR as a detect-then-read reader, and eval ocr-lines (branch `claude/project-thread-dvu0cz`)**
+Jonathan: the `ocr` capability is flawed if it can miss text, and are we losing what the model knows by keeping only text? Tesseract psm 3 never read the last line of the leaf034 advert ("AND GUTTA PERCHA GOODS."); docTR, which finds each word with a detector before reading it, read every line of that page (and BLITZ where Tesseract read BUOITZ). The answer kept lines and words with boxes but dropped the rest: Tesseract's paragraphs and its picture blocks, docTR's blocks.
+- `runtimes/tesseract.py`: lines carry `para`; the answer has `blocks` (every block of Tesseract's layout analysis, kind "text" or "picture" when nothing was read in it) and `unread` (always empty: Tesseract reads every word it finds).
+- `workers/ocr.py` (**new**, venv-worker, venv `ocr` from `scripts/setup_worker_venv.sh ocr`: torch and python-doctr): docTR (Apache-2.0) DBNet + PARSeq as the `ocr` answer, with `blocks`, `unread` (word boxes read as nothing) and, with option `layout`, `regions` from docTR's layout detector (DocLayNet classes). Tesseract's own params are refused. Models `doctr-db-parseq` and `doctr-db-parseq-layout` (not a role default). CPU 3-14 s a page on the 20 page-layout pages.
+- `evals/metrics.py`: `line_recall` (reference lines found: half a line's words, in order first and then by bag, each read word used once) and `print_read` (the scan's ink in the labelled text blocks inside the reading's line boxes; none for a reading without boxes).
+- Eval `ocr-lines` (**new**, dataset page-layout, primary line_recall): Tesseract psm 3/4/11 and upscale, docTR with and without layout, docTR under Haiku's correction, Haiku and Sonnet reading. `ocr-hard` gains line_recall and the psm11, doctr and doctr-haiku-fix-v2 candidates.
+- Client `ocr` docstring. Tests: `test_ocr_worker.py` (**new**, fake docTR modules), `test_tesseract_runtime.py`, `test_eval_metrics.py`.
+
+**Rebuilt pages: no line drawn far bigger than its words; figure F1 leaves out the rules page-build found itself (branch `claude/project-thread-dvu0cz`)**
+Jonathan judged page-rebuild pages and found overlapping and missing text (ward1874-leaf034). A font fit takes a line's size from its first word, and Tesseract boxed "FOR" with a descender of the line above, so "FOR YOUNG LADIES AND MISSES" was set at twice its size over the heading. The missing text is a line Tesseract never read: that is the `ocr` capability's to fix (an eval on the hard pages), not a fallback here.
+- `runtimes/pagebuild.py`: `_shrink`: a word is set no more than 5 % wider than Tesseract's box for it: overrun shared by a line (its median) scales the line, a word still too wide (a corrected word longer than the one read) is set smaller alone. The answer's new `scan_figures` lists the figures `rules` found in the scan.
+- `evals/metrics.py`: `figure_f1` leaves out `scan_figures`: they are not a reader's finds (scoring them took the full rebuild's figure F1 from 29 % to 13 %).
+- `workers/phonics.py`: `period` takes the shortest lag within 1 % of the best correlation: a steady tone correlates as well at twice its period, and the argmax picked either by rounding (the macOS leg of this PR's CI found 320 samples for 160).
+- Tests in `test_pagebuild.py`, `test_page_metrics.py` and `test_phonics.py`.
+
 **Eval speak-consonants: the default cut is the baseline**
 The first live run (2026-11-24, 150 jobs, none failed) scored sound_pure 100 % for kokoro-alice-cut, 96 % for emma-cut and emma-cut-short, 88 % for emma-cut-i, 76 % for lewis-cut and 0 % for the sound said alone. Blind pairs against that 0 % baseline could not tell the cuts apart, so `kokoro-emma-cut` is now the baseline and the pairs compare the cuts with each other. kokoro-emma-alone stays as a candidate for the metrics, with `judge = false` so it is in no new pair.
 
