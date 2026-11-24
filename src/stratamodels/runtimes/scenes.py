@@ -297,11 +297,11 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     outside = scores[:]
     for a, b in flashing:
         outside[a:b] = [0.0] * (b - a)
-    cut_at = [
-        i
-        for i in pick_cuts(outside, times, threshold, min_shot_s)
-        if all(abs(times[i] - times[k]) >= min_shot_s for k in ends_at)
-    ]
+    # dropped before the choice: a frame that loses to a gap's end must not first have won over a real cut on its other side
+    for i, t in enumerate(times):
+        if any(abs(t - times[k]) < min_shot_s for k in ends_at):
+            outside[i] = 0.0
+    cut_at = pick_cuts(outside, times, threshold, min_shot_s)
     cut_at = sorted({*cut_at, *ends_at})
     edges = [times[0]] + [times[i] for i in cut_at] + [end]
     for fr in frames:  # blackdetect's marks are in the clip's time, like pts_time

@@ -255,3 +255,23 @@ def test_footage_too_dark_to_see_is_black_but_not_a_shot_of_its_own(monkeypatch,
     monkeypatch.setattr(scenes.subprocess, "run", fake_run)
     r = scenes.run(dict(HANDLE), {"path": str(video)})
     assert [c["frame"] for c in r["cuts"]] == [25] and r["black"] == [{"start": 1.0, "end": 3.0}]
+
+
+def test_a_torn_frame_beside_a_gap_does_not_hide_a_cut_before_it(monkeypatch, tmp_path):
+    """A cut at 3.0 s, a stronger frame at 3.4 s that loses to the gap's start at 3.8 s: the cut at 3.0 s, 0.8 s clear of the gap, stays."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    score = {75: 0.5, 85: 0.9, 94: 0.0, 95: 0.0, 110: 0.8}
+
+    def fake_run(cmd, cwd, **kw):
+        with open(f"{cwd}/frames.txt", "w", encoding="utf8") as f:
+            for i in range(150):
+                f.write(f"frame:{i} pts:{i} pts_time:{i / 25}\nlavfi.scene_score={score.get(i, 0.01)}\n")
+        with open(f"{cwd}/grey.raw", "wb") as f:
+            f.write(picture() * 95 + bars() * 55)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(scenes.subprocess, "run", fake_run)
+    monkeypatch.setattr(scenes, "widen_blank", lambda runs, *a: runs)  # the gap starts where it is found
+    r = scenes.run(dict(HANDLE), {"path": str(video)})
+    assert [c["frame"] for c in r["cuts"]] == [75, 95]
