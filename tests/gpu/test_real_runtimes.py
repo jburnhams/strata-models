@@ -365,6 +365,40 @@ def test_judge_vision_on_the_gpu(tmp_path):
     )
 
 
+@pytest.mark.skipif(
+    bool(runtimes.available()["llama-server"]), reason="needs the llama-server binary (llama.cpp) and huggingface_hub"
+)
+def test_scene_describe_on_the_gpu(tmp_path):
+    """Role scene-describe through the registry: three frames of one made-up scene and its context, answered in the preset's schema with what is seen kept apart from what is guessed."""
+    from PIL import Image, ImageDraw
+
+    frames = []
+    for i in range(3):  # a cake with candles moving across a table, as frames of one shot would
+        im = Image.new("RGB", (448, 336), (90, 60, 40))
+        d = ImageDraw.Draw(im)
+        x = 80 + 60 * i
+        d.rectangle((x, 180, x + 140, 260), fill="white")
+        for c in range(4):
+            d.rectangle((x + 20 + 30 * c, 140, x + 30 + 30 * c, 180), fill="yellow")
+        im.save(tmp_path / f"{i}.png")
+        frames.append(str(tmp_path / f"{i}.png"))
+    out, _ = measure(
+        Registry.load().resolve("scene-describe"),
+        dict(
+            images=frames,
+            preset="scene-describe-v1",
+            context=dict(seconds=12.0, shots=1, speech="Happy birthday to you"),
+            temperature=0.0,
+        ),
+    )
+    a = out["json"]
+    print(a)
+    assert set(a) == {"summary", "observed", "inferred", "setting", "people", "children", "activity", "tags", "picture"}
+    assert a["setting"] in ("indoor", "outdoor", "mixed", "unknown") and isinstance(a["people"], int)
+    assert all(set(g) == {"guess", "because"} for g in a["inferred"])
+    assert a["picture"]["quality"] in ("good", "fair", "poor")
+
+
 # ---- recorded sound -------------------------------------------------------------------------------------------------------------------------
 DENOISERS = [
     "deepfilternet3",
