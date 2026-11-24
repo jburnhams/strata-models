@@ -7,7 +7,7 @@ was never read) and garbles worn capitals. docTR (Mindee, Apache-2.0) finds word
 recogniser (PARSeq): on that page it read every line, BLITZ where Tesseract read BUOITZ.
 
 engine (models.toml `name`): "doctr", with options det (default db_resnet50) and reco (default parseq), the docTR architectures, and layout
-(default false: also run docTR's layout detector, lw_detr_s, about 2 s more a page); weights download into <models>/doctr on first load. On the
+(default false: also run docTR's layout detector, lw_detr_s, about 2 s more a page), and device ("cpu" keeps it off the GPU); weights download into <models>/doctr on first load. On the
 GPU when there is one, else the CPU (4-14 s a page).
 
 params: path or image (the page picture); straight (default true: assume the page is not rotated, faster and steadier on scans). Tesseract's
@@ -38,7 +38,9 @@ def load(model, models_dir):
     opts = model.get("options") or {}
     det, reco = opts.get("det", "db_resnet50"), opts.get("reco", "parseq")
     layout = bool(opts.get("layout", False))
-    cuda = torch.cuda.is_available()
+    cuda = (
+        torch.cuda.is_available() and opts.get("device") != "cpu"
+    )  # device = "cpu": a model run inside a CPU-lane job (runtimes/ocrfix.py)
     M["key"] = model.get("key")
     M["engine"] = f"doctr {det}+{reco}" + ("+layout" if layout else "")
     M["make"] = lambda straight: ocr_predictor(

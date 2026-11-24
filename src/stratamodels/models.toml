@@ -415,6 +415,38 @@ used_by = []
 # the same, with docTR's layout detector (lw_detr_s, DocLayNet classes) as the answer's `regions`
 options = { worker = "ocr", venv = "ocr", det = "db_resnet50", reco = "parseq", layout = true }
 
+[models.doctr-db-parseq-cpu]
+runtime = "venv-worker"
+name = "doctr"
+roles = ["ocr"]
+vram_gb = 0.0
+licence = "Apache-2.0"
+source = "https://github.com/mindee/doctr"
+used_by = []
+# docTR on the CPU (4-14 s a page): the reader inside the ocr-fix models, which run on the CPU lane and so must not take the GPU
+options = { worker = "ocr", venv = "ocr", det = "db_resnet50", reco = "parseq", device = "cpu" }
+
+# docTR's boxes with a Claude model's corrections of each line (runtimes/ocrfix.py): eval ocr-lines
+[models.doctr-haiku-fix]
+runtime = "ocr-fix"
+name = "doctr + claude-haiku-5-5"
+roles = ["ocr"]
+vram_gb = 0.0
+licence = "Apache-2.0 (docTR); Anthropic API"
+source = "runtimes/ocrfix.py"
+used_by = []
+options = { reader = "doctr-db-parseq-cpu", fixer = "claude-haiku-5-5-api", preset = "page-text-fix-v1" }
+
+[models.doctr-sonnet-fix]
+runtime = "ocr-fix"
+name = "doctr + claude-sonnet-5-5"
+roles = ["ocr"]
+vram_gb = 0.0
+licence = "Apache-2.0 (docTR); Anthropic API"
+source = "runtimes/ocrfix.py"
+used_by = []
+options = { reader = "doctr-db-parseq-cpu", fixer = "claude-sonnet-5-5-api", preset = "page-text-fix-v1" }
+
 [models.ffmpeg-scene-score]
 runtime = "ffmpeg-scenes"
 name = "scene score (ffmpeg select)"

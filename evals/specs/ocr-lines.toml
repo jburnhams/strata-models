@@ -73,3 +73,20 @@ name = "sonnet-read"
 without = ["ocr"]                # the item's Tesseract reading is for page-build: a cloud reader refuses it
 model = "claude-sonnet-5-5-api"
 params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }
+
+# ---- boxes and Claude's text (2026-11-24): the Claude readers found the most lines but give no boxes; docTR the most print in boxes. An
+# ocr-fix model reads with docTR (CPU) and has the model correct each numbered line against the page (page-text-fix-v1), boxes kept --------
+[[candidates]]
+name = "doctr-haiku-boxes"
+model = "doctr-haiku-fix"
+without = ["ocr"]                # docTR reads the page: the item's Tesseract reading is not the one to correct
+
+[[candidates]]
+name = "doctr-sonnet-boxes"
+model = "doctr-sonnet-fix"
+without = ["ocr"]
+
+[[candidates]]
+name = "tesseract-haiku-boxes"
+model = "doctr-haiku-fix"
+note = "the same correction of the item's own Tesseract reading (its `ocr`), so Tesseract's boxes with Haiku's text"
