@@ -22,6 +22,7 @@ name = "kokoro-emma-alone"
 model = "kokoro-v1"
 params = { voice = "bf_emma", carrier = "" }
 note = "the sound alone in IPA (PR #110's phonemes): a vowel follows the consonant"
+judge = false                       # 0 % sound_pure on the first run: no pair with it needs a listen
 
 [[candidates]]
 name = "kokoro-emma-cut"
