@@ -20,7 +20,7 @@ export const fixtures = {
     models: [
       { key: 'buffalo_l', runtime: 'insightface', name: 'buffalo_l', roles: ['faces'], vram_gb: 1, licence: 'non-commercial', source: 'https://example.org/i', used_by: ['bright-horizons'], options: {}, served: true, resident: true, missing: [], stats: { jobs: 300, mean_run_s: 0.05, last_at: NOW } },
       { key: 'whisper-large-v3', runtime: 'faster-whisper', name: 'large-v3', roles: ['transcribe'], vram_gb: 4.5, licence: 'MIT', source: '', used_by: ['strata-360'], options: {}, served: true, resident: false, missing: [], stats: null },
-      { key: 'flux3-klein', runtime: 'sd-cpp', name: 'FLUX.3 [klein]', roles: ['image-generate'], vram_gb: 7, licence: 'FLUX Kommunity', source: '', used_by: [], options: { steps: 16 }, served: true, resident: false, missing: [], stats: null },
+      { key: 'flux3-klein', runtime: 'sd-cpp', name: 'FLUX.3 [klein]', roles: ['image-generate'], vram_gb: 7, licence: 'FLUX Kommunity', source: '', used_by: [], options: { steps: 16, upsample: { model: 'flux3-klein-pup' } }, served: true, resident: false, missing: [], stats: null },
       { key: 'qwen', runtime: 'llama-server', name: 'q', roles: ['vision-language'], vram_gb: 7, licence: 'Apache-2.0', source: '', used_by: ['strata-360'], options: {}, served: false, resident: false, missing: [], stats: null },
     ] as Model[],
   }),
@@ -103,7 +103,7 @@ export const handlers = [
   }),
   http.post('/api/jobs', async ({ request }) => { const b = (await request.json()) as { params: { prompt: string } }; mock.calls.push(`generate ${b.params.prompt}`); if (b.params.prompt === 'fail') return HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'queued' }, { status: 201 }); return HttpResponse.json({ ...fixtures.jobs()[0], id: 99, status: 'queued' }, { status: 201 }) }),
   http.get('/api/jobs/98', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 98, status: 'failed', error: 'stable-diffusion.cpp is not installed' })),
-  http.get('/api/jobs/99', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 99, role: 'image-generate', model: 'flux3-klein', params: { prompt: 'a hare' }, status: 'done', result: { path: '/d/generated/a.png', width: 1024, height: 1024, seed: 5, steps: 16, seconds: 9.4, peak_vram_mb: 6200 } })),
+  http.get('/api/jobs/99', () => HttpResponse.json({ ...fixtures.jobs()[0], id: 99, role: 'image-generate', model: 'flux3-klein', params: { prompt: 'a hare' }, status: 'done', result: { path: '/d/generated/a.png', width: 1024, height: 1024, seed: 5, steps: 16, seconds: 9.4, peak_vram_mb: 6200, upsampled: { prompt_in: 'a hare', prompt: 'Full-color photograph of a brown hare', model: 'flux3-klein-pup', run_s: 4.8, error: null } } })),
   http.get('/api/images', () => HttpResponse.json({ items: mock.images, next: null })),
   http.post('/api/images/upload', () => { mock.calls.push('upload'); return HttpResponse.json({ path: '/d/uploads/r.png' }, { status: 201 }) }),
   http.get('/api/jobs/:id', ({ params }) => { const j = fixtures.jobs().find(x => x.id === Number(params.id)); return j ? HttpResponse.json({ ...j, result: j.status === 'done' ? { faces: [] } : null }) : HttpResponse.json({ detail: 'no job' }, { status: 404 }) }),

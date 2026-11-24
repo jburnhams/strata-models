@@ -15,13 +15,14 @@ export const SIZES = [
 ]
 
 /** The params of a request from the form: only what was set, so the model's own defaults apply to the rest. */
-export function paramsOf(f: { prompt: string; size: string; seed: string; steps: string; guidance: string; refs: string[] }) {
+export function paramsOf(f: { prompt: string; size: string; seed: string; steps: string; guidance: string; refs: string[]; expand?: boolean }) {
   const [w, h] = f.size.split('x').map(Number)
   const p: Record<string, unknown> = { prompt: f.prompt.trim(), width: w, height: h }
   if (f.seed.trim()) p.seed = Number(f.seed)
   if (f.steps.trim()) p.steps = Number(f.steps)
   if (f.guidance.trim()) p.cfg_scale = Number(f.guidance)
   if (f.refs.length) p.ref_images = f.refs
+  if (f.expand === false) p.upsample = false
   return p
 }
 
@@ -30,7 +31,8 @@ function Result({ job }: { job: Job }) {
   return (
     <figure className="grid gap-2">
       <img src={imagesApi.fileUrl(r.path)} alt={String((job.params as { prompt?: string })?.prompt ?? 'Generated picture')} width={r.width} height={r.height} className="h-auto max-w-full rounded-surface" />
-      <figcaption className="type-caption text-muted-foreground">{job.model} · {r.width} × {r.height} · seed {r.seed} · {format.decimal(r.seconds)} s{r.peak_vram_mb ? ` · ${format.decimal(r.peak_vram_mb / 1024)} GB VRAM at peak` : ''}</figcaption>
+      <figcaption className="type-caption text-muted-foreground">{job.model} · {r.width} × {r.height} · seed {r.seed} · {format.decimal(r.seconds)} s{r.peak_vram_mb ? ` · ${format.decimal(r.peak_vram_mb / 1024)} GB VRAM at peak` : ''}{r.upsampled && !r.upsampled.error ? ` · prompt expanded by ${r.upsampled.model ?? 'the upsampler'}${r.upsampled.run_s ? ` in ${format.decimal(r.upsampled.run_s)} s` : ''}` : ''}</figcaption>
+      {r.upsampled && (r.upsampled.error ? <p className="type-body-sm text-muted-foreground">{`Prompt used as typed: ${r.upsampled.error}`}</p> : <Disclosure summary="The prompt as expanded"><p className="type-body-sm whitespace-pre-wrap">{r.upsampled.prompt}</p></Disclosure>)}
     </figure>
   )
 }
@@ -62,8 +64,8 @@ export default function GeneratePage() {
   const models = reg.status === 'ready' ? reg.data.models.filter(m => m.roles.includes('image-generate')) : []
   const role = reg.status === 'ready' ? reg.data.roles.find(r => r.key === 'image-generate') : undefined
   const [prompt, setPrompt] = useState(''), [model, setModel] = useState(''), [size, setSize] = useState('1024x1024'), [seed, setSeed] = useState(''), [steps, setSteps] = useState(''), [guidance, setGuidance] = useState('')
-  const [refs, setRefs] = useState<string[]>([]), [job, setJob] = useState<Job | null>(null), [n, setN] = useState(0)
-  const gen = useAsyncAction(async () => { const j = await imagesApi.generate(model || undefined, paramsOf({ prompt, size, seed, steps, guidance, refs }) as never); setJob(j); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['images'] }) })
+  const [expand, setExpand] = useState(true), [refs, setRefs] = useState<string[]>([]), [job, setJob] = useState<Job | null>(null), [n, setN] = useState(0)
+  const gen = useAsyncAction(async () => { const j = await imagesApi.generate(model || undefined, paramsOf({ prompt, size, seed, steps, guidance, refs, expand }) as never); setJob(j); setN(k => k + 1); await qc.invalidateQueries({ queryKey: ['images'] }) })
   const upload = useAsyncAction(async (files: File[]) => { const out: string[] = []; for (const f of files.slice(0, 10 - refs.length)) out.push((await imagesApi.upload(f)).path); setRefs(r => [...r, ...out]) })
   const onSubmit = (e: FormEvent) => { e.preventDefault(); if (prompt.trim()) gen.run() }
   const chosen = models.find(m => m.key === (model || role?.model))
@@ -86,6 +88,7 @@ export default function GeneratePage() {
             <Field label="Seed" hint="Empty: a new picture every time. The same seed and prompt give the same picture."><Input inputMode="numeric" value={seed} onChange={e => setSeed(e.target.value)} /></Field>
             <Field label="Steps" hint={`Empty: the model's own (${String((chosen?.options as { steps?: number } | undefined)?.steps ?? '–')}). More is slower, rarely better.`}><Input inputMode="numeric" value={steps} onChange={e => setSteps(e.target.value)} /></Field>
             <Field label="Guidance" hint="Empty: the model's own. How closely to follow the prompt."><Input inputMode="decimal" value={guidance} onChange={e => setGuidance(e.target.value)} /></Field>
+            {(chosen?.options as { upsample?: unknown } | undefined)?.upsample ? <label className="flex items-start gap-2 type-body-sm sm:col-span-2"><input type="checkbox" checked={expand} onChange={e => setExpand(e.target.checked)} className="mt-1" /><span>Expand the prompt into a detailed description first (a few seconds; what this model expects). Untick when the prompt is already a full description. Edits with reference pictures are never expanded.</span></label> : null}
           </div>
         </Disclosure>
       </form>
