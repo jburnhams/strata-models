@@ -191,23 +191,30 @@ def mount(app, scheduler):
 
     @app.get("/api/evals")
     def get_evals():
-        out = []
-        for name, s in C.list_specs(engine()).items():
+        """Each experiment with how many of its outputs are in: no analysis here. A dataset is read once however many experiments share it,
+        and the outputs are counted in one query for all of them (each experiment's own query was most of a slow list)."""
+        eng = engine()
+        out, sets, keys = [], {}, {}
+        for name, s in C.list_specs(eng).items():
             if isinstance(s, C.EvalError):
                 out.append(dict(name=name, error=str(s)))
                 continue
-            try:
-                ds = C.load_dataset(s.dataset, engine=engine())
-                keys = [C.result_key(s, c, it) for c in s.candidates for it in ds.items]
-                have = len(C.cached(engine(), keys))
-                total = len(keys)
-            except C.EvalError as e:
-                out.append(dict(s.to_json(), error=str(e)))
+            if s.dataset not in sets:
+                try:
+                    sets[s.dataset] = C.load_dataset(s.dataset, engine=eng)
+                except C.EvalError as e:
+                    sets[s.dataset] = e
+            ds = sets[s.dataset]
+            if isinstance(ds, C.EvalError):
+                out.append(dict(s.to_json(), error=str(ds)))
                 continue
-            out.append(
-                dict(s.to_json(), outputs=have, total=total, running=runs.get(name, {}).get("state") == "running")
-            )
-        return dict(experiments=out, datasets=C.list_datasets(engine=engine()))
+            keys[name] = [C.result_key(s, c, it) for c in s.candidates for it in ds.items]
+            out.append(dict(s.to_json(), total=len(keys[name]), running=runs.get(name, {}).get("state") == "running"))
+        have = C.cached_failed(eng, {k for ks in keys.values() for k in ks})
+        for e in out:
+            if e["name"] in keys:
+                e["outputs"] = sum(k in have for k in keys[e["name"]])
+        return dict(experiments=out, datasets=C.list_datasets(engine=eng))
 
     @app.put("/api/evals/{name}/spec")
     def put_spec(name: str, d: dict):
@@ -282,7 +289,7 @@ def mount(app, scheduler):
         cands = []
         for c in s.candidates:
             items = C.sample(c, ds.items, eng)  # what a run runs: a sampled candidate's total is its sample
-            rows = C.cached(eng, [C.result_key(s, c, it) for it in items])
+            rows = C.cached_failed(eng, [C.result_key(s, c, it) for it in items])
             steps = []
             if c.stages and len(rows) < len(
                 items
@@ -291,12 +298,11 @@ def mount(app, scheduler):
                 bad = [0] * len(c.stages)
                 for it in items:
                     keys = C.stage_keys(eng, c, it)
-                    have = C.cached(eng, keys)
+                    have = C.cached_failed(eng, keys)
                     for lvl, k in enumerate(keys):
-                        r = have.get(k)
-                        if r is not None:
+                        if k in have:
                             got[lvl] += 1
-                            bad[lvl] += bool(r.error)
+                            bad[lvl] += have[k]
                 steps = [
                     dict(role=st["role"], model=st["model"], done=got[i], failed=bad[i])
                     for i, st in enumerate(c.stages)
@@ -306,7 +312,7 @@ def mount(app, scheduler):
                     name=c.name,
                     total=len(items),
                     done=len(rows),
-                    failed=sum(1 for r in rows.values() if r.error),
+                    failed=sum(rows.values()),
                     steps=steps,
                 )
             )

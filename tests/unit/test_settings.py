@@ -121,3 +121,27 @@ def test_budgets_and_rollovers(monkeypatch):
     monkeypatch.setenv("STRATAMODELS_GEMINI_BUDGET_USD", "10")
     monkeypatch.setenv("STRATAMODELS_GEMINI_ROLLOVER", "2026-12-01")
     assert settings.budget("gemini") == (10.0, "2026-12-01")
+
+
+def test_bound_settings_are_read_once_per_ttl_and_at_once_after_a_save_here(monkeypatch):
+    import time
+
+    from sqlalchemy.orm import Session
+
+    from stratamodels.db.models import Setting
+    from stratamodels.store import memory_store
+
+    e = memory_store().engine
+    settings.bind(e)
+    now = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    assert settings.load() == {}
+    with Session(e) as s:  # another process (the CLI) changes a setting
+        s.add(Setting(key="gpu_jobs", value="3", updated_at=1.0))
+        s.commit()
+    assert settings.load() == {}  # within the TTL: the kept rows, no query
+    now[0] += settings.TTL_S
+    assert settings.load() == dict(gpu_jobs="3")
+    settings.save(dict(cpu_jobs=2))
+    assert settings.load() == dict(gpu_jobs="3", cpu_jobs="2")  # a save here shows at once
+    settings.bind(None)

@@ -63,10 +63,14 @@ _engine = None
 IMPORTED = "_imported"  # a row (not a setting) marking that the file was copied in
 
 
+_rows = None  # (read at, rows): the table read again at most every TTL_S, and at once after a save here
+TTL_S = 5.0  # a change saved by another process (the CLI's `settings set`) shows within this
+
+
 def bind(engine):
     """Keep the settings in this database from now on (None: back to the file). Copies the file's settings in when the table is empty."""
-    global _engine
-    _engine = None
+    global _engine, _rows
+    _engine, _rows = None, None
     if engine is None:
         return
     from sqlalchemy import func, select
@@ -97,13 +101,23 @@ def engine():
 
 
 def _db_rows():
+    """The table's settings, kept for TTL_S: data_dir() is asked for per eval item ("{data}" params, datasets_dir), and a read of the table each
+    time was 500 of the evals list's 640 queries (2026-11-24)."""
+    global _rows
+    import time
+
+    hit = _rows
+    if hit is not None and time.monotonic() - hit[0] < TTL_S:
+        return dict(hit[1])
     from sqlalchemy import select
     from sqlalchemy.orm import Session
 
     from stratamodels.db.models import Setting
 
     with _lock(), Session(_engine) as s:
-        return {r.key: r.value for r in s.scalars(select(Setting)) if r.key != IMPORTED}
+        rows = {r.key: r.value for r in s.scalars(select(Setting)) if r.key != IMPORTED}
+    _rows = (time.monotonic(), rows)
+    return dict(rows)
 
 
 def _lock():
@@ -165,6 +179,8 @@ def save(changes):
                 else:
                     row.value, row.updated_at = d[k], time.time()
             s.commit()
+        global _rows
+        _rows = None
         return d
     os.makedirs(home(), exist_ok=True)
     tmp = _path() + ".tmp"

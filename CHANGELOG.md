@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Evals list: no settings read per item, one outputs query, and no outputs loaded (branch `claude/project-thread-rri5uy`)**
+Jonathan: the evals list is slow, and it should not be calculating anything. It did no analysis, but one `GET /api/evals` ran 641 SQL statements on omarchy, 503 of them the same read of the `settings` table (`settings.data_dir()`, asked for per item by every "{data}" param in `expand()` and by `datasets_dir()`), and while the background analyses (`Summaries`) held the GIL each statement waited its turn: 2 to 20 s on the day, over 100 s earlier. Outside the service with a thread holding the GIL: 47 s before, about 16 s with the first two fixes.
+- `settings.py`: the table's rows are kept for `TTL_S` (5 s), and dropped at once on a save in this process or a `bind` (a CLI `settings set` shows within 5 s).
+- `evals/core.py`: `cached_failed(engine, keys)` reads only key and whether it failed (in chunks of 2000), for counts and to-do lists; `run` and `/api/evals/{name}/progress` use it too instead of loading every output's JSON.
+- `evals/api.py` `get_evals`: each dataset read once however many experiments share it, and all experiments' outputs counted in one query.
+- Not done here: the analyses still run in the service process, and their cache is keyed on the evals source files, so a deploy touching `metrics.py` redoes all of them (page-layout 1129 s, page-rebuild 1080 s), slowing every endpoint meanwhile.
+- Tests: `test_settings.py` (rows kept for the TTL, fresh after a save), `test_eval_core.py` (`cached_failed`), `test_eval_api.py` (the list counts outputs after a run).
+
 **ocr: answers keep the layout the reader found, docTR as a detect-then-read reader, and eval ocr-lines (branch `claude/project-thread-dvu0cz`)**
 Jonathan: the `ocr` capability is flawed if it can miss text, and are we losing what the model knows by keeping only text? Tesseract psm 3 never read the last line of the leaf034 advert ("AND GUTTA PERCHA GOODS."); docTR, which finds each word with a detector before reading it, read every line of that page (and BLITZ where Tesseract read BUOITZ). The answer kept lines and words with boxes but dropped the rest: Tesseract's paragraphs and its picture blocks, docTR's blocks.
 - `runtimes/tesseract.py`: lines carry `para`; the answer has `blocks` (every block of Tesseract's layout analysis, kind "text" or "picture" when nothing was read in it) and `unread` (always empty: Tesseract reads every word it finds).

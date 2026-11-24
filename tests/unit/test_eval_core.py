@@ -703,3 +703,21 @@ def test_forgetting_a_source_forgets_what_was_made_from_it(setup, scheduler, eng
         assert r == dict(ran=2, cached=1, failed=0)  # up and refined again; other was kept
     finally:
         stop.set()
+
+
+def test_cached_failed_says_which_outputs_are_there_and_which_failed_without_loading_them(setup, engine):
+    from stratamodels.db.models import EvalResult
+
+    mk = lambda k, err: EvalResult(
+        key=k,
+        dataset="speech",
+        item_id=k,
+        role="echo",
+        model="small",
+        created_at=1.0,
+        output=dict(big="x" * 1000),
+        error=err,
+    )
+    C.save(engine, [mk("ok", None), mk("bad", "boom")])
+    assert C.cached_failed(engine, ["ok", "bad", "missing"]) == {"ok": False, "bad": True}
+    assert C.cached_failed(engine, []) == {}
