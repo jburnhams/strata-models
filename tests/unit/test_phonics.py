@@ -178,10 +178,21 @@ def test_a_persons_recordings_are_found_by_letters_or_ipa_trimmed_and_listed(tmp
     wav(rec / "θ.wav", carrier(hiss(0.2)))
     wav(rec / "th-then.wav", carrier(hum(0.2)))
     wav(rec / "ck.wav", carrier(hiss(0.02)))
+    wav(
+        rec / "j.wav", carrier(hiss(0.03))
+    )  # the j of jam (/dʒ/), not /j/: with no y.wav, the y of yes stays unrecorded
     (rec / "notes.txt").write_text("not a recording")
     rows, missing = b.recordings(str(rec), str(tmp_path / "out"), str(tmp_path / "person.jsonl"))
-    assert sorted(r["key"] for r in rows) == sorted(["ʃ", "θ", "ð", "k"]) and len(missing) == 21 and "s" in missing
+    assert (
+        sorted(r["key"] for r in rows) == sorted(["ʃ", "θ", "ð", "k", "dʒ"]) and len(missing) == 20 and "y" in missing
+    )
     listed = [json.loads(line) for line in (tmp_path / "person.jsonl").read_text(encoding="utf8").splitlines()]
     assert [r["key"] for r in listed] == [r["key"] for r in rows]
     x, _sr = sf.read(listed[0]["output"]["path"])
     assert x.ndim == 1 and len(x) < len(carrier(hiss(0.2)))  # mono, the silence trimmed to 50 ms a side
+
+
+def test_recording_names_letters_first_and_ipa_only_where_unambiguous():
+    b = builder()
+    assert b.names("y", "j") == ["y"] and b.names("j", "dʒ") == ["j", "dʒ"] and b.names("sh", "ʃ") == ["sh", "ʃ"]
+    assert b.names("th (then)", "ð") == ["th (then)", "th-then", "ð"] and b.names("c/k/ck", "k") == ["c", "k", "ck"]
