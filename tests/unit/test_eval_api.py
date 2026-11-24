@@ -67,7 +67,10 @@ def test_blind_judging(client, scheduler):
     assert client.get("/api/evals/fake-asr").json()["judgments"]["n"] == 6
     assert client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="z")).status_code == 400
     assert (
-        client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"][:-3] + "abc", winner="x")).status_code
+        client.post(
+            "/api/evals/fake-asr/judgments",
+            json=dict(token=p["token"][:-1] + ("0" if p["token"][-1] != "0" else "1"), winner="x"),
+        ).status_code
         == 400
     )
     assert client.post("/api/evals/other/judgments", json=dict(token=p["token"], winner="x")).status_code == 400
