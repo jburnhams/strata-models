@@ -1,0 +1,108 @@
+{
+ "type": "object",
+ "properties": {
+  "summary": {
+   "type": "string"
+  },
+  "observed": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 8
+  },
+  "inferred": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "guess": {
+      "type": "string"
+     },
+     "because": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "guess",
+     "because"
+    ],
+    "additionalProperties": false
+   },
+   "maxItems": 5
+  },
+  "setting": {
+   "type": "string",
+   "enum": [
+    "indoor",
+    "outdoor",
+    "mixed",
+    "unknown"
+   ]
+  },
+  "people": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "children": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "activity": {
+   "type": "string"
+  },
+  "tags": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 12
+  },
+  "picture": {
+   "type": "object",
+   "properties": {
+    "quality": {
+     "type": "string",
+     "enum": [
+      "good",
+      "fair",
+      "poor"
+     ]
+    },
+    "problems": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "dark",
+       "blurry",
+       "shaky",
+       "noisy",
+       "tracking lines",
+       "colour cast",
+       "overexposed"
+      ]
+     },
+     "maxItems": 7
+    }
+   },
+   "required": [
+    "quality",
+    "problems"
+   ],
+   "additionalProperties": false
+  }
+ },
+ "required": [
+  "summary",
+  "observed",
+  "inferred",
+  "setting",
+  "people",
+  "children",
+  "activity",
+  "tags",
+  "picture"
+ ],
+ "additionalProperties": false
+}
