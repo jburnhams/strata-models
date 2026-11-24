@@ -335,3 +335,37 @@ def test_run_answers_with_the_model_and_every_setting_it_ran_with(no_ffmpeg, tmp
 def test_run_says_what_was_wrong_with_the_job(no_ffmpeg, tmp_path, name, params, says):
     with pytest.raises(ParamError, match=says):
         S.run({"path": str(tmp_path / name), **params})
+
+
+@pytest.mark.parametrize(
+    ("probe", "width", "want"),
+    [
+        (
+            {"width": 1920, "height": 1080},
+            272,
+            154,
+        ),  # 153: halves up to even, as scale=272:-2 would
+        ({"width": 720, "height": 576}, 256, 204),
+        (
+            {"width": 1920, "height": 1080, "side_data_list": [{"rotation": -90}]},
+            256,
+            456,
+        ),  # a phone video stored on its side
+        ({"width": 1920, "height": 1080, "tags": {"rotate": "270"}}, 256, 456),
+    ],
+)
+def test_the_analysis_height_keeps_the_shape_ffmpeg_shows(probe, width, want):
+    import json
+    import types
+
+    def run(cmd, **kw):
+        return types.SimpleNamespace(stdout=json.dumps({"streams": [probe]}), stderr="")
+
+    assert S.analysis_height("v.mp4", width, run=run) == want
+
+
+def test_a_file_ffprobe_cannot_read_is_the_jobs_fault():
+    import types
+
+    with pytest.raises(ParamError, match="ffprobe could not read v.mp4: bad"):
+        S.analysis_height("v.mp4", 256, run=lambda cmd, **kw: types.SimpleNamespace(stdout="", stderr="bad"))

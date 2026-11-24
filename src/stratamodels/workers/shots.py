@@ -243,7 +243,9 @@ def decode(path, s, engine, clip, tmp, black, black_min_s, black_pixel):
     the black and time listing (blackdetect, and select on the scene score so every frame has a line, at 160 px)."""
     import numpy as np
 
-    w, h = (TN_W, TN_H) if engine == "transnetv2" else (s["width"], -2)
+    # the frame size is given to ffmpeg exactly, never left to scale's -2: frames are read from stdout by their byte count, so the size
+    # read must be the size written (a height worked out here could round differently from ffmpeg's and mix rows of two frames)
+    w, h = (TN_W, TN_H) if engine == "transnetv2" else (s["width"], analysis_height(path, s["width"]))
     cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error"]
     if clip is not None:
         cmd += ["-ss", f"{clip[0]:.6f}", "-t", f"{clip[1] - clip[0]:.6f}"]
@@ -271,8 +273,6 @@ def decode(path, s, engine, clip, tmp, black, black_min_s, black_pixel):
     ]
     err = open(os.path.join(tmp, "ffmpeg.err"), "w+")
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, cwd=tmp)
-    if h == -2:  # the height ffmpeg picks for the width: ask it from the file's own shape
-        h = analysis_height(path, w)
 
     def frames():
         size = w * h * 3
@@ -285,9 +285,12 @@ def decode(path, s, engine, clip, tmp, black, black_min_s, black_pixel):
     return p, err, frames(), os.path.join(tmp, "frames.txt")
 
 
-def analysis_height(path, width):
-    """The height scale=W:-2 gives: the display shape kept, rounded to even (ffprobe's width, height and sample aspect)."""
-    out = subprocess.run(
+def analysis_height(path, width, run=subprocess.run):
+    """An even height for `width` that keeps the picture's stored shape as ffmpeg shows it: turned a quarter when the stream carries a
+    rotation of 90 or 270 degrees (ffmpeg turns such a video upright before the filters, by default)."""
+    import json
+
+    out = run(
         [
             "ffprobe",
             "-v",
@@ -295,9 +298,11 @@ def analysis_height(path, width):
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height",
+            "stream=width,height:stream_side_data=rotation",
+            "-show_entries",
+            "stream_tags=rotate",
             "-of",
-            "csv=p=0",
+            "json",
             path,
         ],
         capture_output=True,
@@ -305,10 +310,16 @@ def analysis_height(path, width):
         check=False,
     )
     try:
-        vw, vh = (int(x) for x in out.stdout.strip().split(",")[:2])
-    except ValueError as e:
-        raise ParamError(f"ffprobe could not read {path}: {out.stderr.strip()[-300:]}") from e
-    return max(2, round(width * vh / vw / 2) * 2)
+        st = json.loads(out.stdout or "{}")["streams"][0]
+        vw, vh = int(st["width"]), int(st["height"])
+    except (ValueError, KeyError, IndexError, TypeError) as e:
+        raise ParamError(f"ffprobe could not read {path}: {(out.stderr or '').strip()[-300:]}") from e
+    turn = [d.get("rotation") for d in st.get("side_data_list") or [] if "rotation" in d] or [
+        (st.get("tags") or {}).get("rotate", 0)
+    ]
+    if round(abs(float(turn[0] or 0))) % 180 == 90:
+        vw, vh = vh, vw
+    return max(2, int(width * vh / vw / 2 + 0.5) * 2)  # halves rounded up, as ffmpeg's own -2 does
 
 
 def _number(params, key, default, low, high):
