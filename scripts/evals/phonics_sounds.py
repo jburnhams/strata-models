@@ -6,7 +6,7 @@ lists them, and (with --recordings) a person's own recordings of them as the bas
 Items: input {text (the label, "/ʃ/ (sh)"), sound (the IPA)}; reference {sound}; tags {kind (hiss, buzz, nasal, liquid, stop, affricate,
 brief), letters}.
 
---recordings DIR: one WAV per sound, named by its letters or its IPA (sh.wav or ʃ.wav; for the two th sounds th-thin.wav and th-then.wav, or
+--recordings DIR: one WAV per sound, named by its letters or its IPA (sh.wav or ʃ.wav; letters win: j.wav is the j of jam, never /j/, the y of yes; for the two th sounds th-thin.wav and th-then.wav, or
 θ.wav and ð.wav; "c/k/ck" may be c.wav, k.wav or ck.wav). Each is copied, trimmed to its sound with 50 ms of silence either side, to
 <data>/evals/recorded/phonics/<n>.wav, and listed in <data>/evals/recorded/phonics-person.jsonl, which model `phonics-person` (runtime
 `recorded`, by sound) replays, so the person's clips stand in the eval, the blind judging and the metrics beside the models'. A sound with no
@@ -41,11 +41,13 @@ def items():
 
 
 def names(letters, ipa):
-    """The file names a recording of a sound may have (without .wav)."""
-    alts = {ipa, *letters.replace(" ", "").split("/")}
+    """The file names a recording of a sound may have (without .wav), its letters first. Its IPA counts only where no sound is spelled that
+    way: the IPA of y is /j/, and j.wav is the j of jam."""
+    spelled = {n for lt in phonics.CONSONANTS for n in lt.split("/")}
+    own = letters.split("/")
     if letters.startswith("th "):
-        alts.add("th-" + letters[4:-1])
-    return alts
+        own.append("th-" + letters[4:-1])
+    return own + ([ipa] if ipa not in spelled else [])
 
 
 def recordings(folder, dest, jsonl):
@@ -56,7 +58,7 @@ def recordings(folder, dest, jsonl):
     os.makedirs(dest, exist_ok=True)
     rows, missing = [], []
     for letters, (ipa, _) in phonics.CONSONANTS.items():
-        src = next((have[n] for n in sorted(names(letters, ipa)) if n in have), None)
+        src = next((have[n] for n in names(letters, ipa) if n in have), None)
         if src is None:
             missing.append(letters)
             continue
