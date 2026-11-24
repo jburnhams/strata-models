@@ -206,6 +206,17 @@ def test_speak_on_the_gpu(key):
     assert os.path.isfile(out["path"]) and 2.0 < out["duration_s"] < 12.0 and out["sample_rate"] >= 16000
 
 
+def test_speak_ipa_on_kokoro():
+    """A vowel sound given as IPA (`phonemes`): a short clip, not a spelled-out word. Listen to it: the numbers cannot say it is the ee of bee."""
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().models["kokoro-v1"]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip("no venv for kokoro-v1: scripts/setup_worker_venv.sh kokoro")
+    out, _out2 = measure(m, dict(text="/iː/", phonemes="iː", voice="bf_emma"))
+    assert os.path.isfile(out["path"]) and 0.1 < out["duration_s"] < 2.0
+
+
 @pytest.mark.skipif(
     not IMAGE or bool(runtimes.available()["face-kind"]) or bool(runtimes.available()["insightface"]),
     reason="needs STRATAMODELS_TEST_IMAGE (a photo of a real person), insightface, open_clip and torch",
