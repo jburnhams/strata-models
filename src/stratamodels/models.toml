@@ -457,6 +457,49 @@ source = "https://ffmpeg.org/ffmpeg-filters.html#select_002c-aselect"
 used_by = ["strata-reels"]
 options = { threshold = 0.2, min_shot_s = 0.6, width = 160, deinterlace = true }   # 0.2: eval shots-vhs, 2026-11-24 (0.3 missed 3 more of 50 real cuts, 0.15 made 8 false ones)
 
+# Rivals to the baseline, in eval shots-spliced: one worker (workers/shots.py) in the venv `shots` (scripts/setup_worker_venv.sh shots), so
+# torch, OpenCV and PySceneDetect stay out of this service's dependencies. Same answer shape as ffmpeg-scene-score (cuts, shots, black).
+[models.transnetv2]
+runtime = "venv-worker"
+name = "TransNet V2 (transnetv2-pytorch)"
+roles = ["shot-boundaries"]
+vram_gb = 1.6                                # measured on omarchy (2026-11-24): torch reserved 1,468 MB at its peak on a 21-minute tape, batches of 8 windows
+licence = "MIT (code and weights)"
+source = "https://github.com/soCzech/TransNetV2 (paper https://arxiv.org/abs/2008.04838); PyTorch port https://pypi.org/project/transnetv2-pytorch/"
+used_by = []
+options = { worker = "shots", venv = "shots", engine = "transnetv2", threshold = 0.5, min_shot_s = 0.6, deinterlace = true, timeout_s = 14400 }
+
+[models.transnetv2-cpu]
+runtime = "venv-worker"
+name = "TransNet V2 (transnetv2-pytorch), on the CPU"
+roles = ["shot-boundaries"]
+vram_gb = 0.0
+licence = "MIT (code and weights)"
+source = "https://github.com/soCzech/TransNetV2 (paper https://arxiv.org/abs/2008.04838); PyTorch port https://pypi.org/project/transnetv2-pytorch/"
+used_by = []
+# the same on the CPU lane: a tape never waits for the GPU; the eval's latency_s says what that costs
+options = { worker = "shots", venv = "shots", engine = "transnetv2", device = "cpu", threshold = 0.5, min_shot_s = 0.6, deinterlace = true, timeout_s = 14400 }
+
+[models.pyscenedetect-adaptive]
+runtime = "venv-worker"
+name = "PySceneDetect AdaptiveDetector"
+roles = ["shot-boundaries"]
+vram_gb = 0.0
+licence = "BSD-3-Clause"
+source = "https://www.scenedetect.com/docs/latest/api/detectors.html#module-scenedetect.detectors.adaptive_detector"
+used_by = []
+options = { worker = "shots", venv = "shots", engine = "adaptive", threshold = 3.0, min_content_val = 15.0, window_width = 2, width = 256, min_shot_s = 0.6, deinterlace = true, timeout_s = 14400 }
+
+[models.pyscenedetect-content]
+runtime = "venv-worker"
+name = "PySceneDetect ContentDetector"
+roles = ["shot-boundaries"]
+vram_gb = 0.0
+licence = "BSD-3-Clause"
+source = "https://www.scenedetect.com/docs/latest/api/detectors.html#module-scenedetect.detectors.content_detector"
+used_by = []
+options = { worker = "shots", venv = "shots", engine = "content", threshold = 27.0, width = 256, min_shot_s = 0.6, deinterlace = true, timeout_s = 14400 }
+
 [models.pagebuild]
 runtime = "page-build"
 name = "strata-python pages"
