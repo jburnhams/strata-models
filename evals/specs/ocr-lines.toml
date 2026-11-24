@@ -1,0 +1,72 @@
+name = "ocr-lines"
+question = "Does each reader find every printed line of a whole page, display type and adverts included, and put a box round it, so a rebuilt page lacks nothing?"
+role = "ocr"
+dataset = "page-layout"          # scripts/evals/page_layout.py: 20 whole pages of Ward 1874 and Collier 1828; reference.text from ocr_reference.py --pages (Opus), reference.page labelled blocks
+metrics = ["line_recall", "print_read", "cer_exact", "cer", "wer_bag", "latency_s", "cost_usd", "failed"]
+judge = false
+
+[decision]
+primary = "line_recall"
+baseline = "tesseract"
+min_effect = 0.02
+guards = { failed = 1.0 }
+# Why (Jonathan, 2026-11-24): the ocr capability is flawed if it can miss text. Tesseract psm 3 never read the last line of an advert on
+# ward1874-leaf034 ("AND GUTTA PERCHA GOODS."), so no rebuild could draw it; cer barely notices a missed line among a page's characters.
+# line_recall counts printed lines found (half a line's words, in any order); print_read is the scan's ink in the labelled text blocks that
+# falls inside the reading's line boxes, which a reader without boxes (the vision-model readers) cannot score: the app needs boxes. The
+# reference text is a model's reading (Opus), so a line it missed counts for no one.
+
+[[candidates]]
+name = "tesseract"
+model = "tesseract-eng"
+note = "what strata-scan uses today (psm 3: Tesseract's own layout analysis)"
+
+[[candidates]]
+name = "psm4"
+model = "tesseract-eng"
+params = { psm = 4 }
+
+[[candidates]]
+name = "psm11"
+model = "tesseract-eng"
+params = { psm = 11 }
+note = "sparse text: no layout analysis, every word it can find"
+
+[[candidates]]
+name = "upscale"
+model = "tesseract-eng"
+params = { clean = "upscale" }
+
+[[candidates]]
+name = "doctr"
+model = "doctr-db-parseq"
+note = "detect then read: DBNet finds the words, PARSeq reads each (CPU 4-14 s a page here)"
+
+[[candidates]]
+name = "doctr-layout"
+model = "doctr-db-parseq-layout"
+note = "the same, with docTR's layout regions in the answer (scored by page-layout later; here, that it reads the same)"
+
+[[candidates]]
+name = "doctr-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+note = "Haiku corrects docTR's text against the page: its text only, so no print_read"
+
+[[candidates.stages]]
+role = "ocr"
+model = "doctr-db-parseq"
+input = "{image}"
+send = "image"
+into = "prompt"
+
+[[candidates]]
+name = "haiku-read-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-read-v2", prompt = "Transcribe this page.", max_tokens = 4096 }
+note = "a vision model reading the whole page: text, no boxes"
+
+[[candidates]]
+name = "sonnet-read"
+model = "claude-sonnet-5-5-api"
+params = { system_preset = "ocr-read-v1", prompt = "Transcribe this page.", max_tokens = 4096 }

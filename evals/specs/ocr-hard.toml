@@ -2,7 +2,7 @@ name = "ocr-hard"
 question = "On the worst pages of the two books (picked with no reference, by the kinds of error Tesseract makes), how close does each reader get to a strong model's reading, and what does one page cost?"
 role = "ocr"
 dataset = "ocr-hard"             # scripts/evals/ocr_reference.py: Opus read each page once (ocr_hard/<item>.txt, SOURCES.json); ocr_pages.py --refs scripts/evals/ocr_hard --name ocr-hard
-metrics = ["cer_exact", "cer", "wer", "wer_bag", "garbled", "cost_usd", "latency_s", "failed"]
+metrics = ["cer_exact", "cer", "wer", "wer_bag", "line_recall", "garbled", "cost_usd", "latency_s", "failed"]
 judge = false
 
 [decision]
@@ -225,6 +225,30 @@ params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
 role = "ocr"
 model = "tesseract-eng"
 params = { clean = "adaptive" }
+input = "{image}"
+send = "image"
+into = "prompt"
+
+# ---- detect then read (2026-11-24): docTR finds each word with a detector, so lines Tesseract's layout analysis skips are still read
+# (ocr-lines scores that directly); here, how well it reads them, alone and under Haiku's correction pass ----------------------------------
+[[candidates]]
+name = "psm11"
+model = "tesseract-eng"
+params = { psm = 11 }
+note = "Tesseract's sparse-text mode: no layout analysis, every word it can find"
+
+[[candidates]]
+name = "doctr"
+model = "doctr-db-parseq"
+
+[[candidates]]
+name = "doctr-haiku-fix-v2"
+model = "claude-haiku-5-5-api"
+params = { system_preset = "ocr-correct-v2", max_tokens = 4096 }
+
+[[candidates.stages]]
+role = "ocr"
+model = "doctr-db-parseq"
 input = "{image}"
 send = "image"
 into = "prompt"

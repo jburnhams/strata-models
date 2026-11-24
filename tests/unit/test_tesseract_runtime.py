@@ -17,20 +17,31 @@ def test_parse_tsv_groups_words_into_lines_and_drops_empty_ones():
     tsv = (
         HEAD
         + row(1, 0, 0, 0, 0, (0, 0, 800, 1200), -1)
+        + row(2, 1, 0, 0, 0, (10, 10, 200, 80), -1)
         + row(4, 1, 1, 1, 0, (10, 10, 200, 30), -1)
         + row(5, 1, 1, 1, 1, (10, 10, 90, 30), 96.5, "Punch")
         + row(5, 1, 1, 1, 2, (110, 12, 100, 28), 90.5, "and")
         + row(5, 1, 2, 1, 1, (10, 60, 60, 30), 80, "Judy")  # paragraph 2 restarts line numbers: still its own line
+        + row(2, 2, 0, 0, 0, (10, 300, 400, 400), -1)
         + row(5, 2, 1, 1, 1, (10, 300, 400, 400), 95, " ")  # a picture block: an empty word, no line
+        + row(2, 3, 0, 0, 0, (5, 900, 20, 20), -1)
         + row(5, 3, 1, 1, 1, (5, 900, 20, 20), -1, "~")  # conf -1 counts as 0
     )
     r = tesseract.parse_tsv(tsv)
     assert (r["width"], r["height"]) == (800, 1200)
     assert [ln["text"] for ln in r["lines"]] == ["Punch and", "Judy", "~"]
     assert r["lines"][0]["box"] == [10, 10, 200, 30] and r["lines"][0]["conf"] == 93.5 and r["lines"][0]["block"] == 1
+    assert [ln["para"] for ln in r["lines"]] == [1, 2, 1]
     assert r["lines"][2]["conf"] == 0.0
     assert r["text"] == "Punch and\nJudy\n~"
-    assert tesseract.parse_tsv(HEAD) == dict(width=0, height=0, lines=[], text="")
+    # every block the layout analysis found, the picture one too: the app sees where nothing was read
+    assert r["blocks"] == [
+        dict(block=1, box=[10, 10, 200, 80], kind="text"),
+        dict(block=2, box=[10, 300, 400, 400], kind="picture"),
+        dict(block=3, box=[5, 900, 20, 20], kind="text"),
+    ]
+    assert r["unread"] == []
+    assert tesseract.parse_tsv(HEAD) == dict(width=0, height=0, lines=[], text="", blocks=[], unread=[])
 
 
 def test_parse_tsv_refuses_more_than_one_page():

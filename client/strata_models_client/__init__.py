@@ -135,7 +135,9 @@ def transcribe(path, app, role="transcribe", priority="normal", model=None, **pa
 def ocr(path, app, priority="normal", model=None, **params):
     """Printed text from a page picture (role `ocr`): params lang ('eng', 'eng+fra'), psm (Tesseract's page segmentation), dpi, clean (steps that clean the page first, such as "flatten,sharpen": see runtimes/pageclean.py; boxes are then in the cleaned picture's pixels), pdf (a .pdf path
     to write as well: the picture with its text searchable). Returns {width, height, text, lines: [{text, box: [x, y, w, h], conf, block,
-    words: [{text, box, conf}]}], engine, lang, seconds}; conf is 0-100."""
+    para, words: [{text, box, conf}]}], blocks: [{block, box, kind}], unread: [{box, conf}], engine, lang, seconds}; conf is 0-100. `blocks`
+    is every block the reader found (kind "text", or "picture": nothing read there), `unread` every word box a detector found but read as
+    nothing; a detect-then-read model (docTR) has no `para` and may add `regions` [{box, kind, conf}] from a layout detector."""
     params["path"] = os.path.abspath(path)
     if params.get("pdf"):
         params["pdf"] = os.path.abspath(params["pdf"])

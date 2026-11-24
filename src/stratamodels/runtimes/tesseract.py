@@ -17,9 +17,12 @@ params:
   dpi      the scan's resolution, when the file does not say (Tesseract guesses otherwise, and small type suffers)
   pdf      a .pdf path to write as well: the picture with the text under it, invisible but searchable and selectable (a book's pages are
            joined into one searchable PDF by the app)
-Answer: {width, height, text, lines: [{text, box: [x, y, w, h], conf, block, words: [{text, box, conf}]}], engine, lang, seconds}. conf is
-0-100 (Tesseract's), a line's is the mean of its words'; boxes are pixels of the picture. Lines come in Tesseract's reading order; an empty
-page has no lines and text ""."""
+Answer: {width, height, text, lines: [{text, box: [x, y, w, h], conf, block, para, words: [{text, box, conf}]}], blocks: [{block, box,
+kind}], unread: [], engine, lang, seconds}. conf is 0-100 (Tesseract's), a line's is the mean of its words'; boxes are pixels of the picture.
+Lines come in Tesseract's reading order; an empty page has no lines and text "". `blocks` is every block Tesseract's layout analysis found,
+numbered as the lines' `block`: kind "text", or "picture" for one with no words read in it (an engraving, an ornament, or print it took for a
+picture, which is why it is kept: the app can see where nothing was read). `unread` (regions a detector found but could not read) is always
+empty here: Tesseract reads every word it finds."""
 
 import csv
 import io
@@ -83,10 +86,12 @@ def _union(boxes: list[list[int]]) -> list[int]:
 def parse_tsv(tsv: str) -> dict[str, Any]:
     """Tesseract's TSV (one row per page, block, paragraph, line and word) into lines of words. A line is keyed by (block, paragraph, line),
     because line numbers restart in every paragraph (and a second page is refused, since every number restarts there); words with no text (Tesseract emits empty level-5 rows for picture blocks) are dropped,
-    and a line left with no words is dropped with them, so an engraving never turns into an empty line."""
+    and a line left with no words is dropped with them, so an engraving never turns into an empty line; its block stays in `blocks` as a
+    picture."""
     width = height = 0
     order: list[tuple[int, int, int]] = []
     words: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    blocks: dict[int, list[int]] = {}
     for r in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
         level = int(r["level"] or 0)
         if level == 1:
@@ -95,6 +100,8 @@ def parse_tsv(tsv: str) -> dict[str, Any]:
             ):  # a second page (a multipage TIFF): its numbers restart, so its lines would merge with the first's
                 raise RunError("tesseract reads one page at a time: give it a single-page picture")
             width, height = int(r["width"]), int(r["height"])
+        if level == 2:
+            blocks[int(r["block_num"])] = _box(r)
         if level != 5:
             continue
         text = (r.get("text") or "").strip()
@@ -114,10 +121,15 @@ def parse_tsv(tsv: str) -> dict[str, Any]:
                 box=_union([w["box"] for w in ws]),
                 conf=round(sum(w["conf"] for w in ws) / len(ws), 1),
                 block=key[0],
+                para=key[1],
                 words=ws,
             )
         )
-    return dict(width=width, height=height, lines=lines, text="\n".join(ln["text"] for ln in lines))
+    read = {key[0] for key in order}
+    found = [dict(block=n, box=box, kind="text" if n in read else "picture") for n, box in blocks.items()]
+    return dict(
+        width=width, height=height, lines=lines, text="\n".join(ln["text"] for ln in lines), blocks=found, unread=[]
+    )
 
 
 def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:

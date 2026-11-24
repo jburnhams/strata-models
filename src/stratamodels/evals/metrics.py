@@ -145,6 +145,45 @@ def _cer_exact(item, output, error):
     return (len(r) if error else edits(r, exact_chars(transcript(output))), len(r))
 
 
+LINE_FOUND = 0.5  # a reference line is found when this share of its words is in the reading
+
+
+def found_words(ref, hyp):
+    """Which words of ref (a token list) a reading hyp has: matched in order first (difflib's longest matching blocks), then the rest by bag,
+    each reading word used once, so a line read out of order (a column, a side note) still counts and a common word is not credited twice."""
+    import difflib
+
+    hit = [False] * len(ref)
+    used = [False] * len(hyp)
+    for a, b, n in difflib.SequenceMatcher(None, ref, hyp, autojunk=False).get_matching_blocks():
+        for k in range(n):
+            hit[a + k] = used[b + k] = True
+    left = collections.Counter(t for t, u in zip(hyp, used) if not u)
+    for i, t in enumerate(ref):
+        if not hit[i] and left[t] > 0:
+            left[t] -= 1
+            hit[i] = True
+    return hit
+
+
+def _line_recall(item, output, error):
+    """The reference's printed lines (one a line of reference.text) the reading found: at least LINE_FOUND of a line's words, after
+    normalise(). cer counts a missed line as some characters among thousands; this counts it as a line, which is what a rebuilt page lacks
+    (the advert's last line on ward1874-leaf034)."""
+    ref = _ref_text(item)
+    if ref is None:
+        return None
+    lines = [w for w in (normalise(ln) for ln in ref.splitlines()) if w]
+    if error or not lines:
+        return (0, len(lines)) if lines else None
+    hit = found_words([t for ln in lines for t in ln], normalise(transcript(output)))
+    found, k = 0, 0
+    for ln in lines:
+        found += sum(hit[k : k + len(ln)]) >= LINE_FOUND * len(ln)
+        k += len(ln)
+    return (found, len(lines))
+
+
 def _wer_bag(item, output, error):
     """Word errors with the order ignored: the reference words a reading lacks or adds beyond it (whichever is more), over the reference words.
     Beside `wer` it separates misread words from lines read in the wrong order (a title page read column by column)."""
@@ -815,6 +854,36 @@ def _page_ink_f1(item, output, error):
     return INK.ink_f1(scan, got, tol_px=max(1, round(dpi / 250)), mask=mask)["f1"]
 
 
+def _print_read(item, output, error):
+    """The share of the scan's ink in the reference text blocks that lies in the reading's line boxes (3 px around): print the reader found and
+    read, whatever it read it as. Needs boxes, so a reading with no lines (a vision model's text) has none; a reading of an upscaled picture is
+    scaled back by its width."""
+    ref = _page_ref(item)
+    image = (item.get("input") or {}).get("image")
+    if ref is None or not image or not ref.get("blocks"):
+        return None
+    if error:
+        return 0.0
+    if not isinstance(output, dict) or not isinstance(output.get("lines"), list):
+        return None
+    from stratamodels.evals import ink as INK
+
+    boxes = tuple(tuple(float(v) for v in b["box"]) for b in ref["blocks"])
+    try:
+        scan, mask, _ = _page_scan_ink(image, boxes)
+    except (OSError, ValueError, TypeError):
+        return None
+    ink = scan & mask
+    if not ink.any():
+        return None
+    k = scan.shape[1] / float(output.get("width") or scan.shape[1])
+    read = np.zeros_like(scan)
+    for ln in output["lines"]:
+        x, y, w, h = (float(v) * k for v in ln["box"])
+        read |= INK.box_mask(scan.shape, [x - 3, y - 3, w + 6, h + 6])
+    return float((ink & read).sum() / ink.sum())
+
+
 PRINT_REACH = 0.06  # page_ink_all reads this fraction of the page's size around the labelled print (its border), as page-build's rules do
 
 
@@ -1060,6 +1129,22 @@ METRICS = {
             "Character error rate with case and punctuation kept (only curly quotes, dashes and whitespace unified): small capitals, italics read as other letters, a wrong stop all count",
             "%",
             _cer_exact,
+        ),
+        Metric(
+            "line_recall",
+            "ratio",
+            "higher",
+            f"Printed lines of the reference the reading found (at least {LINE_FOUND:.0%} of a line's words, in any order): a missed line counts whole, where cer counts its characters",
+            "%",
+            _line_recall,
+        ),
+        Metric(
+            "print_read",
+            "mean",
+            "higher",
+            "Share of the scan's ink in the reference text blocks inside the reading's line boxes: print found and read (as anything); none for a reading without boxes",
+            "%",
+            _print_read,
         ),
         Metric(
             "wer_bag",

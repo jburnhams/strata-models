@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Make the venv a venv-worker model runs in: <models>/venvs/NAME (models dir: STRATAMODELS_MODELS, default ~/models). Needs uv (and git, curl).
-#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|dfn|clearvoice|resemble|audio|audio-quality|video|seedvr2|flashvsr-plus|vapoursynth
+#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|dfn|clearvoice|resemble|audio|audio-quality|video|seedvr2|flashvsr-plus|vapoursynth|ocr
 # Each pins what its model needs; they are kept apart from the service's venv on purpose (Chatterbox wants torch 2.6, for one).
 set -euo pipefail
-name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, dfn, clearvoice, resemble, audio, audio-quality, video, seedvr2, flashvsr-plus or vapoursynth}
+name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, dfn, clearvoice, resemble, audio, audio-quality, video, seedvr2, flashvsr-plus, vapoursynth or ocr}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 TORCH_INDEX=https://download.pytorch.org/whl/cu128   # CUDA 12.8 wheels: they bring their own CUDA libraries, any recent driver runs them
 py=3.12
@@ -27,6 +27,7 @@ case $name in
   clearvoice) pkgs="clearvoice scipy soundfile" ;;       # pins numpy<2 and an old opencv: the reason it has a venv of its own
   resemble) pkgs="resemble-enhance scipy soundfile"; py=3.11 ;;   # pins torch 2.1.1, so Python 3.11
   audio) pkgs="numpy scipy soundfile noisereduce" ;;     # the CPU engines: none, afftdn (ffmpeg), noisereduce
+  ocr) pkgs="--index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch torchvision python-doctr" ;;   # workers/ocr.py (docTR); weights into <models>/doctr on first load
   audio-quality) pkgs="--index-strategy unsafe-best-match --extra-index-url https://download.pytorch.org/whl/cpu torch==2.8.* torchaudio==2.8.* onnxruntime pesq pystoi numpy scipy soundfile" ;;   # CPU only
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac
