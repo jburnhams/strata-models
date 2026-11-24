@@ -602,10 +602,12 @@ UNREAD_MM = 0.8  # ink of the print that no drawn line, picture or rule covers i
 UNREAD_MIN_MM = 2.5  # a piece at least this tall or wide is print nobody read (a line Tesseract missed); smaller is a speck or a stray stroke
 
 
-def add_unread(page: Page, image: str) -> None:
+def add_unread(page: Page, image: str, read: Sequence[Sequence[float]] = ()) -> None:
     """The scan's print that the page does not draw (a line of display type Tesseract never read: ward1874-leaf034's last line, an
     ornament, a border's worn corner) as figures, each its own ink cut from the scan, so a rebuilt page never silently
-    loses print. Only ink within the print (the blocks, grown as for rules) outside every drawn line and figure counts."""
+    loses print. Only ink within the print (the blocks, grown as for rules) outside every drawn line and figure, and outside every line
+    the reader read (`read`: Tesseract's line boxes, so a line the layout or text model left out on purpose, a stamp, handwriting, show-
+    through, stays out), counts."""
     if not page.blocks:
         return
     from scipy import ndimage  # pyright: ignore[reportMissingTypeStubs]  (scipy ships no stubs)
@@ -627,7 +629,9 @@ def add_unread(page: Page, image: str) -> None:
         max(0, int((tx - rx) / kx)) : min(wid, int((tx + tw + rx) / kx)),
     ] = True
     covered = np.zeros_like(ink)
-    for b in [ln.box for blk in page.blocks for ln in blk.lines] + [f.box for f in page.figures]:
+    for b in (
+        [ln.box for blk in page.blocks for ln in blk.lines] + [f.box for f in page.figures] + [tuple(r) for r in read]
+    ):
         x, y, w, h = b
         m = 0.15 * h if w > h else 0.15 * w  # a line's box is Tesseract's, which can clip an ascender or a descender
         covered[
@@ -644,9 +648,10 @@ def add_unread(page: Page, image: str) -> None:
             continue
         ys, xs = cast("slice", sl[0]), cast("slice", sl[1])
         y0, y1, x0, x1 = int(ys.start), int(ys.stop), int(xs.start), int(xs.stop)
-        if max(y1 - y0, x1 - x0) < least:
-            continue
         keep = (lab[ys, xs] == i) & left[ys, xs]
+        rows, cols = np.nonzero(keep.any(axis=1))[0], np.nonzero(keep.any(axis=0))[0]
+        if not len(rows) or max(rows[-1] - rows[0], cols[-1] - cols[0]) + 1 < least:
+            continue  # measured on the ink itself, not on the bridging that joined it
         keep = cast("np.ndarray[Any, np.dtype[np.bool_]]", nd.binary_dilation(keep, iterations=2))
         crop = cast("np.ndarray[Any, np.dtype[np.uint8]]", cast("Any", np).where(keep, g[ys, xs], 255).astype(np.uint8))
         path = _save_crop(crop, ["unread", _stamp(image), [x0, y0, x1, y1]])
@@ -926,7 +931,9 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         if params.get("rules"):
             add_rules(page, image)
         if params.get("unread"):
-            add_unread(page, image)
+            o = _json(params.get("ocr"), "ocr answer") if params.get("ocr") else None
+            read = [ln["box"] for ln in ocr_lines(cast("Mapping[str, Any]", o))] if isinstance(o, Mapping) else []
+            add_unread(page, image, read)
     fit = params.get("fit", True) is not False
     try:
         pdf = render(page, fonts, small_caps_faces=small_caps, fit=fit)
