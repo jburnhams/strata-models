@@ -9,7 +9,7 @@ ocr-lines on omarchy (20 pages): Sonnet reading found every printed line (0.01 %
 - `runtimes/ocrfix.py` (**new**, runtime `ocr-fix`, CPU lane): reads the page with its `reader` model (or corrects a given `ocr` answer), shows its fixer (a vision-language model) the page and the numbered lines (preset page-text-fix-v1), and answers the reader's answer with each corrected line's text: words keep their boxes when the count is the same, else share the line's box by length; an emptied line goes to `unread`. A failed fix answers the reader's text (`fixer.error`). `cost_usd` is the fixer's.
 - `workers/ocr.py`: option `device = "cpu"`. Models `doctr-db-parseq-cpu` (the reader inside a CPU-lane job), `doctr-haiku-fix` and `doctr-sonnet-fix`.
 - Eval `ocr-lines`: candidates doctr-haiku-boxes, doctr-sonnet-boxes and tesseract-haiku-boxes (the item's Tesseract reading corrected).
-- Tests: `test_ocrfix.py` (**new**).
+- Tests: `test_ocrfix.py` (**new**). `test_eval_api.py`: the pairs test counted distinct items from 30 random draws (> 20 of 40), which failed on some seeds (CI, seed 4182920893, on main too); it now checks that no pair is offered twice while unjudged ones remain.
 
 **Role `scene-describe` and preset `scene-describe-v1`, for strata-reels' scenes (branch `claude/project-thread-36vaj1`)**
 strata-reels' plan step 3 gives each scene of a tape a short description. The prompt is model work, so it lives here like `photo-caption`'s, and a role lets an eval change the model without touching the app. Spec S4 asks that observed facts and inferences stay apart, so the schema has two lists: `observed` (seen in the frames or said in the speech) and `inferred` (each guess with the evidence it rests on).

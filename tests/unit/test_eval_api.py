@@ -1,5 +1,7 @@
 """The Evals API (stratamodels.evals.api): listing, running in the background, the analysis, the write-up, blind judging, the media file."""
 
+import collections
+import json
 import time
 
 import pytest
@@ -175,13 +177,16 @@ def test_pairs_with_the_same_output_are_not_offered(client, scheduler):
     )
     client.post("/api/evals/fake-asr/run")
     wait_run(client, "fake-asr")
-    seen = set()
+    seen = []
     for _ in range(30):
         p = client.get("/api/evals/fake-asr/pair").json()["pair"]
         assert not same(p["x"], p["y"])
-        seen.add(p["item_id"])
+        seen.append((p["item_id"], frozenset(json.dumps(o, sort_keys=True) for o in (p["x"], p["y"]))))
         client.post("/api/evals/fake-asr/judgments", json=dict(token=p["token"], winner="tie"))
-    assert len(seen) > 20  # unjudged pairs come first, so it moves through the items
+    # Unjudged pairs come first, so no pair is offered twice while 80 differ (40 items: base-better and same-better; base and same read
+    # alike, so those two pairs show the same outputs and look alike here, hence at most 2). Counting distinct items instead, as this test
+    # once did (> 20 of 40 from 30 random draws), failed on some seeds (4182920893, in CI on 2026-11-24).
+    assert max(collections.Counter(seen).values()) <= 2
 
 
 def test_media_of_a_phrase_is_cut_to_its_clip(client, tmp_path, setup, fake_run):
