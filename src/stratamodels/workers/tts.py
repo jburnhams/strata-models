@@ -21,6 +21,14 @@ longer pauses between words to that, and edge (default 0.05 s) is the silence ke
 Result: {path, duration_s, sample_rate, seconds, engine, voice, seed, speech_s, rate_wpm, max_pause_s, long_pauses}, and with a target
 {target_s, stretch, fit: ok | long | short (more than 5 % off), speed (Kokoro)}.
 
+Phonics sounds: sound (one sound in IPA, Kokoro only: /ʃ/, /m/, /iː/) gives it pure, with no vowel added ("mmm", not "muh"). A vowel is
+said as written (as `phonemes`). A consonant is said at the start of a carrier syllable (the sound then `carrier`, default "ɑː"), and
+workers/phonics.py cuts it from before the vowel: a sound that can be held (s, sh, f, th, h, z, v, m, n, ng, l, r) is lengthened to
+hold_s (default 0.5 s; 0 keeps it as said), a stop or affricate (p t k b d g, ch, j) keeps its burst alone, and w, y, x, qu stay as said.
+carrier = "" says the consonant alone, as `phonemes` does (Kokoro then adds a vowel: the baseline the cut is measured against). text is
+only the label; wpm and fit_s are refused. Result: as above without the pace keys, plus sound {ipa, kind, carrier, span_s, held_s} and the
+measures of workers/phonics.py (sound_s, high, low, voiced, vowel_leak).
+
 A model entry can carry the settings an eval chose as options.defaults ({voice = ..., speed = ...}): the role then speaks with them unless a job
 says otherwise, so apps ask the role for speech and get the chosen voice."""
 
@@ -33,6 +41,7 @@ E = {}
 
 
 import pacing  # noqa: E402  (pace and pauses, workers/pacing.py: shared with the eval metrics)
+import phonics  # noqa: E402  (pure consonant sounds cut from a carrier, workers/phonics.py: shared with the eval metrics)
 from protocol import ParamError, serve  # noqa: E402  (the shared JSON-lines loop, workers/protocol.py)
 
 
@@ -203,6 +212,8 @@ def run(p):
         **(E["options"].get("defaults") or {}),
         **p,
     }  # a model entry's own voice and settings (models.toml options.defaults); the job's win
+    if p.get("sound") is not None:
+        return sound(p)
     text, phon = p.get("text"), p.get("phonemes")
     if phon is not None and (not isinstance(phon, str) or not phon.strip()):
         raise ParamError("phonemes is a string of IPA")
@@ -304,6 +315,58 @@ def run(p):
         if native:
             res["speed"] = round(speed, 3)
     return res
+
+
+def sound(p):
+    """One phonics sound, pure (see the module doc)."""
+    import numpy as np
+    import soundfile as sf
+
+    snd = p.get("sound")
+    if not isinstance(snd, str) or not snd.strip():
+        raise ParamError("sound is one phonics sound in IPA")
+    if E["engine"] != "kokoro":
+        raise ParamError(f"sound: only the kokoro engine takes IPA, not {E['engine']!r}")
+    if p.get("wpm") is not None or p.get("fit_s") is not None:
+        raise ParamError("wpm and fit_s count syllables in text: a sound has none")
+    snd, carrier = snd.strip(), p.get("carrier", "ɑː")
+    if not isinstance(carrier, str):
+        raise ParamError('carrier is the IPA said after the sound ("" for none)')
+    hold_s = float(p.get("hold_s", 0.5))
+    if not 0 <= hold_s <= 2:
+        raise ParamError("hold_s is between 0 and 2 seconds")
+    edge, seed, kind = float(p.get("edge", 0.05)), int(p.get("seed") or 0), phonics.kind(snd)
+    t0 = time.perf_counter()
+    _seed(seed)
+    said = snd if kind == "vowel" else snd + carrier.strip()
+    x, sr, voice, _ = speak(dict(p, text=said, phonemes=said))
+    x = np.clip(x, -1, 1)
+    info = dict(ipa=snd, kind=kind, carrier=said if said != snd else None)
+    if said == snd:
+        x = pacing.tighten(x, sr, None, edge)
+    else:
+        try:
+            y, got = phonics.cut(x, sr, snd, hold_s, seed)
+        except ValueError as e:
+            raise RuntimeError(f"{e} in {said!r}") from e
+        info.update(got)
+        pad = np.zeros(int(edge * sr), np.float32)
+        x = np.concatenate([pad, y, pad])
+    out_dir = p.get("out_dir") or "."
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"tts-{uuid.uuid4().hex[:12]}.wav")
+    sf.write(path, x, sr, subtype="PCM_16")
+    return dict(
+        path=path,
+        duration_s=round(len(x) / sr, 3),
+        sample_rate=sr,
+        seconds=round(time.perf_counter() - t0, 3),
+        engine=E["engine"],
+        voice=voice,
+        seed=seed,
+        sound=info,
+        **phonics.measure(x, sr),
+    )
 
 
 if __name__ == "__main__":

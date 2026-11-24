@@ -247,3 +247,71 @@ def test_an_unknown_engine(sampled, tmp_path):
     sampled("nope")
     with pytest.raises(ParamError, match="unknown engine"):
         T.run(dict(text="hello", out_dir=str(tmp_path)))
+
+
+# ---- sound: one phonics sound, pure (workers/phonics.py cuts it from a carrier) -------------------------------------------------------------
+@pytest.fixture
+def carrier_kokoro(kokoro, monkeypatch):
+    """The fake Kokoro, saying a carrier as a hiss then a vowel (and anything else as before)."""
+    from sounds import carrier, hiss, vowel
+
+    plain = kokoro.create
+
+    def create(text, voice, speed, lang, is_phonemes=False):
+        if not text.endswith(("ɪ", "ɑː")):
+            return plain(text, voice, speed, lang, is_phonemes)
+        kokoro.calls.append(dict(text=text, voice=voice, speed=speed, lang=lang, is_phonemes=is_phonemes))
+        return carrier(hiss(0.12), vowel(0.25)), SR
+
+    monkeypatch.setattr(kokoro, "create", create)
+    return kokoro
+
+
+def test_a_sound_is_cut_from_a_carrier_and_held(carrier_kokoro, tmp_path):
+    r = T.run(dict(text="/ʃ/ (sh)", sound="ʃ", voice="bf_emma", out_dir=str(tmp_path)))
+    assert carrier_kokoro.calls == [dict(text="ʃɑː", voice="bf_emma", speed=1.0, lang="en-gb", is_phonemes=True)]
+    assert r["sound"] == dict(ipa="ʃ", kind="hiss", carrier="ʃɑː", span_s=r["sound"]["span_s"], held_s=0.5)
+    assert (
+        abs(r["duration_s"] - 0.6) < 0.01 and r["high"] > 0.9 and r["vowel_leak"] == 0
+    )  # 0.5 s held, 50 ms of silence either side
+    assert os.path.isfile(r["path"]) and "rate_wpm" not in r
+
+
+def test_a_sound_with_another_carrier_and_hold(carrier_kokoro, tmp_path):
+    r = T.run(dict(sound="s", carrier="ɪ", hold_s=0.3, edge=0, out_dir=str(tmp_path)))
+    assert carrier_kokoro.calls[0]["text"] == "sɪ" and abs(r["duration_s"] - 0.3) < 0.01
+
+
+def test_a_sound_alone_and_a_vowel_are_said_as_written(kokoro, tmp_path):
+    r = T.run(dict(sound="ʃ", carrier="", out_dir=str(tmp_path)))
+    v = T.run(dict(sound="iː", out_dir=str(tmp_path)))
+    assert [c["text"] for c in kokoro.calls] == ["ʃ", "iː"] and all(c["is_phonemes"] for c in kokoro.calls)
+    assert r["sound"] == dict(ipa="ʃ", kind="hiss", carrier=None) and v["sound"]["kind"] == "vowel"
+
+
+def test_a_carrier_with_no_vowel_to_find_fails_the_job(kokoro, monkeypatch, tmp_path):
+    monkeypatch.setattr(kokoro, "create", lambda *a, **k: (np.zeros(SR // 2, np.float32), SR))
+    with pytest.raises(RuntimeError, match="no vowel found to cut /m/ from in 'mɑː'"):
+        T.run(dict(sound="m", out_dir=str(tmp_path)))
+
+
+@pytest.mark.parametrize(
+    ("params", "says"),
+    [
+        (dict(sound=""), "sound is one phonics sound"),
+        (dict(sound=3), "sound is one phonics sound"),
+        (dict(sound="s", wpm=150), "a sound has none"),
+        (dict(sound="s", carrier=1), "carrier is the IPA"),
+        (dict(sound="s", hold_s=3), "hold_s is between"),
+    ],
+)
+def test_sound_refused(kokoro, tmp_path, params, says):
+    with pytest.raises(ParamError, match=says):
+        T.run(dict(params, out_dir=str(tmp_path)))
+    assert kokoro.calls == []
+
+
+def test_only_kokoro_takes_a_sound(monkeypatch, tmp_path):
+    monkeypatch.setattr(T, "E", dict(engine="qwen3-custom", name="Qwen", options={}, m=object()))
+    with pytest.raises(ParamError, match="only the kokoro engine"):
+        T.run(dict(sound="s", out_dir=str(tmp_path)))

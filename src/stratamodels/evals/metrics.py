@@ -259,6 +259,39 @@ def _max_pause(item, output, error):
     return None if m is None else float(m["max_pause_s"])
 
 
+# ---- phonics sounds (speak-consonants: workers/phonics.py, shared with the TTS worker that cuts them) -------------------------------------
+def sound_of(item, output, error):
+    """(the sound asked for, the measures of the clip made) for a phonics sound output: measured here from its file, with the same code the
+    worker used, so a recorded person's clip is measured exactly as a model's."""
+    snd = (item.get("input") or {}).get("sound")
+    path = output.get("path") if isinstance(output, dict) and not error else None
+    if not snd or not isinstance(path, str):
+        return None
+    from stratamodels.workers import pacing, phonics
+
+    try:
+        x, sr = pacing.read_wav(path)
+    except (OSError, EOFError, ValueError):
+        return None
+    return snd, phonics.measure(x, sr)
+
+
+def _sound_pure(item, output, error):
+    if error:
+        return False if (item.get("input") or {}).get("sound") else None
+    got = sound_of(item, output, error)
+    if got is None:
+        return None
+    from stratamodels.workers import phonics
+
+    return phonics.pure(*got)[0]
+
+
+def _vowel_leak(item, output, error):
+    got = sound_of(item, output, error)
+    return None if got is None else got[1]["vowel_leak"]
+
+
 def _fit_err(item, output, error):
     if error or not isinstance(output, dict) or not output.get("target_s"):
         return None
@@ -1315,6 +1348,22 @@ METRICS = {
             _long_pauses,
         ),
         Metric("max_pause_s", "mean", "lower", "The longest pause between words in a clip", "s", _max_pause),
+        Metric(
+            "sound_pure",
+            "binary",
+            "higher",
+            "A phonics sound said on its own, with no vowel added: a hiss that hisses, a nasal that is voiced, a stop that stays short (workers/phonics.py pure(): a check of gross failures, not of quality; a failed job fails it)",
+            "%",
+            _sound_pure,
+        ),
+        Metric(
+            "vowel_leak",
+            "mean",
+            "lower",
+            "Share of a phonics sound's energy in frames that look like a vowel (voiced, mostly in 500 Hz to 3 kHz; workers/phonics.py)",
+            "%",
+            _vowel_leak,
+        ),
         Metric(
             "fit_err",
             "mean",

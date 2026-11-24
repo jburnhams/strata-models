@@ -2,6 +2,17 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-24
+
+**speak: `sound`, a phonics consonant said pure ("mmm", not "muh"), and eval speak-consonants (#111)**
+Kokoro asked for a lone consonant in IPA gives about 20 ms of it and then a vowel (#110). Said at the start of a syllable it comes out whole, so the role now says a carrier (the sound then /ɑː/) and cuts the sound from before the vowel. Tried on the 25 consonants of Letters and Sounds in a cloud container (CPU, kokoro-onnx 0.6): with bf_emma 24 pass the purity check (none said alone); bf_alice 25, bf_isabella 22, bm_lewis 19, bm_george 13 to 16 (Kokoro's male voices give weaker nasals and h). Not yet listened to: the eval's blind judging decides.
+- `workers/phonics.py` (**new**, numpy only, shared by the worker and the metrics): the 25 consonants and how each is said; the vowel onset (each frame's log spectrum against the vowel's, the loud frames); within it a hiss's high-band run or a nasal's low-band run; `hold` (grains at whole pitch periods for a voiced sound, at random for noise); `measure` (high, low, voiced, vowel_leak) and `pure` (a rough pass or fail per kind).
+- `workers/tts.py`: params `sound`, `carrier` (default "ɑː"; "" says it alone, the baseline) and `hold_s` (default 0.5); a vowel is said as written. The result has `sound` {ipa, kind, carrier, span_s, held_s} and the measures. Kokoro only.
+- Eval `speak-consonants` (dataset `phonics-consonants-25` from `scripts/evals/phonics_sounds.py`): metrics `sound_pure` and `vowel_leak` (evals/metrics.py), blind judging against the sound said alone. `--recordings DIR` copies a person's recordings in as model `phonics-person` (runtime `recorded`, by sound), the candidate the models are compared with.
+- Tried and dropped: holding the consonant inside Kokoro (its duration predictor's output exposed and raised in the ONNX graph: a held /s/ comes out as a vowel), a coda carrier (/ɪʃ/: Kokoro's trailing breath gets in), and forced alignment with wav2vec2 espeak CTC (its spikes give where a sound is, not how long). That recogniser also hears little in an isolated sound, so it is not a judge here yet.
+- `pyproject.toml`: tts.py and phonics.py may hold IPA in docstrings (RUF002, RUF003). Client `speak` docstring.
+- Tests: `test_phonics.py` (**new**, synthetic hiss, hum, burst and vowel in `tests/utils/sounds.py`), `test_tts_worker.py` (sound), `tests/gpu` (`test_speak_pure_consonants_on_kokoro`).
+
 ## 2026-11-23
 
 **speak: `phonemes`, IPA said as written, for the sounds of phonics (branch `claude/project-thread-8d9l62`)**
