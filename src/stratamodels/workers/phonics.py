@@ -132,7 +132,14 @@ def period(y, sr):
     head = e[n - 1 - np.arange(n)]  # energy of y[: n - t]
     tail = e[-1] - np.concatenate([[0.0], e[:-1]])  # energy of y[t:]
     r = c / np.sqrt(np.maximum(head * tail, 1e-20))
-    t = lo + int(np.argmax(r[lo:hi]))
+    # every multiple of the period correlates about as well as the period itself (a steady tone: 0.99999999999999 at 160 and at 320
+    # samples), so a plain argmax picks either by rounding, which differs by platform (macOS CI found 320): the shortest lag within 1 %
+    # of the best, among the peaks (the lags beside a peak are within 1 % of it too), is the period
+    w = r[lo - 1 : hi + 1] if lo > 0 else np.concatenate([[-np.inf], r[: hi + 1]])
+    peak = (w[1:-1] >= w[:-2]) & (w[1:-1] >= w[2:])
+    best = float(np.max(w[1:-1]))
+    ok = peak & (w[1:-1] >= 0.99 * best)
+    t = lo + int(np.argmax(ok) if ok.any() else np.argmax(w[1:-1]))  # no peak inside the range: its best end, as before
     return t if r[t] > 0.6 else None
 
 
