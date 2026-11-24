@@ -177,3 +177,12 @@ def test_the_labelled_pages_are_drawable_and_consistent():
             parts = ref[part]
             assert M.match_boxes(parts, parts) == [(i, i) for i in range(len(parts))], pid
         assert M.METRICS["block_f1"].score(dict(reference=dict(page=ref)), dict(page=ref), None) == 1.0
+
+
+def test_figures_page_build_cut_from_the_scan_itself_are_not_a_readers_finds():
+    rule = dict(
+        box=[100, 40, 800, 3], kind="rule"
+    )  # page-build's rules and unread print, listed in the answer's scan_figures
+    out = dict(page=dict(REF, figures=[*REF["figures"], rule, dict(box=[300, 1350, 400, 30])]), scan_figures=[1, 2])
+    assert score("figure_f1", out) == 1.0
+    assert score("figure_f1", dict(out, scan_figures=[])) == pytest.approx(2 * 1 / (1 + 3))

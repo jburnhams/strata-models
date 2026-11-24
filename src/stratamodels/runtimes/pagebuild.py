@@ -25,6 +25,8 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   snap        with `font_fit`: sizes within this fraction of their block's median size take the median (default 0: as fitted), so a block of
               one type size is drawn in one size, not the word-by-word scatter of a fit to worn print
   crop        cut each figure's picture out of the scan (`image`), its paper whitened, rather than leave its box empty
+  unread      cut the print no drawn line or figure covers out of the scan as figures (a line Tesseract never read, an ornament): a
+              rebuilt page never silently loses print
   rules       find the ruled lines the scan's ink holds (the border round the page, the rule under a running head) and draw each as a
               figure of kind rule cut from the scan: no reader is asked for them (page-layout-fix-v2 leaves the border out)
   group       with `ocr` and no `groups`, on a model whose options name a layout model (`group`, as `pagebuild-opus-layout` does: the
@@ -43,9 +45,11 @@ params (one of `page`, `ocr` or `layout`; each as JSON, as JSON text (a model's 
   fit         fit each line's spacing to its box (default true)
   out         the .pdf path to write (default: <data>/pages/<hash of the description>.pdf, so a rebuild is cached by what decides it)
   png         also write the PDF rasterised at the scan's dpi beside it (default true): what the blind judge and the ink metrics look at
-Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds,
+Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs show), width, height, dpi, text (read back from the PDF, in reading order), page (the description drawn), blocks, lines, seconds, scan_figures (the
+indexes of page.figures found in the scan here, by `rules` and `unread`, not named by a reader),
 grouper ({model, seconds, cost_usd} or {model, seconds, error}; null when no layout model was asked), cost_usd (the layout model's, when it cost any)}."""
 
+import functools
 import glob
 import hashlib
 import itertools
@@ -283,6 +287,44 @@ def _styled(
     return (style if style == "small-caps" else "roman"), f"{face}:roman"
 
 
+OVERRUN = 1.05  # a fitted word may be drawn this much wider than Tesseract's box for it before it is set smaller
+
+
+@functools.lru_cache(maxsize=64)
+def _metrics(path: str) -> Any:
+    """The font at 1000 px, to measure advances with (None when it cannot be read: no shrinking then)."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype(path, 1000)
+    except OSError:
+        return None
+
+
+def _shrink(
+    parts: Sequence[str], fitted: Sequence[Mapping[str, Any]], files: Sequence[str], boxes: Sequence[Any]
+) -> list[float]:
+    """A factor for each word's fitted size, so no word is drawn much wider than Tesseract's box for it. A fit takes a line's size from
+    its first word, so one bad box (Tesseract joining a capital to a descender of the line above: a box twice the type's height) sets
+    the whole line twice too big, and it runs off the page over its neighbours (page-rebuild, 2026-11-24: ward1874-leaf034). Overrun
+    shared by the line (its median) scales the whole line; a word still too wide after that (a corrected word longer than the one read)
+    is set smaller on its own."""
+    ratios: list[float] = []
+    for t, wd, path, box in zip(parts, fitted, files, boxes, strict=True):
+        font = _metrics(path) if path else None
+        px, w = float(wd.get("size_px") or 0.0), float(cast("Sequence[Any]", box)[2])
+        if font is None or px <= 0 or w <= 0:
+            ratios.append(1.0)
+            continue
+        drawn = float(font.getlength(t)) / 1000 * px * float(wd.get("hscale") or 1.0) + float(
+            wd.get("tracking_em") or 0.0
+        ) * px * max(0, len(t) - 1)
+        ratios.append(drawn / w)
+    line = statistics.median(ratios) if ratios else 1.0
+    f = 1 / line if line > OVERRUN else 1.0
+    return [min(f, OVERRUN / r) if r * f > OVERRUN else f for r in ratios]
+
+
 def line_maker(
     texts: Mapping[int, str] | None = None,
     fit: tuple[str, Mapping[tuple[int, ...], Mapping[str, Any]], Mapping[str, str]] | None = None,
@@ -308,14 +350,16 @@ def line_maker(
         parts = text.split()
         if len(parts) == len(own) and len(known) == len(got):
             spans: list[Span] = []
+            styled = [_styled(face, fonts, wd, keep) for wd in known]
+            shrink = _shrink(parts, known, [fonts.get(key, "") for _st, key in styled], [w["box"] for w in own])
             for i, (t, wd) in enumerate(zip(parts, known, strict=True)):
-                style, key = _styled(face, fonts, wd, keep)
+                style, key = styled[i]
                 spans.append(
                     Span(
                         t + (" " if i < len(parts) - 1 else ""),
                         style=style,
                         face=key,
-                        size_pt=float(wd["size_pt"]),
+                        size_pt=float(wd["size_pt"]) * shrink[i],
                         tracking_em=float(wd.get("tracking_em") or 0.0),
                         hscale=float(wd.get("hscale") or 1.0),
                         stroke_em=float(wd.get("stroke_em") or 0.0),
@@ -552,6 +596,63 @@ def add_rules(page: Page, image: str) -> None:
         )
         path = _save_crop(crop, ["rule", _stamp(image), [a0, b0, a1, b1]])
         page.figures.append(Figure(box=(a0 * kx, b0 * ky, (a1 - a0) * kx, (b1 - b0) * ky), image=path, kind="rule"))
+
+
+UNREAD_MM = 0.8  # ink of the print that no drawn line, picture or rule covers is gathered into pieces with gaps up to this wide bridged
+UNREAD_MIN_MM = 2.5  # a piece at least this tall or wide is print nobody read (a line Tesseract missed); smaller is a speck or a stray stroke
+
+
+def add_unread(page: Page, image: str) -> None:
+    """The scan's print that the page does not draw (a line of display type Tesseract never read: ward1874-leaf034's last line, an
+    ornament, a border's worn corner) as figures, each its own ink cut from the scan, so a rebuilt page never silently
+    loses print. Only ink within the print (the blocks, grown as for rules) outside every drawn line and figure counts."""
+    if not page.blocks:
+        return
+    from scipy import ndimage  # pyright: ignore[reportMissingTypeStubs]  (scipy ships no stubs)
+
+    from stratamodels.evals import ink as INK  # pyright: ignore[reportMissingTypeStubs]
+
+    nd: Any = ndimage
+    g = _paper(image)
+    kx, ky = page.width / g.shape[1], page.height / g.shape[0]
+    dpi = page.dpi / kx
+    with Image.open(image) as im:
+        ink = np.array(cast("Any", INK).binarise(im, dpi, deskew=False)[0], dtype=bool)
+    hgt, wid = ink.shape
+    tx, ty, tw, th = _union([b.box for b in page.blocks])
+    rx, ry = RULE_REACH * page.width, RULE_REACH * page.height
+    area = np.zeros_like(ink)
+    area[
+        max(0, int((ty - ry) / ky)) : min(hgt, int((ty + th + ry) / ky)),
+        max(0, int((tx - rx) / kx)) : min(wid, int((tx + tw + rx) / kx)),
+    ] = True
+    covered = np.zeros_like(ink)
+    for b in [ln.box for blk in page.blocks for ln in blk.lines] + [f.box for f in page.figures]:
+        x, y, w, h = b
+        m = 0.15 * h if w > h else 0.15 * w  # a line's box is Tesseract's, which can clip an ascender or a descender
+        covered[
+            max(0, int((y - m) / ky)) : int((y + h + m) / ky) + 1, max(0, int((x - m) / kx)) : int((x + w + m) / kx) + 1
+        ] = True
+    left = ink & area & ~covered
+    if not left.any():
+        return
+    bridge = max(1, round(UNREAD_MM * dpi / 25.4))
+    lab, _n = nd.label(nd.binary_dilation(left, iterations=bridge), structure=np.ones((3, 3), dtype=bool))
+    least = UNREAD_MIN_MM * dpi / 25.4
+    for i, sl in enumerate(cast("list[Any]", nd.find_objects(lab)), 1):
+        if sl is None:
+            continue
+        ys, xs = cast("slice", sl[0]), cast("slice", sl[1])
+        y0, y1, x0, x1 = int(ys.start), int(ys.stop), int(xs.start), int(xs.stop)
+        if max(y1 - y0, x1 - x0) < least:
+            continue
+        keep = (lab[ys, xs] == i) & left[ys, xs]
+        keep = cast("np.ndarray[Any, np.dtype[np.bool_]]", nd.binary_dilation(keep, iterations=2))
+        crop = cast("np.ndarray[Any, np.dtype[np.uint8]]", cast("Any", np).where(keep, g[ys, xs], 255).astype(np.uint8))
+        path = _save_crop(crop, ["unread", _stamp(image), [x0, y0, x1, y1]])
+        page.figures.append(
+            Figure(box=(x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky), image=path, kind="figure")
+        )  # pages has no kind for it: the answer's `scan_figures` names them
 
 
 def _picture(path: object, dpi: object) -> tuple[int, int, float]:
@@ -814,13 +915,18 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     fonts.update(_fonts(params))
     fonts = {k: truetype(v) for k, v in fonts.items()}
     image = params.get("image")
-    if params.get("crop") or params.get("rules"):
+    readers = len(
+        page.figures
+    )  # the figures a reader named; those after are found in the scan here (rules, unread print)
+    if params.get("crop") or params.get("rules") or params.get("unread"):
         if not isinstance(image, str) or not os.path.isfile(image):
-            raise RunError("crop and rules cut from the scan: give its picture (image)")
+            raise RunError("crop, rules and unread cut from the scan: give its picture (image)")
         if params.get("crop"):
             crop_figures(page, image)
         if params.get("rules"):
             add_rules(page, image)
+        if params.get("unread"):
+            add_unread(page, image)
     fit = params.get("fit", True) is not False
     try:
         pdf = render(page, fonts, small_caps_faces=small_caps, fit=fit)
@@ -865,5 +971,6 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         seconds=round(time.monotonic() - t0, 3),
         model=handle.get("key"),
         grouper=grouper,
+        scan_figures=list(range(readers, len(page.figures))),
         **({"cost_usd": grouper["cost_usd"]} if grouper and isinstance(grouper.get("cost_usd"), (int, float)) else {}),
     )

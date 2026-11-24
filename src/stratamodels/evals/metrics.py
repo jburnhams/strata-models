@@ -720,6 +720,11 @@ def _parts_f1(key):
             return None
         r = ref.get(key) or []
         g = [] if error else (_page_out(output) or {}).get(key) or []
+        if key == "figures" and isinstance(output, dict):
+            # rules and unread print page-build cut from the scan itself (its `rules` and `unread`) are not a reader's finds: scoring them
+            # took the full rebuild's figure F1 from 29 % to 13 % on the same reader's figures (page-rebuild, 2026-11-23)
+            cut = set(output.get("scan_figures") or [])
+            g = [f for i, f in enumerate(g) if i not in cut]
         if not r and not g:
             return None  # nothing to find and nothing found: says nothing about the reader
         return 2 * len(match_boxes(r, g)) / (len(r) + len(g))

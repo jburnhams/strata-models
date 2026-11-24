@@ -122,11 +122,11 @@ also = ["image"]
 answer = "json"
 into = "font_fit"
 
-# ---- 4. + one size per block, pictures and rules cut from the scan: the full recipe ----------------------------------------------------
+# ---- 4. + one size per block, pictures, rules and print nobody read cut from the scan: the full recipe ------------------------------------
 [[candidates]]
 name = "full"
 model = "pagebuild"
-params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true, unread = true }
 note = "sizes within 10 % of their block's median set to it, words fitted bold or small capitals set in roman, figures and the scan's ruled lines (the border) cut from the scan"
 
 [[candidates.stages]]
@@ -169,7 +169,7 @@ into = "font_fit"
 [[candidates]]
 name = "full-opus"
 model = "pagebuild"
-params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true, unread = true }
 
 [[candidates.stages]]
 role = "page-build"
@@ -213,7 +213,7 @@ into = "font_fit"
 [[candidates]]
 name = "full-every-face"
 model = "pagebuild"
-params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true }
+params = { snap = 0.1, styles = ["roman", "italic"], crop = true, rules = true, unread = true }
 
 [[candidates.stages]]
 role = "page-build"

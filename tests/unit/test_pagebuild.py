@@ -722,3 +722,55 @@ def test_a_cff_face_is_drawn_through_a_truetype_copy_made_once(tmp_path):
     assert "ABC DEF" in out["text"]
     with Image.open(out["png"]) as im:
         assert im.convert("L").getextrema()[0] < 100  # the boxes are drawn
+
+
+# ---- what the fit gets wrong on display pages (page-rebuild, 2026-11-24: ward1874-leaf034) ------------------------------------------------
+def test_a_line_fitted_too_big_from_one_bad_box_is_set_to_its_words_boxes(ttf):
+    font = ImageFont.truetype(ttf, 1000)
+    words = ["FOR", "YOUNG", "LADIES"]
+    true_px = 100.0
+    boxes = [[0, 0, font.getlength(w) / 1000 * true_px, 100] for w in words]
+    fitted = [
+        dict(size_px=2 * true_px, hscale=1.0) for _ in words
+    ]  # the size of the first word's box, twice the type's
+    shrink = pagebuild._shrink(words, fitted, [ttf] * 3, boxes)
+    assert shrink == pytest.approx([0.5, 0.5, 0.5])
+    # a word that fits keeps its size; one corrected longer than the word read is set smaller on its own
+    fitted = [dict(size_px=true_px, hscale=1.0) for _ in words]
+    shrink = pagebuild._shrink(["FOR", "YOUNG", "LADIES!!!"], fitted, [ttf] * 3, boxes)
+    assert shrink[:2] == [1.0, 1.0] and shrink[2] < 0.9
+    assert pagebuild._shrink(words, fitted, ["", "", ""], boxes) == [
+        1.0,
+        1.0,
+        1.0,
+    ]  # a face that cannot be read: as fitted
+
+
+def test_unread_print_is_cut_from_the_scan_and_listed_as_found_there(tmp_path):
+    pic = tmp_path / "scan.png"
+    im = Image.new("L", (1000, 1400), 230)
+    d = ImageDraw.Draw(im)
+    d.rectangle((200, 300, 800, 340), fill=20)  # a line Tesseract read
+    d.rectangle((250, 500, 750, 560), fill=20)  # a line of display type it never read
+    d.rectangle((600, 420, 603, 423), fill=20)  # a speck
+    d.rectangle((300, 1300, 700, 1340), fill=20)  # print far below everything read: outside the print area
+    im.save(pic, dpi=(300, 300))
+    ocr = dict(
+        width=1000,
+        height=1400,
+        lines=[
+            dict(text="read", box=[200, 300, 600, 40], block=1, words=[dict(text="read", box=[200, 300, 600, 40])]),
+            dict(text="also", box=[200, 600, 600, 40], block=1, words=[dict(text="also", box=[200, 600, 600, 40])]),
+        ],
+    )
+    d.rectangle((200, 600, 800, 640), fill=20)
+    im.save(pic, dpi=(300, 300))
+    groups = dict(blocks=[dict(lines=[1, 2], role="body")], figures=[])
+    r = pagebuild.run(handle(), dict(ocr=ocr, groups=groups, image=str(pic), unread=True))
+    figs = r["page"]["figures"]
+    assert r["scan_figures"] == list(range(len(figs))) and len(figs) == 1
+    x, y, w, h = figs[0]["box"]
+    assert abs(x - 250) < 15 and abs(y - 500) < 15 and abs(w - 500) < 25 and abs(h - 60) < 25
+    with Image.open(r["png"]) as out:
+        assert out.getpixel((500, 530)) < 128  # drawn
+    assert pagebuild.run(handle(), dict(ocr=ocr, groups=groups, image=str(pic)))["scan_figures"] == []

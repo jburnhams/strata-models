@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Rebuilt pages: no line drawn far bigger than its words, and print nobody read is cut from the scan (branch `claude/project-thread-dvu0cz`)**
+Jonathan judged page-rebuild pages and found overlapping and missing text (ward1874-leaf034). A font fit takes a line's size from its first word, and Tesseract boxed "FOR" with a descender of the line above, so "FOR YOUNG LADIES AND MISSES" was set at twice its size over the heading; and Tesseract never read the page's last line, so nothing drew it.
+- `runtimes/pagebuild.py`: `_shrink`: a word is set no more than 5 % wider than Tesseract's box for it: overrun shared by a line (its median) scales the line, a word still too wide (a corrected word longer than the one read) is set smaller alone. New `unread`: ink within the print that no drawn line or figure covers is cut from the scan as figures (pieces of 2.5 mm or more, gaps up to 0.8 mm bridged). The answer's new `scan_figures` lists the figures found in the scan by `rules` and `unread`.
+- `evals/metrics.py`: `figure_f1` leaves out `scan_figures`: they are not a reader's finds (scoring the rules took the full rebuild's figure F1 from 29 % to 13 %).
+- `evals/specs/page-rebuild.toml`: `unread = true` on the full candidates.
+- Tests in `test_pagebuild.py` and `test_page_metrics.py`.
+
 **Eval speak-consonants: the default cut is the baseline**
 The first live run (2026-11-24, 150 jobs, none failed) scored sound_pure 100 % for kokoro-alice-cut, 96 % for emma-cut and emma-cut-short, 88 % for emma-cut-i, 76 % for lewis-cut and 0 % for the sound said alone. Blind pairs against that 0 % baseline could not tell the cuts apart, so `kokoro-emma-cut` is now the baseline and the pairs compare the cuts with each other. kokoro-emma-alone stays as a candidate for the metrics, with `judge = false` so it is in no new pair.
 
