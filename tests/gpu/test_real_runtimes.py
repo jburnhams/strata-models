@@ -565,3 +565,48 @@ def test_font_match_fits_the_real_catalogue(tmp_path):
     print(f"\nfontfit: {r['face']} ink_f1 {r['ink_f1']} in {r['seconds']} s; ranked {[f['face'] for f in r['faces']]}")
     assert r["face"] == "old-standard"
     assert r["blocks"][0]["lines"][0]["words"][0]["size_px"] == pytest.approx(60.0, rel=0.08)
+
+
+WRITE_SCHEMA = dict(
+    type="object",
+    properties=dict(
+        prompts=dict(
+            type="array",
+            items=dict(
+                type="object",
+                properties=dict(text=dict(type="string"), style=dict(type="string")),
+                required=["text", "style"],
+                additionalProperties=False,
+            ),
+        )
+    ),
+    required=["prompts"],
+    additionalProperties=False,
+)
+
+
+@pytest.mark.skipif(
+    bool(runtimes.available()["claude-api"]), reason="needs the anthropic SDK and ANTHROPIC_API_KEY (keys.py)"
+)
+def test_write_role_follows_a_brief_and_a_schema():
+    """Role `write` (a cloud model, no GPU): a recording-prompt brief of the kind strata-voice sends, answered in its JSON schema."""
+    m = Registry.load().resolve("write")
+    rt = runtimes.get(m.runtime)
+    h = rt.load(m, MODELS)
+    try:
+        out = rt.run(
+            h,
+            dict(
+                system="You write short sentences for a speaker to read aloud when recording a voice dataset, in British English.",
+                prompt="Write 3 new prompts. Each is one sentence of 6 to 15 words, with no digits, and uses the sound /ʒ/ as in "
+                "“measure”. Give each a style from: neutral, happy, surprised.",
+                schema=WRITE_SCHEMA,
+                max_tokens=1000,
+            ),
+        )
+    finally:
+        rt.unload(h)
+    print(f"\n{m.key} write ({out['seconds']} s, {out['cost_usd']} USD): {out['json']}")
+    prompts = out["json"]["prompts"]
+    assert len(prompts) == 3 and all(p["style"] in {"neutral", "happy", "surprised"} for p in prompts)
+    assert all(6 <= len(p["text"].split()) <= 15 and not any(c.isdigit() for c in p["text"]) for p in prompts)
