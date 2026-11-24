@@ -1,0 +1,47 @@
+name = "shots-vhs"
+question = "Which settings should serve shot-boundaries on a real digitised VHS tape, with its torn restarts and its lost signal at both ends?"
+role = "shot-boundaries"
+dataset = "shots-vhs"        # scripts/evals/marked_shots.py: windows of one family tape (21 min, PAL) whose cuts were marked by eye; private, kept in the data directory
+metrics = ["cut_f1", "cut_miss", "cut_false", "latency_s", "failed"]
+
+# shots-spliced has the exact cuts but not the tape's faults. The baseline is what served before 2026-11-24: threshold 0.3 and no search for
+# stretches with no picture. A missed cut joins two shots the editor cannot split, so cut_miss is read first; the `signal` windows (the picture
+# comes or goes) beside the rest.
+[decision]
+primary = "cut_f1"
+baseline = "ffmpeg-0.3-plain"
+min_effect = 0.02
+guards = { latency_s = 3.0, failed = 1.0 }
+
+[[candidates]]
+name = "ffmpeg-0.3-plain"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.3, blank = false }
+note = "what served before 2026-11-24"
+
+[[candidates]]
+name = "ffmpeg-0.3"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.3 }
+note = "stretches with no picture found"
+
+[[candidates]]
+name = "ffmpeg-0.25"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.25 }
+
+[[candidates]]
+name = "ffmpeg-0.2"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.2 }
+
+[[candidates]]
+name = "ffmpeg-0.15"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.15 }
+
+[[candidates]]
+name = "ffmpeg-0.2-min0.2"
+model = "ffmpeg-scene-score"
+params = { threshold = 0.2, min_shot_s = 0.2 }
+note = "keeps a camcorder's quarter-second shots, at the risk of splitting torn restarts"

@@ -69,3 +69,20 @@ def test_a_file_that_is_not_video_fails_with_ffmpegs_reason(tmp_path):
     bad.write_text("not a video")
     with pytest.raises(RunError, match="ffmpeg failed"):
         scenes.run(handle(tmp_path), {"path": str(bad)})
+
+
+def test_a_flashing_stretch_with_no_picture_is_one_black_shot(tmp_path):
+    """A test pattern, then 2 s of flat grey that jumps between two levels every few frames and 2 s of snow: one gap, no cut in it."""
+    path = tmp_path / "lost.mp4"
+    flash = "geq=lum='if(lt(mod(N,8),4),30,190)':cb=128:cr=128"
+    snow = "geq=lum='random(1)*255':cb=128:cr=128"
+    grey = "color=gray:s=720x576:r=25:d=2"
+    graph = f"[1]{flash}[f];[2]{snow}[n];[0][f][n]concat=n=3:v=1,format=yuv420p[v]"
+    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=720x576:r=25:d=2"]
+    cmd += ["-f", "lavfi", "-i", grey, "-f", "lavfi", "-i", grey, "-filter_complex", graph, "-map", "[v]"]
+    subprocess.run([*cmd, "-c:v", "libx264", "-crf", "10", str(path)], check=True)
+    r = scenes.run(handle(tmp_path), {"path": str(path)})
+    assert [c["frame"] for c in r["cuts"]] == [50] and r["black"] == [{"start": 2.0, "end": 6.0}]
+    assert r["frames"] == 150
+    # without it, the flashes are cuts
+    assert len(scenes.run(handle(tmp_path), {"path": str(path), "blank": False})["cuts"]) > 1

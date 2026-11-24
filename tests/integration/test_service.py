@@ -154,5 +154,5 @@ def test_shots_finds_the_cuts_through_the_service(service, tmp_path):
     result, p = sm.run_with_provenance("shot-boundaries", dict(path=str(video)), app="it")
     now = sm.role_settings("shot-boundaries")
     assert result["cuts"] == r["cuts"] and p["model"] == now["model"] == "ffmpeg-scene-score"
-    assert p["options"]["threshold"] == 0.3 and p["settings_hash"] == now["settings_hash"] and p["job_id"] > 0
+    assert p["options"]["threshold"] == 0.2 and p["settings_hash"] == now["settings_hash"] and p["job_id"] > 0
     assert sm.provenance(get(service, f"/api/jobs/{p['job_id']}")) == p

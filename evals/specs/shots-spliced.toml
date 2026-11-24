@@ -18,7 +18,7 @@ guards = { latency_s = 3.0, failed = 1.0 }
 name = "ffmpeg-0.3"
 model = "ffmpeg-scene-score"
 params = { threshold = 0.3 }
-note = "what serves shot-boundaries today: scene score at 160 px after yadif"
+note = "what served shot-boundaries before 2026-11-24 (0.2 since, eval shots-vhs): scene score at 160 px after yadif"
 
 [[candidates]]
 name = "ffmpeg-0.2"

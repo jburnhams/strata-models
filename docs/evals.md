@@ -128,6 +128,11 @@ The first candidates tune the ffmpeg baseline (threshold, width); the rivals (20
 PySceneDetect's adaptive and content detectors, one venv worker (`workers/shots.py`, venv `shots`) that sees the same deinterlaced frames,
 finds the same black stretches and applies the same minimum shot length as the baseline, so only the detector differs.
 
+**On a real tape (`shots-vhs`).** Spliced race files have exact cuts but none of a tape's faults, so `scripts/evals/marked_shots.py` makes
+a second dataset from one real tape whose cuts a person marked (a text file of frame numbers, kept with the tape in the data directory: it is
+private). Each item is a window of the tape (`clip`), about 80 s, `tags.kind` `signal` where the picture comes or goes. Baseline: what
+served before 2026-11-24, threshold 0.3 with no search for stretches with no picture.
+
 **Subjective cuts** (later, role `cut-points`): where to cut inside one shot, which has no single right answer. Two ways to measure it: a
 score from what the cut lands on (does it break a spoken phrase: word times from transcription; does it interrupt a movement: motion just
 before and after the cut), and blind A/B judging in the Judge tab, two candidates' cuts of the same shot played side by side
