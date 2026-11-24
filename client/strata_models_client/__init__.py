@@ -187,7 +187,8 @@ def role_settings(role):
 def speak(text, app, priority="normal", model=None, **params):
     """Speech from text (role `speak`): params voice (a preset name, or a reference recording's path for the cloning models), speed (1.0 = the
     model's own pace), instruct, language, seed, phonemes (Kokoro: IPA said as written, for a sound no word spells alone; `text` is then
-    its label). Without model and voice, the voice and settings the role's eval chose. Returns {path (a WAV on
+    its label), sound (Kokoro: one phonics sound in IPA, said pure with no vowel added, "mmm" not "muh": a consonant is cut from a
+    carrier syllable and held for hold_s, a stop keeps its burst; text is then its label). Without model and voice, the voice and settings the role's eval chose. Returns {path (a WAV on
     this machine, the service's copy: copy it if it must last), duration_s, sample_rate, seconds, engine, voice}."""
     if params.get("voice") and os.path.exists(str(params["voice"])):
         params["voice"] = os.path.abspath(params["voice"])

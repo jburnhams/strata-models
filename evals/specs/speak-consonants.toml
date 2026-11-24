@@ -1,0 +1,60 @@
+name = "speak-consonants"
+question = "Can the speak role say a phonics consonant pure ('mmm', not 'muh'), well enough to stand in for a person's recording?"
+role = "speak"
+dataset = "phonics-consonants-25"   # scripts/evals/phonics_sounds.py: the 25 consonant sounds of Letters and Sounds, Phases 2 and 3
+metrics = ["judged", "sound_pure", "vowel_leak", "failed"]
+judge = true                        # listen, blind: is it the sound, said on its own, and does a held sound sound natural?
+
+[decision]
+primary = "judged"                  # share of blind pairs won against Kokoro saying the sound alone (what the role gave before, PR #110)
+baseline = "kokoro-emma-alone"
+min_effect = 0.1
+guards = { failed = 1.0 }
+
+# `sound` (workers/tts.py, workers/phonics.py): Kokoro says the sound at the start of a carrier syllable (the sound then "ɑː") and the
+# sound is cut from before the vowel; s, sh, f, th, h, z, v, m, n, ng, l and r are held for hold_s, the stops keep their burst alone.
+# carrier = "" says the sound alone, as `phonemes` does: Kokoro then adds a vowel, the failure this eval is about.
+# The person: their own recordings, replayed (model phonics-person, runtime recorded): build the dataset with --recordings DIR first. Until
+# then its jobs fail; it is there so the write-up can say how close the cut sounds come to a person's.
+
+[[candidates]]
+name = "kokoro-emma-alone"
+model = "kokoro-v1"
+params = { voice = "bf_emma", carrier = "" }
+note = "the sound alone in IPA (PR #110's phonemes): a vowel follows the consonant"
+
+[[candidates]]
+name = "kokoro-emma-cut"
+model = "kokoro-v1"
+params = { voice = "bf_emma" }
+note = "cut from /Cɑː/, held 0.5 s (24 of 25 pass sound_pure when tried, 2026-11-24)"
+
+[[candidates]]
+name = "kokoro-emma-cut-i"
+model = "kokoro-v1"
+params = { voice = "bf_emma", carrier = "ɪ" }
+note = "cut from /Cɪ/, held 0.5 s (22 of 25)"
+
+[[candidates]]
+name = "kokoro-emma-cut-short"
+model = "kokoro-v1"
+params = { voice = "bf_emma", hold_s = 0.3 }
+note = "cut from /Cɑː/, held 0.3 s"
+
+[[candidates]]
+name = "kokoro-alice-cut"
+model = "kokoro-v1"
+params = { voice = "bf_alice" }
+note = "25 of 25"
+
+[[candidates]]
+name = "kokoro-lewis-cut"
+model = "kokoro-v1"
+params = { voice = "bm_lewis" }
+note = "19 of 25: Kokoro's male voices give weaker nasals and h"
+
+[[candidates]]
+name = "person"
+model = "phonics-person"
+params = {}
+note = "a person's own recordings (scripts/evals/phonics_sounds.py --recordings)"

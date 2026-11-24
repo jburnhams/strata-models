@@ -217,6 +217,25 @@ def test_speak_ipa_on_kokoro():
     assert os.path.isfile(out["path"]) and 0.1 < out["duration_s"] < 2.0
 
 
+def test_speak_pure_consonants_on_kokoro():
+    """`sound`: /ʃ/ cut from /ʃɑː/ and held hisses with no vowel after it; said alone (carrier "") it does not. Measured in a cloud container
+    on 2026-11-24 (bf_emma): 24 of the 25 consonants pass phonics.pure, against none said alone. Listen to the clips too."""
+    from stratamodels.runtimes import worker
+
+    m = Registry.load().models["kokoro-v1"]
+    if not os.path.isfile(worker.python_of(m, MODELS)[1]):
+        pytest.skip("no venv for kokoro-v1: scripts/setup_worker_venv.sh kokoro")
+    cut, _ = measure(m, dict(text="/ʃ/", sound="ʃ", voice="bf_emma"))
+    alone, _ = measure(m, dict(text="/ʃ/", sound="ʃ", carrier="", voice="bf_emma"))
+    assert (
+        cut["sound"]["kind"] == "hiss"
+        and cut["high"] > 0.5
+        and cut["vowel_leak"] < 0.1
+        and abs(cut["duration_s"] - 0.6) < 0.02
+    )
+    assert alone["high"] < cut["high"]
+
+
 @pytest.mark.skipif(
     not IMAGE or bool(runtimes.available()["face-kind"]) or bool(runtimes.available()["insightface"]),
     reason="needs STRATAMODELS_TEST_IMAGE (a photo of a real person), insightface, open_clip and torch",

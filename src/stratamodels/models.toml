@@ -493,6 +493,16 @@ source = "https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v
 used_by = ["strata-360"]
 options = { worker = "tts", venv = "kokoro", engine = "kokoro" }
 
+[models."phonics-person"]
+runtime = "recorded"
+name = "A person's recordings of the phonics sounds"
+roles = ["speak"]
+vram_gb = 0.0
+licence = "recordings made for this eval"
+source = "scripts/evals/phonics_sounds.py --recordings"
+# Not a model: a person saying each consonant pure, replayed by sound, so eval speak-consonants measures the models against a person.
+options = { file = "evals/recorded/phonics-person.jsonl", by = "sound" }
+
 [models.chatterbox]
 runtime = "venv-worker"
 name = "ResembleAI/chatterbox"
