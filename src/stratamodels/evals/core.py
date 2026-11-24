@@ -844,6 +844,19 @@ def cached(engine, keys):
         return {r.key: r for r in s.scalars(select(EvalResult).where(EvalResult.key.in_(list(keys))))} if keys else {}
 
 
+def cached_failed(engine, keys):
+    """{key: failed} of the cached outputs among `keys`, without reading the outputs: a count or a to-do list needs only which are there,
+    and loading every output (OCR pages, pipeline traces) made the evals list take minutes."""
+    keys, out = list(keys), {}
+    if not keys:
+        return out
+    with session(engine) as s:
+        for i in range(0, len(keys), 2000):  # in chunks: SQLite allows a bounded number of parameters per statement
+            q = select(EvalResult.key, EvalResult.error.is_not(None)).where(EvalResult.key.in_(keys[i : i + 2000]))
+            out.update((k, bool(bad)) for k, bad in s.execute(q))
+    return out
+
+
 def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=print, batch=32, recover=False):
     """Run what is missing: every (candidate, item) without a cached output goes to `executor` (submit(role, params, model, options) -> job id;
     wait(job id) -> job row). Each output is saved as its job finishes. `recover`: a job that already finished with exactly the same params is
@@ -856,7 +869,7 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
     todo = []
     for c in cands:
         keys = {result_key(spec, c, it): it for it in sample(c, items, engine)}
-        have = cached(engine, keys)
+        have = cached_failed(engine, keys)
         queued = {k for _, _, k in todo}
         todo += [
             (c, it, k) for k, it in keys.items() if k not in have and k not in queued
