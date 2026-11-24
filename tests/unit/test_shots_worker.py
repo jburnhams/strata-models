@@ -369,3 +369,13 @@ def test_a_file_ffprobe_cannot_read_is_the_jobs_fault():
 
     with pytest.raises(ParamError, match="ffprobe could not read v.mp4: bad"):
         S.analysis_height("v.mp4", 256, run=lambda cmd, **kw: types.SimpleNamespace(stdout="", stderr="bad"))
+
+
+def test_a_probe_that_lists_the_stream_twice_reads_the_first():
+    """omarchy, 2026-11-24: ffprobe's csv printed `640,360` twice with a blank line between on the spliced MP4s, and the first version read
+    both as one number; the probe is JSON now and takes the first stream."""
+    import json
+    import types
+
+    out = json.dumps({"streams": [{"width": 640, "height": 360}, {"width": 640, "height": 360}]}) + "\n\n"
+    assert S.analysis_height("v.mp4", 256, run=lambda cmd, **kw: types.SimpleNamespace(stdout=out, stderr="")) == 144

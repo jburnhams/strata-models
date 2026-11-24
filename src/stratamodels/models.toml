@@ -463,7 +463,7 @@ options = { threshold = 0.3, min_shot_s = 0.6, width = 160, deinterlace = true }
 runtime = "venv-worker"
 name = "TransNet V2 (transnetv2-pytorch)"
 roles = ["shot-boundaries"]
-vram_gb = 0.5
+vram_gb = 1.6                                # measured on omarchy (2026-11-24): torch reserved 1,468 MB at its peak on a 21-minute tape, batches of 8 windows
 licence = "MIT (code and weights)"
 source = "https://github.com/soCzech/TransNetV2 (paper https://arxiv.org/abs/2008.04838); PyTorch port https://pypi.org/project/transnetv2-pytorch/"
 used_by = []
