@@ -330,3 +330,22 @@ def test_recorded_can_match_on_several_params(tmp_path, monkeypatch):
     assert recorded.run(h, dict(path="/a.wav", clip=[1.0, 2.5], language="en"))["text"] == "hi"
     with pytest.raises(RunError, match="nothing recorded"):
         recorded.run(h, dict(path="/a.wav"))  # the whole file is another key than a clip of it
+
+
+def test_the_scene_preset_carries_the_scene_and_keeps_guesses_apart(setup):
+    _, img = setup
+    body, schema = llama.request(
+        dict(
+            images=[str(img), str(img)],
+            preset="scene-describe-v1",
+            context=dict(seconds=42.5, shots=3, speech="happy birthday"),
+        )
+    )
+    content = body["messages"][0]["content"]
+    assert [c["type"] for c in content] == ["image_url", "image_url", "text"]
+    assert "happy birthday" in content[-1]["text"] and "{context}" not in content[-1]["text"]
+    assert schema["required"] == [
+        "summary", "observed", "inferred", "setting", "people", "children", "activity", "tags", "picture",
+    ]  # fmt: skip
+    assert schema["properties"]["inferred"]["items"]["required"] == ["guess", "because"]
+    assert body["response_format"]["json_schema"]["schema"] is schema

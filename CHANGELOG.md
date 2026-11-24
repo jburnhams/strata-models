@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**Role `scene-describe` and preset `scene-describe-v1`, for strata-reels' scenes (branch `claude/project-thread-36vaj1`)**
+strata-reels' plan step 3 gives each scene of a tape a short description. The prompt is model work, so it lives here like `photo-caption`'s, and a role lets an eval change the model without touching the app. Spec S4 asks that observed facts and inferences stay apart, so the schema has two lists: `observed` (seen in the frames or said in the speech) and `inferred` (each guess with the evidence it rests on).
+- `src/stratamodels/runtimes/presets/scene-describe-v1.md`, `scene-describe-v1.schema.json`: **new**. The frames of one scene in time order, plus `{context}` (the scene's length, shots and transcript). It answers `summary`, `observed`, `inferred`, `setting`, `people`, `children`, `activity`, `tags` and `picture` (quality and the faults a tape shows). Real people are never named.
+- `src/stratamodels/models.toml`: role `scene-describe` on Qwen3.5-9B (local: these are family tapes); the role added to Qwen3.5-9B and Claude Haiku 5.5, so an eval can compare them. Qwen's `used_by` names strata-reels.
+- `tests/unit/test_llama.py`: the preset sends every frame, fills the context and carries its schema.
+- `tests/gpu/test_real_runtimes.py`: `scene-describe` through the registry on the real model, three made-up frames and a context, answered in the preset's schema (skipped without llama-server; not run yet: the GPU machine was offline).
+- `README.md`: the role's row. Not measured yet: the eval needs scenes a person has judged, which strata-reels' chapters screen (its step 4) will give.
+
 **Role `write`: new short texts to a brief, for strata-voice's recording prompts (branch `claude/project-thread-cvjjmf`)**
 strata-voice's step 3 has a cloud model write candidate recording prompts (natural en-GB sentences aimed at sounds, sentence types and styles its recordings still lack), which a local coverage ranker then orders. An app asks for a role, so the choice of writer belongs here rather than in the app.
 - `src/stratamodels/models.toml`: role `write` (Claude Sonnet 5.5 by default, not yet measured against Haiku), and `write` in the roles of the cloud text models (Claude Haiku, Sonnet and Opus, Gemini Flash and Argon, Nemotron) so a job may name one of them instead. No runtime change: `claude-api` already takes `prompt`, `system` and `schema`.
