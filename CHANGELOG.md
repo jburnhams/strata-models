@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
+**font-match: masks bounded by bytes and no fit on misread streaks; eval candidates can leave item inputs out (branch `claude/project-thread-dvu0cz`)**
+At 07:37 the kernel stopped the whole service: a strata-scan font-match job held 33 GB of RAM and 69 GB of swap. Tesseract had read a 40 x 1,863 px streak as "Seater", the fit sized it at 4,140 px (up to 143 MB a mask), and `render_word`'s cache was bounded by its count (65,536), not by bytes. Separately, ocr-lines' cloud readers failed every page with `unknown params ['ocr']`: the page-layout items carry a Tesseract reading for page-build.
+- `runtimes/fontfit.py`: `render_word` keeps its masks least recently used first within 512 MB (`RENDER_CACHE_BYTES`; a mask over an eighth of that is answered but not kept). `Scan` drops a word of three or more letters whose ink is over 3 times taller than wide, and a line whose x-height is over 8 times the page's median (not the picture's height: a cropped one-line block is all line); the answer's new `skipped_lines` names them.
+- `evals/core.py`: a candidate's `without = [...]` leaves those item input fields out of its job (after its stages too); the key changes with it (a pipeline's key names `without`, since a field its stage makes is not in the key's params). `evals/specs/ocr-lines.toml`: the three cloud candidates have `without = ["ocr"]`, so their failed rows are not reused: the next run makes them anew.
+- Tests in `test_fontfit.py` and `test_eval_pipeline.py`.
+
 **Evals list: no settings read per item, one outputs query, and no outputs loaded (branch `claude/project-thread-rri5uy`)**
 Jonathan: the evals list is slow, and it should not be calculating anything. It did no analysis, but one `GET /api/evals` ran 641 SQL statements on omarchy, 503 of them the same read of the `settings` table (`settings.data_dir()`, asked for per item by every "{data}" param in `expand()` and by `datasets_dir()`), and while the background analyses (`Summaries`) held the GIL each statement waited its turn: 2 to 20 s on the day, over 100 s earlier. Outside the service with a thread holding the GIL: 47 s before, about 16 s with the first two fixes.
 - `settings.py`: the table's rows are kept for `TTL_S` (5 s), and dropped at once on a save in this process or a `bind` (a CLI `settings set` shows within 5 s).

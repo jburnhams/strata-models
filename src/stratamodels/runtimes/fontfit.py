@@ -30,7 +30,8 @@ params:
 Answer: {face, class, style, size_pt, ink_f1, precision, recall, path (the rendering), fonts: {id: {family, class, like, files: {style: ttf}}},
 faces: [{face, class, ink_f1}] (ranked), blocks: [{box, face, class, ink_f1, lines: [{text, box, baseline_y, size_px, size_pt, hscale,
 tracking_em, weight_delta, style, words: [{text, box, style, x, baseline_y, size_px, size_pt, hscale, tracking_em, weight_delta, stroke_em}]}]}],
-proposed, proposer ({model, seconds, cost_usd} or {model, seconds, error}; null when none was asked), mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
+proposed, proposer ({model, seconds, cost_usd} or {model, seconds, error}; null when none was asked), skipped_lines (the text of lines left
+unfitted and undrawn as no type: a word of three letters taller than wide, or an x-height over BIG times the page's median), mode, dpi, seconds}. Boxes are [x, y, w, h] in the picture's pixels, as Tesseract's. The line's values are its first word's, for a
 summary; a renderer sets each word with the word's own: `size_pt` (or size_px at the scan's dpi), stretched by `hscale`, `tracking_em` times
 the size added after every glyph, its baseline at `baseline_y` and its left ink edge at `x` (that is the rendering's geometry exactly, so a
 rebuild reproduces what was scored); weight_delta > 0 means the
@@ -38,6 +39,7 @@ print is heavier than the font (ink spread; it is the fit's own unit, 0.5 less t
 stroke round the glyphs in ems of the size, what a renderer draws: measured on the word as rendered (the ink the lower threshold added, over
 the outline's length, both sides), 0 when the print is lighter, since a stroke cannot thin."""
 
+import collections
 import difflib
 import json
 import os
@@ -87,6 +89,8 @@ STYLES = ("roman", "italic", "bold", "bold-italic", "small-caps")
 STROKE_PER_WEIGHT = (
     20.0  # weight_delta per em of stroke: a coverage threshold 0.1 lower thickens a stem by about a 200th of the size
 )
+TALL = 3.0  # a word of three or more letters whose ink is this many times taller than wide is no word (Scan)
+BIG = 8.0  # a line whose x-height is this many times the page's median is no line of type (Scan)
 WORK_XH = 26.0  # the fit runs with the x-height scaled to about this many pixels: enough for serifs, fast enough for every face
 
 
@@ -231,8 +235,32 @@ def x_ratio(path):
     return xh, ch, max(0.0, pb[3]) / 200.0
 
 
-@lru_cache(maxsize=65536)
+# the masks render_word keeps, by their size: a count let one fit hold 33 GB (2026-11-24, see Scan)
+RENDER_CACHE_BYTES = 512 * 2**20
+_renders: "collections.OrderedDict[tuple[Any, ...], tuple[Any, int, int]]" = collections.OrderedDict()
+_render_bytes = [0]
+
+
 def render_word(path, text, size, hscale, tracking, threshold, synth_sc=False):
+    """_render_word's answer, kept least recently used first within RENDER_CACHE_BYTES of masks (a fit renders each word in every face, size
+    and weight it tries, and a candidate's words again for the next line, so the cache is what makes a fit fast)."""
+    key = (path, text, float(size), float(hscale), float(tracking), float(threshold), bool(synth_sc))
+    hit = _renders.get(key)
+    if hit is not None:
+        _renders.move_to_end(key)
+        return hit
+    out = _render_word(*key)
+    n = int(out[0].nbytes)
+    if n <= RENDER_CACHE_BYTES // 8:  # one giant mask is not kept at the cost of everything else
+        _renders[key] = out
+        _render_bytes[0] += n
+        while _render_bytes[0] > RENDER_CACHE_BYTES and _renders:
+            _, old = _renders.popitem(last=False)
+            _render_bytes[0] -= int(old[0].nbytes)
+    return out
+
+
+def _render_word(path, text, size, hscale, tracking, threshold, synth_sc=False):
     """(ink mask, ink left x, baseline row) of a word set in one font: kerned (Raqm or basic layout), `tracking` ems added after each glyph,
     stretched by `hscale`, and black where the anti-aliased coverage passes `threshold` (lower = heavier). synth_sc: lowercase letters drawn as
     capitals at x-height (small capitals for a face without them)."""
@@ -316,6 +344,7 @@ class Scan:
         self.dpi = dpi
         H, W = ink_full.shape
         self.lines: list[dict[str, Any]] = []
+        self.skipped: list[str] = []
         for ln in lines:
             words = []
             for w in ln.get("words") or [dict(text=ln["text"], box=ln["box"], conf=ln.get("conf", 100))]:
@@ -328,6 +357,8 @@ class Scan:
                 if not len(cols):
                     continue
                 ib = [x0 + int(cols[0]), y0 + int(rows[0]), int(cols[-1] - cols[0] + 1), int(rows[-1] - rows[0] + 1)]
+                if len(str(w["text"]).strip()) >= 3 and ib[3] > TALL * ib[2]:
+                    continue  # no word of three letters is set taller than wide: a rule, the gutter's shadow or a speck Tesseract read as text
                 words.append(dict(text=str(w["text"]), box=[x, y, bw, bh], ink=ib, conf=float(w.get("conf", 100))))
             if not words:
                 continue
@@ -349,6 +380,16 @@ class Scan:
                     block=ln.get("block"),
                 )
             )
+        # A line far bigger than the page's type is a misreading (2026-11-24: Tesseract read a 1,863 px streak as "Seater"; fitted, its words
+        # were drawn at 4,140 px, 143 MB a mask, and one fit took 33 GB before the kernel stopped the service). Display type on these pages
+        # is at most about 5 times the body's x-height.
+        if self.lines:
+            med = float(np.median([ln["xh"] for ln in self.lines]))
+            keep = [
+                ln for ln in self.lines if ln["xh"] <= BIG * med
+            ]  # relative only: a cropped block of one line is all line
+            self.skipped = [ln["text"] for ln in self.lines if ln not in keep]
+            self.lines = keep
         if not self.lines:
             raise RunError("no words with ink to fit")
         med = float(np.median([ln["xh"] for ln in self.lines]))
@@ -952,6 +993,7 @@ def run(handle, params):
             )
         ],
         proposed=proposed,
+        skipped_lines=scan.skipped,
         proposer=proposer,
         mode=mode,
         dpi=dpi,

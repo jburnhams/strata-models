@@ -1,6 +1,7 @@
 """Pipeline candidates (stages before a candidate's own job, stratamodels.evals.core): each stage cached on its own, the trace kept with the end
 result, a failed stage fails the output, judges see only the end result, the Outputs API and the write-up show every step."""
 
+import dataclasses
 import json
 import os
 
@@ -332,3 +333,36 @@ def test_cost_usd_adds_a_cloud_stage_to_a_local_job(pipe, scheduler):
         )  # a step paid in quota
     finally:
         stop.set()
+
+
+def test_without_leaves_item_fields_out_of_the_candidates_job_and_its_key(pipe, scheduler):
+    """ocr-lines: a page-layout item carries a Tesseract reading for page-build, which a cloud reader refuses as an unknown param."""
+    spec = (
+        SPEC.replace('name = "fake-pipe"', 'name = "fake-without"')
+        .replace('name = "plain+small"\nmodel = "small"', 'name = "plain+small"\nmodel = "small"\nwithout = ["seed"]')
+        .replace('name = "raw"\nmodel = "small"', 'name = "raw"\nmodel = "small"\nwithout = ["seed"]')
+    )
+    open(os.path.join(os.environ["STRATAMODELS_DATA"], "evals", "specs", "fake-without.toml"), "w").write(spec)
+    s = C.load_spec("fake-without")
+    raw = s.candidates[0]
+    it = C.load_dataset(s.dataset).items[0]
+    assert raw.without == ["seed"] and "seed" not in C.job_params(s, raw, it)
+    assert C.result_key(s, raw, it) != C.result_key(pipe, pipe.candidates[0], it)
+    staged = s.candidates[1]
+    other = dataclasses.replace(
+        staged, without=["seed", "prompt"]
+    )  # "prompt" is made by its stage: not in the item's input
+    assert C.result_key(s, other, it) != C.result_key(s, staged, it)
+    assert "without" not in pipe.candidates[0].to_json() and raw.to_json()["without"] == ["seed"]
+    stop = scheduler.start()
+    try:
+        C.run(s, scheduler.store.engine, C.SchedulerExecutor(scheduler))
+        _ds, outs, _runs = C.outputs_for(s, scheduler.store.engine)
+        assert "seed" not in outs["raw"][0][0]["echo"]
+        o = outs["plain+small"][0][0]
+        assert o["echo"]["prompt"] == "detailed: a cat number 0" and "seed" not in o["echo"]  # after its stage too
+        assert outs["two-step"][0][0]["echo"]["seed"] == 0  # the others keep it
+    finally:
+        stop.set()
+    with pytest.raises(C.EvalError, match="without"):
+        C.parse_spec(dict(C.load_spec("fake-pipe").to_json(), candidates=[dict(name="x", model="m", without="ocr")]))
