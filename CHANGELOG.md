@@ -4,11 +4,10 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-24
 
-**Rebuilt pages: no line drawn far bigger than its words, and print nobody read is cut from the scan (branch `claude/project-thread-dvu0cz`)**
-Jonathan judged page-rebuild pages and found overlapping and missing text (ward1874-leaf034). A font fit takes a line's size from its first word, and Tesseract boxed "FOR" with a descender of the line above, so "FOR YOUNG LADIES AND MISSES" was set at twice its size over the heading; and Tesseract never read the page's last line, so nothing drew it.
-- `runtimes/pagebuild.py`: `_shrink`: a word is set no more than 5 % wider than Tesseract's box for it: overrun shared by a line (its median) scales the line, a word still too wide (a corrected word longer than the one read) is set smaller alone. New `unread`: ink within the print that no drawn line or figure covers is cut from the scan as figures (pieces of 2.5 mm or more, gaps up to 0.8 mm bridged). The answer's new `scan_figures` lists the figures found in the scan by `rules` and `unread`.
-- `evals/metrics.py`: `figure_f1` leaves out `scan_figures`: they are not a reader's finds (scoring the rules took the full rebuild's figure F1 from 29 % to 13 %).
-- `evals/specs/page-rebuild.toml`: `unread = true` on the full candidates.
+**Rebuilt pages: no line drawn far bigger than its words; figure F1 leaves out the rules page-build found itself (branch `claude/project-thread-dvu0cz`)**
+Jonathan judged page-rebuild pages and found overlapping and missing text (ward1874-leaf034). A font fit takes a line's size from its first word, and Tesseract boxed "FOR" with a descender of the line above, so "FOR YOUNG LADIES AND MISSES" was set at twice its size over the heading. The missing text is a line Tesseract never read: that is the `ocr` capability's to fix (an eval on the hard pages), not a fallback here.
+- `runtimes/pagebuild.py`: `_shrink`: a word is set no more than 5 % wider than Tesseract's box for it: overrun shared by a line (its median) scales the line, a word still too wide (a corrected word longer than the one read) is set smaller alone. The answer's new `scan_figures` lists the figures `rules` found in the scan.
+- `evals/metrics.py`: `figure_f1` leaves out `scan_figures`: they are not a reader's finds (scoring them took the full rebuild's figure F1 from 29 % to 13 %).
 - `workers/phonics.py`: `period` takes the shortest lag within 1 % of the best correlation: a steady tone correlates as well at twice its period, and the argmax picked either by rounding (the macOS leg of this PR's CI found 320 samples for 160).
 - Tests in `test_pagebuild.py`, `test_page_metrics.py` and `test_phonics.py`.
 

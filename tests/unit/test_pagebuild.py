@@ -744,36 +744,3 @@ def test_a_line_fitted_too_big_from_one_bad_box_is_set_to_its_words_boxes(ttf):
         1.0,
         1.0,
     ]  # a face that cannot be read: as fitted
-
-
-def test_unread_print_is_cut_from_the_scan_and_listed_as_found_there(tmp_path):
-    pic = tmp_path / "scan.png"
-    im = Image.new("L", (1000, 1400), 230)
-    d = ImageDraw.Draw(im)
-    d.rectangle((200, 300, 800, 340), fill=20)  # a line Tesseract read
-    d.rectangle((250, 500, 750, 560), fill=20)  # a line of display type it never read
-    d.rectangle((600, 420, 603, 423), fill=20)  # a speck
-    d.rectangle((300, 440, 320, 444), fill=20)  # a short stroke: under 2.5 mm though bridging would make it more
-    d.rectangle((250, 680, 750, 700), fill=20)  # a stamp Tesseract read and the layout model left out on purpose
-    d.rectangle((300, 1300, 700, 1340), fill=20)  # print far below everything read: outside the print area
-    im.save(pic, dpi=(300, 300))
-    ocr = dict(
-        width=1000,
-        height=1400,
-        lines=[
-            dict(text="read", box=[200, 300, 600, 40], block=1, words=[dict(text="read", box=[200, 300, 600, 40])]),
-            dict(text="also", box=[200, 600, 600, 40], block=1, words=[dict(text="also", box=[200, 600, 600, 40])]),
-            dict(text="STAMP", box=[250, 680, 500, 20], block=2, words=[dict(text="STAMP", box=[250, 680, 500, 20])]),
-        ],
-    )
-    d.rectangle((200, 600, 800, 640), fill=20)
-    im.save(pic, dpi=(300, 300))
-    groups = dict(blocks=[dict(lines=[1, 2], role="body")], figures=[])
-    r = pagebuild.run(handle(), dict(ocr=ocr, groups=groups, image=str(pic), unread=True))
-    figs = r["page"]["figures"]
-    assert r["scan_figures"] == list(range(len(figs))) and len(figs) == 1
-    x, y, w, h = figs[0]["box"]
-    assert abs(x - 250) < 15 and abs(y - 500) < 15 and abs(w - 500) < 25 and abs(h - 60) < 25
-    with Image.open(r["png"]) as out:
-        assert out.getpixel((500, 530)) < 128  # drawn
-    assert pagebuild.run(handle(), dict(ocr=ocr, groups=groups, image=str(pic)))["scan_figures"] == []
