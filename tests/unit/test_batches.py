@@ -307,3 +307,31 @@ def test_batch_prices_and_reserving_many(ledger):  # noqa: F811
     assert spend.reserve_many("nim", [5.0, 5.0])[1] is None  # unbudgeted: everything goes
     spend.hold("claude", 5.0)  # no check
     assert spend.state("claude")["left"] == 0.0
+
+
+def test_a_bulk_submission_goes_as_one_batch_without_waiting_for_the_window(sch, clock):
+    ids = sch.submit_many(
+        "caption", [dict(prompt=f"describe {i}", max_tokens=100) for i in range(3)], "strata-stills", batch=True
+    )
+    assert [sch.store.get(i)["params"] for i in ids] == [
+        dict(prompt=f"describe {i}", max_tokens=100, batch=True) for i in range(3)
+    ]
+    (row,) = sch.batcher.step()  # at once: no wait_s
+    assert sorted(int(k) for k in row["jobs"]) == ids and sch.batcher.now == set()
+    later = sch.submit_many("caption", [dict(prompt="x")], "app")  # without batch: the CPU lane's
+    assert not sch.batcher.takes(sch.store.get(later[0]))
+
+
+def test_a_bulk_submission_is_checked_before_anything_is_queued(sch):
+    from stratamodels.registry import RegistryError
+    from stratamodels.scheduler import QueueError
+
+    for items, err in (("x", "a list of params"), ([1], "a list of params")):
+        with pytest.raises(QueueError, match=err):
+            sch.submit_many("caption", items, "app")
+    with pytest.raises(QueueError, match="priority"):
+        sch.submit_many("caption", [{}], "app", priority="now")
+    with pytest.raises(RegistryError):
+        sch.submit_many("nope", [{}], "app")
+    assert sch.submit_many("caption", [], "app", batch=True) == [] and sch.batcher.now == set()
+    assert sch.store.queued() == []

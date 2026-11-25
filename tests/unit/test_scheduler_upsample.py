@@ -127,3 +127,8 @@ def test_recovery_after_a_restart_finds_jobs_with_and_without_the_step(sched):
     assert C.done_job(eng, "draw", "pic", dict(prompt="a cat", upsample=True))["id"] == on["id"]
     assert C.done_job(eng, "draw", "pic", dict(prompt="a cat", upsample=False))["id"] == off["id"]
     assert C.done_job(eng, "draw", "pic", dict(prompt="a dog", upsample=False)) is None
+
+
+def test_many_pictures_in_one_call_each_get_their_step(sched):
+    ids = sched.submit_many("draw", [dict(prompt="a cat"), dict(prompt="a dog")], "app")
+    assert len(ids) == 2 and len(sched.store.queued()) == 4  # two steps, two pictures

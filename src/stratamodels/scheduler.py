@@ -60,6 +60,7 @@ def rank(p):
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
 AFTER = "__after__"  # a job's params key: the step job (a prompt upsampler) whose answer becomes this job's prompt; it waits for that job
 MB = 1024.0
+MAX_BULK = 100_000  # jobs in one submit_many (the Claude batch API takes 100 000 requests in a batch)
 BATCH_TICK_S = 5.0  # how often the batcher looks (it polls each open batch every Batcher.poll_s)
 
 
@@ -164,6 +165,36 @@ class Scheduler:
         )
         self._notify()
         return j
+
+    def submit_many(self, role, items, app, priority="normal", model=None, options=None, batch=False):
+        """Queue one job per params dict in `items` (all on the same role, model and priority); returns their ids, in order. The role and model
+        are checked before any is queued, so a refused call queues nothing. `batch`: send them all through the model's batch API (batches.py),
+        as soon as the batcher next looks instead of after its window: the whole lot is already here."""
+        if not isinstance(items, list) or not all(isinstance(p, dict) for p in items):
+            raise QueueError("items is a list of params objects")
+        if len(items) > MAX_BULK:
+            raise QueueError(f"at most {MAX_BULK} jobs in one call")
+        priority = self._priority(priority)
+        app = str(app or "unknown")[:64]
+        m = self.registry.resolve(role, model, app)
+        extra = {batches.BATCH: True} if batch else {}
+        if isinstance(m.options.get("upsample"), dict):  # each job may need its own upsampling step: one at a time
+            ids = [self.submit(role, {**p, **extra}, app, priority, model, options)["id"] for p in items]
+        else:  # one transaction for the lot: tens of thousands of rows in seconds
+            pref = self.registry.preference(app, role)
+            base = dict((pref.params or {}) if pref else {})
+            if options:
+                m = self.registry.variant(m.key, options)
+                base[OPTIONS] = dict(options)
+            rows = [
+                dict(kind="run", role=role, model=m.key, app=app, priority=priority, params={**base, **p, **extra})
+                for p in items
+            ]
+            ids = self.store.add_many(rows)
+            self._notify()
+        if batch and ids:
+            self.batcher.now.add(m.key)
+        return ids
 
     def _upsample_step(self, m, params, app, priority):
         """A model whose options name an `upsample` step (FLUX.3 Klein: its prompt upsampler) gets the job's short prompt expanded first: a job

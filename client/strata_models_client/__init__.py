@@ -73,6 +73,17 @@ def submit(role, params, app, priority="normal", model=None, options=None):
     )
 
 
+def submit_many(role, items, app, priority="normal", model=None, options=None, batch=False):
+    """Queue one job per params dict in `items` in a single call; returns their ids, in order (wait on each with `wait`). `batch=True` sends
+    them through the model's batch API (Claude: half the price, answered within 24 hours), as one batch at once. Nothing is queued when the
+    role or model is refused."""
+    return _call(
+        "POST",
+        "/api/jobs/bulk",
+        dict(role=role, items=list(items), app=app, priority=priority, model=model, options=options, batch=batch),
+    )["ids"]
+
+
 def wait_job(job_id):
     """The job's row once it has finished (done, failed or cancelled), with result, error and timings; never raises for a failed job."""
     while True:

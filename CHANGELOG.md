@@ -12,6 +12,7 @@ For bulk work that can wait (an archive of photos to caption, an eval's cloud ca
 - `db/models.py`, `migrations/20261125_3531dcac671a_…`: table `api_batches` (provider, model, jobs and their held worst cases, the vendor's id, status and counts). Applied when the live service next restarts.
 - `store.py`: batch rows; `recover` leaves the jobs of an open batch running, and the batcher picks them up again at start (a batch written but never confirmed sent fails its jobs).
 - `scheduler.py`: the batcher, stepped on its own thread every 5 s; `_run` drops the flag.
+- `POST /api/jobs/bulk` (`Scheduler.submit_many`, `Store.add_many`, client `submit_many`): many jobs on one role in one call and one transaction, checked before any is queued, returning their ids. With `batch` they go as one batch at the batcher's next step, without the window. The way to send a bulk job: there is no minimum batch size, at the API or here, so a job that trickles in alone still goes, just as a batch of one.
 - `tests/unit/test_batches.py`: **new**, the vendor faked (`cloudfakes.FakeBatches`).
 
 **Eval `shots-vhs`: the rival shot detectors as candidates (branch `claude/project-thread-avddmb`)**

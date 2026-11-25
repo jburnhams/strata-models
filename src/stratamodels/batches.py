@@ -1,7 +1,8 @@
 """Jobs sent through a vendor's batch API (the Claude Message Batches API: half the price of the same calls made at once, answered within
 24 hours, most within one), for bulk work that can wait: an archive of photos to caption, an eval's candidate run.
 
-An app asks for it per job: `batch = true` in the params of a job on a model whose runtime has a batch API (claude-api). Nothing else
+An app asks for it per job: `batch = true` in the params of a job (or `batch` on a bulk submission, POST /api/jobs/bulk, which sends the
+whole lot at the next step instead of waiting for the window) on a model whose runtime has a batch API (claude-api). Nothing else
 changes for the app: it submits jobs and waits for each as it always does, and each job ends done or failed with the same result as a call
 made at once (plus `batch`, the vendor's id). On a model without a batch API the flag is dropped and the job runs at once. What to batch,
 how many, and what to do with an entry that failed (retry it at once, or later) stay with the app: this only sends the calls cheaper.
@@ -50,6 +51,9 @@ class Batcher:
         )
         self.handles = {}  # model key -> (settings hash, handle): the batcher's own client, apart from the CPU lane's
         self.tickets = {}  # job id -> its spend hold, until its outcome is recorded
+        self.now = (
+            set()
+        )  # model keys whose queued batch jobs go at the next step, without waiting wait_s (a bulk submission)
 
     @property
     def store(self):
@@ -103,7 +107,7 @@ class Batcher:
         return {
             k: (m, js)
             for k, (m, js) in groups.items()
-            if len(js) >= self.max_jobs or now - min(j["submitted_at"] for j in js) >= self.wait_s
+            if k in self.now or len(js) >= self.max_jobs or now - min(j["submitted_at"] for j in js) >= self.wait_s
         }
 
     def submit(self, model, jobs):
@@ -270,7 +274,8 @@ class Batcher:
         for b in self.store.batches(status="submitted"):
             if b["vendor_id"] is not None and (b["polled_at"] is None or now - b["polled_at"] >= self.poll_s):
                 out.append(self.poll(b, now))
-        for model, jobs in self.due(now).values():
+        for key, (model, jobs) in self.due(now).items():
+            self.now.discard(key)
             b = self.submit(model, jobs)
             if b is not None:
                 out.append(b)

@@ -116,6 +116,19 @@ class Store:
             return row(j)
 
     @locked
+    def add_many(self, rows):
+        """Queue many jobs in one transaction (a bulk submission); returns their ids, in order."""
+        at = self.clock()
+        with Session(self.engine, expire_on_commit=False) as s:
+            jobs = [Job(**{"submitted_at": at, "status": "queued", **kw}) for kw in rows]
+            s.add_all(jobs)
+            s.flush()
+            for j in jobs:
+                _files(s, j.id, "input", j.params, at)
+            s.commit()
+            return [j.id for j in jobs]
+
+    @locked
     def update(self, job_id, **kw):
         """Change a job; `result=` stores its output (in results, with the paths it wrote in files)."""
         has, result = "result" in kw, kw.pop("result", None)
