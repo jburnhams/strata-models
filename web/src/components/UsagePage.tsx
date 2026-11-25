@@ -18,6 +18,15 @@ export function byApp(rows: UsageRow[]) {
   return [...m.entries()].sort((a, b) => b[1] - a[1])
 }
 
+// CompositionBar has five chart colours and throws on a sixth part, so past five apps the smallest share one "Other" part.
+export const MAX_PARTS = 5
+export function appParts(apps: [string, number][]) {
+  const parts = apps.map(([app, v]) => ({ key: app, label: app, value: v }))
+  if (parts.length <= MAX_PARTS) return parts
+  const rest = parts.slice(MAX_PARTS - 1)
+  return [...parts.slice(0, MAX_PARTS - 1), { key: '__other', label: `Other (${rest.length} apps)`, value: rest.reduce((s, p) => s + p.value, 0) }]
+}
+
 function Period({ hours }: { hours: number }) {
   const load = useLoad({ queryKey: ['usage', hours], queryFn: () => api.usage(hours) })
   return (
@@ -27,7 +36,7 @@ function Period({ hours }: { hours: number }) {
         return (
           <div className="grid gap-8">
             {total > 0 && <p className="type-body">{apps[0][0]} used the GPU most: {seconds(apps[0][1])}, {format.percent(apps[0][1] / total)} of the {seconds(total)} in all.</p>}
-            {total > 0 && <div className="max-w-2xl"><CompositionBar label="GPU time by app" parts={apps.map(([app, v]) => ({ key: app, label: app, value: v }))} formatValue={v => seconds(v)} partHeader="App" /></div>}
+            {total > 0 && <div className="max-w-2xl"><CompositionBar label="GPU time by app" parts={appParts(apps)} formatValue={v => seconds(v)} partHeader="App" /></div>}
             <DataTable caption="GPU use by app and role" columns={columns} rows={u.rows} rowKey={r => `${r.app}/${r.kind}/${r.role}`} sortParam="sort" />
           </div>
         )
