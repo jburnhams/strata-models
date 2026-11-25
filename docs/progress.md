@@ -1,7 +1,7 @@
 # Progress
 
 ## 2026-11-25: one face store for every app
-The faces of bright-horizons, strata-360, strata-stills and later strata-reels move into one store here, decided with Jonathan (one global
+The faces of bright-horizons, strata-360, strata-stills and later strata-reels move into one store here, decided with the owner (one global
 person per human, apps add their own fields; sensitive tags opt-in; merges suggested, never automatic; clustering and crops here; a 1600 px
 copy of each picture kept). Built on strata-python's new `db.vectors` (pgvector column and nearest search), `images.crop` and
 `clients.faces` (strata-python PR #81). Tables and the store are in [database.md](database.md#faces); apps migrate one by one, bright-horizons
