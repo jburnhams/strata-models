@@ -14,7 +14,10 @@ from stratamodels.evals import metrics as M
 
 PACKAGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = ("evals.core", "analyse")
-METRIC = ("evals.metrics", "Metric")  # its methods are called on a metric's value (m.sampler()), which names no definition to follow
+METRIC = (
+    "evals.metrics",
+    "Metric",
+)  # its methods are called on a metric's value (m.sampler()), which names no definition to follow
 METRICS = ("evals.metrics", "METRICS")  # the table of them all: only an experiment's own entries count
 # what an analysis calls but is not decided by: the database, settings, the queue, the cloud CLIs (judges' verdicts are rows it reads)
 SKIP = {"evals.cloud", "evals.api", "evals.report", "evals.summaries", "evals.codehash"}
