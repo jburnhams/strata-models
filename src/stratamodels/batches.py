@@ -28,6 +28,7 @@ The batcher (one per scheduler, stepped on its own thread) takes the queued jobs
 The runtime side is the `batch_*` functions of runtimes/claude.py: batch_request, batch_submit, batch_poll, batch_results, batch_answer."""
 
 import json
+from types import SimpleNamespace
 
 from stratamodels import runtimes, spend
 from stratamodels.store import FINISHED
@@ -47,6 +48,26 @@ def clean(params):
     from stratamodels.scheduler import AFTER, OPTIONS
 
     return {k: v for k, v in (params or {}).items() if k not in (BATCH, OPTIONS, AFTER)}
+
+
+def snapshot(model, logs):
+    """What collecting a batch needs, as it was sent: the model's runtime and load options (its price, its vendor id) and each job's
+    request as the ledger logs it (the prompt with its presets filled in, the schema): a preset or a price edited before the answers come
+    is not read. The requests are kept once each (a bulk job sends the same prompt thousands of times), the pictures per job."""
+    distinct, index, of = [], {}, {}
+    for jid, log in logs:
+        shared = {k: v for k, v in log.items() if k != "images"}
+        sig = json.dumps(shared, sort_keys=True, default=str)
+        if sig not in index:
+            index[sig] = len(distinct)
+            distinct.append(shared)
+        of[str(jid)] = [index[sig], log.get("images") or []]
+    return dict(runtime=model.runtime, options=dict(model.options), requests=distinct, of=of)
+
+
+def requests(snap):
+    """{job id: its request as logged} from a snapshot."""
+    return {int(k): dict(snap["requests"][i], images=imgs) for k, (i, imgs) in snap["of"].items()}
 
 
 class Batcher:
@@ -95,14 +116,20 @@ class Batcher:
         return model is not None and model.served and self._runtime(model) is not None
 
     def _handle(self, model):
-        rt = self.s.get_runtime(model.runtime)
-        have = self.handles.get(model.key)
-        if have is not None and have[0] == model.settings_hash:
+        return self._handle_for(model.runtime, model.key, model.options)
+
+    def _handle_for(self, runtime, key, options):
+        """A client for a model as it was when a batch was sent (its runtime, key and load options: price and vendor model id), cached:
+        a batch is collected with the settings it was sent with, whatever the registry says now."""
+        rt = self.s.get_runtime(runtime)
+        sig = json.dumps([runtime, options], sort_keys=True, default=str)
+        have = self.handles.get(key)
+        if have is not None and have[0] == sig:
             return have[1]
         if have is not None:
             rt.unload(have[1])
-        h = rt.load(model, self.s.models_dir)
-        self.handles[model.key] = (model.settings_hash, h)
+        h = rt.load(SimpleNamespace(key=key, runtime=runtime, options=dict(options)), self.s.models_dir)
+        self.handles[key] = (sig, h)
         return h
 
     def _fail(self, job_id, error, claim=False):
@@ -156,17 +183,18 @@ class Batcher:
             for j in jobs:
                 self._fail(j["id"], e, claim=True)
             return None
-        entries, size = [], 0
+        entries, size, logs = [], 0, {}
         for j in sorted(jobs, key=lambda q: (rank(q["priority"]), q["id"]))[: self.max_jobs]:
             try:
-                body, worst = rt.batch_request(handle, clean(j["params"]))
-            except runtimes.RunError as e:
-                self._fail(j["id"], e, claim=True)
+                body, worst, log = rt.batch_request(handle, clean(j["params"]))
+            except Exception as e:  # a picture that cannot be read fails its own job, not the batch
+                self._fail(j["id"], e if isinstance(e, runtimes.RunError) else f"{type(e).__name__}: {e}", claim=True)
                 continue
             n = len(json.dumps(body))
             if entries and size + n > self.max_bytes:
                 break
             entries.append((j, body, worst))
+            logs[j["id"]] = log
             size += n
         if not entries:
             return None
@@ -192,6 +220,7 @@ class Batcher:
             submitted_at=now,
             status="submitted",
             jobs={str(j["id"]): w for j, _, w in sent},
+            snapshot=snapshot(model, [(j["id"], logs[j["id"]]) for j, _, _ in sent]),
         )
         try:
             vendor_id = rt.batch_submit(handle, [(f"{PREFIX}{j['id']}", body) for j, body, _ in sent])
@@ -209,33 +238,21 @@ class Batcher:
         return self.store.update_batch(b["id"], vendor_id=vendor_id, vendor_status="in_progress", polled_at=now)
 
     # ---- poll and collect -----------------------------------------------------------------------------------------------------------
-    def _model_of_batch(self, b):
-        for k in b["jobs"]:
-            j = self.store.get(int(k), result=False)
-            if j is not None:
-                m = self.s._model_of(j)
-                if m is not None and self._runtime(m) is not None:
-                    return m
-        return None
-
     def poll(self, b, now=None):
         """Ask the vendor how batch row `b` stands; collect its outcomes once it has ended. Returns the batch's row."""
         now = self.s.clock() if now is None else now
-        model = self._model_of_batch(b)
-        if model is None:
-            return self.store.update_batch(
-                b["id"], polled_at=now, error=f"model {b['model_key']} is no longer served: the batch is not polled"
-            )
-        rt = self._runtime(model)
+        snap = b["snapshot"] or {}
         try:
-            handle = self._handle(model)
+            rt = self.s.get_runtime(snap["runtime"])
+            handle = self._handle_for(snap["runtime"], b["model_key"], snap["options"])
             status, counts = rt.batch_poll(handle, b["vendor_id"])
         except Exception as e:  # a poll that fails is tried again next time
             return self.store.update_batch(b["id"], polled_at=now, error=f"{type(e).__name__}: {e}"[:2000])
         b = self.store.update_batch(b["id"], polled_at=now, vendor_status=status, counts=counts, error=None)
-        return self.collect(b, model, rt, handle, now) if status == "ended" else b
+        return self.collect(b, rt, handle, now) if status == "ended" else b
 
-    def collect(self, b, model, rt, handle, now):
+    def collect(self, b, rt, handle, now):
+        logs = requests(b["snapshot"])
         jobs = {int(k): float(w) for k, w in b["jobs"].items()}
         seconds = round(now - b["submitted_at"], 2)
         seen = set()
@@ -252,7 +269,7 @@ class Batcher:
                 ticket = self.tickets.pop(jid, None) or spend.hold(b["provider"], jobs[jid])
                 with spend.job(j["app"], jid):
                     try:
-                        result = rt.batch_answer(handle, clean(j["params"]), outcome, ticket, b["vendor_id"], seconds)
+                        result = rt.batch_answer(handle, logs[jid], outcome, ticket, b["vendor_id"], seconds)
                     except Exception as e:
                         spend.release(ticket)  # already freed when the row was written; a no-op then
                         self.store.update(

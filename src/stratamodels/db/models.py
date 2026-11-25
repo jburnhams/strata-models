@@ -194,6 +194,9 @@ class ApiBatch(Base):
     polled_at: Mapped[float | None] = mapped_column(default=None)
     ended_at: Mapped[float | None] = mapped_column(default=None)
     error: Mapped[str | None] = mapped_column(sa.Text, default=None)
+    snapshot: Mapped[dict | None] = mapped_column(
+        sa.JSON, default=None
+    )  # what collecting it needs, as it was sent: the model's runtime and options, each job's request (batches.snapshot)
 
 
 # ---- registry and config -----------------------------------------------------------------------------------------------------------------

@@ -34,6 +34,7 @@ def upgrade() -> None:
     sa.Column('polled_at', sa.Double(), nullable=True),
     sa.Column('ended_at', sa.Double(), nullable=True),
     sa.Column('error', sa.Text(), nullable=True),
+    sa.Column('snapshot', sa.JSON(), nullable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_api_batches'))
     )
     with op.batch_alter_table('api_batches', schema=None) as batch_op:

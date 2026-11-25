@@ -153,11 +153,12 @@ def _bound(job, body):
 
 
 def batch_request(handle, params):
-    """(the entry's params, its worst case in USD at the batch price) for one job. RunError for params that could not be sent."""
+    """(the entry's params, its worst case in USD at the batch price, the request as the ledger logs it: what batch_answer reads the answer
+    by, kept with the batch) for one job. RunError for params that could not be sent."""
     job = cloud.parse(params)
-    req, oc, _ = _request(handle, job)
+    req, oc, log = _request(handle, job)
     body = dict(max_tokens=job["max_tokens"], **req, **({"output_config": oc} if oc else {}))
-    return body, spend.worst(handle["price"], _bound(job, body), job["max_tokens"], batch=True)
+    return body, spend.worst(handle["price"], _bound(job, body), job["max_tokens"], batch=True), log
 
 
 def batch_submit(handle, entries):
@@ -190,11 +191,11 @@ def batch_results(handle, vendor_id):
         yield r.custom_id, r.result
 
 
-def batch_answer(handle, params, outcome, ticket, vendor_id, seconds):
+def batch_answer(handle, log, outcome, ticket, vendor_id, seconds):
     """A job's result from its outcome in the batch, recorded against its ticket; RunError for one that failed (recorded too, at no cost: the
-    vendor bills only the entries that succeed)."""
-    job = cloud.parse(params, encode_images=False)
-    log = dict(_request(handle, job)[2], batch=vendor_id)
+    vendor bills only the entries that succeed). `log` is the job's request as batch_request logged it when the batch was sent (a preset
+    edited since does not change how the answer is read), `handle` the model as it was then (its price)."""
+    log = dict(log, batch=vendor_id)
     kind = getattr(outcome, "type", None)
     if kind != "succeeded":
         err = getattr(getattr(outcome, "error", None), "error", None)
@@ -213,7 +214,7 @@ def batch_answer(handle, params, outcome, ticket, vendor_id, seconds):
             request=log,
         )
         raise RunError(keys.redact(f"Claude batch {vendor_id}: {why}"))
-    return _finish(handle, job, log, outcome.message, ticket, seconds, batch=vendor_id)
+    return _finish(handle, dict(schema=log.get("schema")), log, outcome.message, ticket, seconds, batch=vendor_id)
 
 
 def unload(handle):

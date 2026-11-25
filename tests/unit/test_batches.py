@@ -1,5 +1,7 @@
 """Jobs sent through the Claude Message Batches API (stratamodels.batches, the batch_* functions of runtimes/claude.py), the vendor faked."""
 
+from types import SimpleNamespace
+
 import anthropic
 import httpx2
 import pytest
@@ -38,8 +40,8 @@ def sch(clock, tmp_path, monkeypatch):
     monkeypatch.setattr(spend, "_reserved", {})
     s = Scheduler(st, reg, str(tmp_path / "models"), probe=lambda: None, clock=clock)
     s.client = FakeAnthropic()
-    m = reg.models["haiku"]
-    s.batcher.handles["haiku"] = (m.settings_hash, claude.load(m, "/m", client=s.client))
+    real = claude.load
+    monkeypatch.setattr(claude, "load", lambda m, d: real(m, d, client=s.client))  # every handle on the fake vendor
     settings.save(dict(claude_budget_usd=1.0))
     yield s
     fake.LOADED.clear()
@@ -260,14 +262,56 @@ def test_a_restart_keeps_open_batches_and_holds_their_budget_again(sch, clock, m
     assert sch.store.get(b["id"])["status"] == "done" and spend.state("claude")["reserved"] == 0.0
 
 
-def test_a_batch_whose_model_is_gone_is_left_alone(sch, clock):
-    caption(sch, 1)
+def test_a_batch_is_collected_with_the_price_and_prompt_it_was_sent_with(sch, clock, tmp_path, monkeypatch):
+    from stratamodels.runtimes import llama
+
+    (tmp_path / "p.md").write_text("old prompt")
+    monkeypatch.setattr(llama, "preset", lambda name: ((tmp_path / f"{name}.md").read_text(), {"type": "object"}))
+    a = sch.submit("caption", dict(preset="p", max_tokens=100, batch=True), "app")
     clock.t += 60
     sch.batcher.step()
-    sch.registry.models.pop("haiku")
+    sch.registry.models["haiku"].options["price"] = dict(input=100.0, output=500.0)  # edited while the batch runs
+    sch.registry.models.pop("haiku")  # or the model removed altogether
+    (tmp_path / "p.md").unlink()  # and the preset gone
+    sch.client.messages.batches.status = "ended"
+    sch.client.messages.batches.outcomes = {
+        f"job-{a['id']}": succeeded(claude_reply('{"ok": 1}', tokens_in=1000, tokens_out=20))
+    }
     clock.t += 60
     (row,) = sch.batcher.step()
-    assert row["status"] == "submitted" and "no longer served" in row["error"]
+    done = sch.store.get(a["id"])
+    assert row["status"] == "ended" and done["result"]["json"] == {"ok": 1}
+    assert done["result"]["cost_usd"] == pytest.approx(0.00055)
+    call = sch.store.api_call(sch.store.api_log()[0]["id"])
+    assert call["request"]["prompt"] == "old prompt" and call["request"]["schema"] == {"type": "object"}
+
+
+def test_a_picture_that_cannot_be_read_fails_only_its_job(sch, clock, tmp_path, monkeypatch):
+    from stratamodels.runtimes import cloud
+
+    bad = tmp_path / "bad.jpg"
+    bad.write_bytes(b"x")
+    monkeypatch.setattr(cloud, "encode", lambda p: (_ for _ in ()).throw(OSError("truncated")))
+    b = sch.submit("caption", dict(prompt="x", image=str(bad), batch=True), "app")
+    (a,) = caption(sch, 1)
+    clock.t += 60
+    (row,) = sch.batcher.step()
+    assert list(row["jobs"]) == [str(a["id"])] and sch.store.get(b["id"])["error"] == "OSError: truncated"
+
+
+def test_snapshots_keep_each_distinct_request_once():
+    from stratamodels.batches import requests, snapshot
+
+    m = SimpleNamespace(runtime="claude-api", options=dict(model="x"))
+    snap = snapshot(
+        m, [(1, dict(prompt="p", images=["/a"])), (2, dict(prompt="p", images=["/b"])), (3, dict(prompt="q"))]
+    )
+    assert snap["requests"] == [dict(prompt="p"), dict(prompt="q")]
+    assert requests(snap) == {
+        1: dict(prompt="p", images=["/a"]),
+        2: dict(prompt="p", images=["/b"]),
+        3: dict(prompt="q", images=[]),
+    }
 
 
 def test_the_batcher_loads_its_own_client_and_a_model_that_cannot_load_fails_its_jobs(sch, clock, monkeypatch):
@@ -361,10 +405,6 @@ def test_jobs_that_keep_arriving_are_held_and_go_as_a_batch_once_there_are_enoug
 
 
 def test_too_few_are_let_go_to_run_at_once_and_explicit_ones_still_batch(sch, clock, monkeypatch):
-    real = claude.load
-    monkeypatch.setattr(
-        claude, "load", lambda m, d: real(m, d, client=sch.client)
-    )  # the CPU lane's own handle, on the fake
     a, b = auto(sch, 2)
     (c,) = caption(sch, 1)  # batch = true
     clock.t += 10
