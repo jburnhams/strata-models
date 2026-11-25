@@ -6,9 +6,9 @@ the signature of what it read. The page gets the kept one: when it is out of dat
 worked out. An experiment never analysed, or one whose analysis took under QUICK_S, is worked out while the request waits up to QUICK_S;
 past that the page gets a stub marked pending, with what the analysis is doing (`progress`), and asks again."""
 
+import contextlib
 import hashlib
 import json
-import os
 import sys
 import threading
 import time
@@ -17,20 +17,9 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import func, select
 
 from stratamodels.db.models import EvalJudgment, EvalResult, EvalSummary
+from stratamodels.evals import codehash
 from stratamodels.evals import core as C
 
-
-def _code_hash():
-    """The analysis code itself: a deploy that changes how a metric is worked out makes every kept summary out of date."""
-    h = hashlib.sha256()
-    here = os.path.dirname(__file__)
-    for f in ("core.py", "judges.py", "metrics.py", "stats.py", "summaries.py"):
-        with open(os.path.join(here, f), "rb") as fh:
-            h.update(fh.read())
-    return h.hexdigest()[:16]
-
-
-CODE = _code_hash()
 QUICK_S = 1.5  # an analysis that took less is redone while the page waits rather than shown out of date
 
 
@@ -57,7 +46,7 @@ def signature(spec, engine):
             s.scalar(select(func.count()).select_from(EvalJudgment).where(EvalJudgment.experiment == spec.name)),
             s.scalar(select(func.max(EvalJudgment.id)).where(EvalJudgment.experiment == spec.name)),
             C.load_dataset(spec.dataset, engine=engine).version,
-            CODE,
+            codehash.code(spec),
             sorted(  # a person's borderline marks (evals.judges.mark_borderline) change judge agreement and no count above
                 jid
                 for jid, d in s.execute(
@@ -84,6 +73,9 @@ class Summaries:
     def __init__(self, engine, analyse=None, log=None):
         self.engine = engine  # a function -> the engine (the scheduler's store may be swapped in tests)
         self.analyse = analyse  # None: evals.core.analyse, looked up when used
+        self.process = (
+            None  # (spec, engine, progress=) -> the analysis, for the slow ones: the service's evals.process.Runner
+        )
         # stderr by default: it runs in background threads, and a line on stdout lands in whatever else is printing then (CI, 2026-11-25:
         # a server test's warm-up wrote "eval summary fake-pipe: 3.8 s" into test_smear_kernel's captured TOML)
         self.log = log or (lambda m: print(m, file=sys.stderr, flush=True))
@@ -105,6 +97,17 @@ class Summaries:
             r = s.get(EvalSummary, name)
             return None if r is None else (r.signature, r.result, r.computed_at, r.seconds)
 
+    def _quick(self, spec):
+        """Whether its last analysis was short enough to be worth no process of its own (one never analysed may be a long one)."""
+        row = self._stored(spec.name)
+        return row is not None and row[3] is not None and row[3] <= QUICK_S
+
+    def stop(self):
+        """The service is closing: start no more analyses and end the ones in a process of their own (they are worked out at the next start)."""
+        self.pool.shutdown(wait=False, cancel_futures=True)
+        if self.process is not None:
+            self.process.stop()
+
     def compute(self, spec, sig=None, force=False):
         """Work out spec's analysis now and keep it (unless the kept one already matches and not `force`). Returns the summary."""
         with self._lock(spec.name):
@@ -124,10 +127,12 @@ class Summaries:
                 self.working[spec.name] = dict(step=step, done=done, total=total, started_at=t)
 
             try:
-                if self.analyse is None:
-                    res = finite(C.analyse(spec, self.engine(), progress=progress))
-                else:
+                if self.analyse is not None:
                     res = finite(self.analyse(spec, self.engine()))
+                elif self.process is not None and not self._quick(spec):
+                    res = self.process(spec, self.engine(), progress=progress)
+                else:
+                    res = finite(C.analyse(spec, self.engine(), progress=progress))
             finally:
                 self.working.pop(spec.name, None)
             took = time.time() - t
@@ -209,7 +214,10 @@ class Summaries:
                 )  # a forced ask joining a queued ordinary one keeps its force
                 return
             self.pending[name] = force
-        self.pool.submit(self._run, name)
+        with contextlib.suppress(
+            RuntimeError
+        ):  # the pool is closed: the service is stopping, the next start brings it up to date
+            self.pool.submit(self._run, name)
 
     def refresh_dataset(self, dataset, force=False):
         """Every experiment on `dataset`: outputs are shared by key across experiments, and a [score] pass rewrites them in place."""

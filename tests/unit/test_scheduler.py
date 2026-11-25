@@ -814,3 +814,45 @@ def test_many_jobs_in_one_call_take_the_variant_and_the_limit(scheduler, monkeyp
     monkeypatch.setattr(S, "MAX_BULK", 1)
     with pytest.raises(QueueError, match="at most 1 jobs"):
         scheduler.submit_many("echo", [{}, {}], "app")
+
+
+def test_a_model_no_job_used_for_a_while_is_unloaded(scheduler, clock):
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    scheduler._unload_idle()
+    assert list(scheduler.resident) == ["small"]  # off by default here: it stays until the room is needed
+    scheduler.idle_unload_s = 1800
+    clock.t += 1700
+    scheduler._unload_idle()
+    assert list(scheduler.resident) == ["small"]
+    clock.t += 200
+    scheduler.busy["small"] = 1  # running a job: not idle however long it takes
+    scheduler._unload_idle()
+    assert list(scheduler.resident) == ["small"]
+    scheduler.busy.clear()
+    scheduler.submit("echo", {}, "a")  # a job waits for it
+    scheduler._unload_idle()
+    assert list(scheduler.resident) == ["small"]
+    scheduler.step()
+    clock.t += 1900
+    scheduler._unload_idle()
+    assert not scheduler.resident and "idle for 30 min" in scheduler.events[-1]["text"]
+
+
+def test_freed_memory_is_given_back_at_most_once_a_minute(scheduler, clock):
+    calls = []
+    scheduler.trim = lambda collect: calls.append(collect)
+    clock.t += 120
+    scheduler._tidy()
+    assert calls == []  # nothing ran
+    scheduler.submit("echo", {}, "a")
+    scheduler.step()
+    scheduler._tidy()
+    assert calls == [False]
+    scheduler._unload("small", "test")
+    scheduler._tidy()
+    assert calls == [False]  # too soon
+    clock.t += 61
+    scheduler._tidy()
+    scheduler._tidy()
+    assert calls == [False, True]  # a model went: what only cycles hold is collected too

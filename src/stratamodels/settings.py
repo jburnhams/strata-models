@@ -9,13 +9,15 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
   cpu_jobs        jobs for zero-VRAM models (recorded outputs, CPU models, cloud CLIs) that may run at once, beside the GPU's. Default: 4.
   whole_card_gb   a model or lease that needs more than this runs with the whole card to itself, the reserve ignored (to try models too big
                   to budget for, at their own risk). Default: 10.0.
+  idle_unload_min minutes after its last job that a loaded model is unloaded, whatever it runs on, giving back its GPU memory and RAM (the next
+                  job loads it again, 3 to 10 s for most). Default: 30. 0 keeps models until the room is needed.
   claude_budget_usd, gemini_budget_usd   what a cloud API key may spend per period (spend.py); a call whose worst case does not fit what is
                   left is refused. Default: 0 (nothing runs until a budget is set).
   claude_rollover, gemini_rollover       YYYY-MM-DD: a day the budget starts again, repeated monthly on that day of the month. Unset: the
                   budget is one pot that only goes down. (NVIDIA NIM is free and only rate-limited: no budget.)
 
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
-STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB. The database is chosen by strata_python.db:
+STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB, STRATAMODELS_IDLE_UNLOAD_MIN. The database is chosen by strata_python.db:
 STRATA_DB_URL, else STRATAMODELS_DATABASE_URL, else schema `stratamodels` of the shared database named in STRATA_DB_DATABASE over the local
 socket (a real Postgres only with STRATA_DB_LIVE=1, set in the service unit)."""
 
@@ -30,6 +32,7 @@ DEFAULTS = dict(
     gpu_jobs="2",
     cpu_jobs="4",
     whole_card_gb="10.0",
+    idle_unload_min="30",
     claude_budget_usd="0",
     claude_rollover="",
     gemini_budget_usd="0",
@@ -42,6 +45,7 @@ ENV = dict(
     gpu_jobs="STRATAMODELS_GPU_JOBS",
     cpu_jobs="STRATAMODELS_CPU_JOBS",
     whole_card_gb="STRATAMODELS_WHOLE_CARD_GB",
+    idle_unload_min="STRATAMODELS_IDLE_UNLOAD_MIN",
     claude_budget_usd="STRATAMODELS_CLAUDE_BUDGET_USD",
     claude_rollover="STRATAMODELS_CLAUDE_ROLLOVER",
     gemini_budget_usd="STRATAMODELS_GEMINI_BUDGET_USD",
@@ -151,6 +155,8 @@ def save(changes):
             raise KeyError(f"unknown setting {k!r}")
         if k in ("vram_reserve_gb", "whole_card_gb") and v is not None:
             _gb(k, v)  # refuse a bad number before it is written
+        if k == "idle_unload_min" and v is not None:
+            _minutes(k, v)
         if k in ("gpu_jobs", "cpu_jobs") and v is not None:
             v = _slots(k, v)
         if k.endswith("_budget_usd") and v is not None:
@@ -237,6 +243,24 @@ def whole_card_gb():
     return _gb_setting("whole_card_gb")
 
 
+def _minutes(key, v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number of minutes, not {v!r}")
+    if not 0 <= f <= 1440:
+        raise ValueError(f"{key} must be between 0 and 1440")
+    return f
+
+
+def idle_unload_min():
+    """Minutes after its last job that a loaded model is unloaded (0: never, only when the room is needed)."""
+    try:
+        return _minutes("idle_unload_min", _raw("idle_unload_min"))
+    except ValueError:
+        return float(DEFAULTS["idle_unload_min"])
+
+
 def _slots(key, v):
     try:
         n = int(str(v).strip())
@@ -298,5 +322,6 @@ def all_settings():
         gpu_jobs=jobs("gpu_jobs"),
         cpu_jobs=jobs("cpu_jobs"),
         whole_card_gb=whole_card_gb(),
+        idle_unload_min=idle_unload_min(),
         **{k: v for p in BUDGETED for k, v in zip((f"{p}_budget_usd", f"{p}_rollover"), budget(p))},
     )
