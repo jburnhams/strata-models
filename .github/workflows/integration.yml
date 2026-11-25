@@ -34,7 +34,15 @@ jobs:
           case "$RUNNER_OS" in
             Linux) sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr ffmpeg ;;
             macOS) brew install tesseract ffmpeg ;;
-            Windows) choco install tesseract ffmpeg -y --no-progress ;;
+            # The Chocolatey feed sometimes times out (504) and choco still exits 0 having installed nothing, which then
+            # fails the tests far from the cause: install each package with retries and fail here if it never lands.
+            Windows) for pkg in tesseract ffmpeg; do
+                for try in 1 2 3 4; do
+                  choco install "$pkg" -y --no-progress && choco list --exact "$pkg" | grep -qi "^$pkg " && continue 2
+                  sleep $((try * 20))
+                done
+                echo "::error::choco could not install $pkg"; exit 1
+              done ;;
           esac
       - run: uv sync --locked
       - name: Integration tests (CLI and HTTP API end-to-end)
