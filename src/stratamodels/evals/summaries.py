@@ -9,6 +9,7 @@ past that the page gets a stub marked pending, with what the analysis is doing (
 import hashlib
 import json
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -80,10 +81,12 @@ class Summaries:
     """The kept analyses: get() for the page, refresh() when something changed, warm() at start. One background worker works them out, one
     experiment at a time, so a burst of judgments makes one or two analyses, not one each."""
 
-    def __init__(self, engine, analyse=None, log=print):
+    def __init__(self, engine, analyse=None, log=None):
         self.engine = engine  # a function -> the engine (the scheduler's store may be swapped in tests)
         self.analyse = analyse  # None: evals.core.analyse, looked up when used
-        self.log = log
+        # stderr by default: it runs in background threads, and a line on stdout lands in whatever else is printing then (CI, 2026-11-25:
+        # a server test's warm-up wrote "eval summary fake-pipe: 3.8 s" into test_smear_kernel's captured TOML)
+        self.log = log or (lambda m: print(m, file=sys.stderr, flush=True))
         self.memo = {}  # name -> (signature, summary): saves reading the row back on every request
         self.locks = {}
         self.guard = threading.Lock()
