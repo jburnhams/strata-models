@@ -1,5 +1,12 @@
 # Progress
 
+## 2026-11-25: one face store for every app
+The faces of bright-horizons, strata-360, strata-stills and later strata-reels move into one store here, decided with Jonathan (one global
+person per human, apps add their own fields; sensitive tags opt-in; merges suggested, never automatic; clustering and crops here; a 1600 px
+copy of each picture kept). Built on strata-python's new `db.vectors` (pgvector column and nearest search), `images.crop` and
+`clients.faces` (strata-python PR #81). Tables and the store are in [database.md](database.md#faces); apps migrate one by one, bright-horizons
+first. Nothing is indexed yet: the live database gets the tables when this is deployed.
+
 ## 2026-11-24: shot-boundaries and scene-describe on a real tape
 strata-reels' whole analysis ran on a real digitised family tape (PAL, 21 min, interlaced, torn restarts, a lost signal at the end). Every frame was scored and every candidate down to a scene score of 0.09 looked at by eye: 50 cuts, two of them where the signal comes and goes, one only six frames after another (under `min_shot_s`, so no setting with 0.6 s finds it).
 

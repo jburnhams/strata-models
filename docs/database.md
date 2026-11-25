@@ -16,6 +16,7 @@ name; strata-python is public, so it has no built-in name). Without them the ser
 | Preferences | `preferences` | an app's own model and default params for a role: `PUT/DELETE /api/preferences/{app}/{role}`, `strata-models prefer` |
 | Requests | `jobs`, `results`, `files` | the scheduler: every run and lease (a run with the load options and `settings_hash` it started with), each run's output (dropped after a week), the paths a job read or wrote (never the bytes) |
 | Evals | `eval_datasets`, `eval_items`, `eval_experiments`, `eval_candidates`, `eval_results`, `eval_judgments` (people's, and model judges' with `judge` set), `eval_summaries` | spec TOMLs and dataset JSONLs imported when new or changed; `PUT /api/evals/{name}/spec`; runs and the Judge tab; `eval_summaries` worked out in the background after runs, judgments, spec edits and at start |
+| Faces | `face_images`, `face_image_tags`, `face_tags`, `faces`, `face_embeddings` (pgvector `public.vector(512)`, HNSW cosine index), `identities`, `identity_app_metadata`, `face_batches`, `face_assignments`, `identity_not_same` | every app's indexed pictures (`POST /api/faces/images`), the people in them and the decisions about them: see [Faces](#faces) |
 
 **Files are seeds.** `models.toml`, `evals/specs/*.toml` and the dataset `.jsonl` files are imported when they are new or changed. A row edited
 here (`edited`) is no longer overwritten by its file: the choice made here stands. `strata-models seed --follow role:KEY` (or
@@ -25,3 +26,23 @@ at the next start.
 **Never against the live database from a branch.** Tests pin `STRATAMODELS_DATABASE_URL` to a temporary SQLite file (`strata_env` in `pyproject.toml`), and strata-python's guard refuses a real Postgres during tests. The CLI
 only creates the tables of an empty database and refuses one at another revision (`Store.connect(migrate='new')`); only the service migrates, at
 start, so the live schema changes when matching code is deployed.
+
+## Faces
+
+One face store for every app (design, survey and decisions: the face database proposal of 2026-11-25). Code: `faces/store.py` (the store),
+`faces/api.py` (the routes, listed in its docstring); apps call it through `strata_python.clients.faces`.
+
+- **A picture** (`face_images`) is one per `app` + `ref` (the app's own id), with the path or URL of the original and `medium`, a 1600 px WebP
+  copy kept under the data folder so a face can still be shown in its picture when the original is out of reach. Crops are cut on demand and
+  cached (`faces/crops`), from the original when it is readable, else from the copy.
+- **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
+  set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`.
+- **Embeddings** (`face_embeddings`) are per face and model: indexing again with another model keeps the faces (matched by box overlap, IoU 0.5)
+  and their decisions, and adds the new model's embedding. Searches compare only one model's embeddings.
+- **People** (`identities`) are global; `identity_app_metadata` holds an app's own fields and its id for the person, which override the global
+  fields when that app reads them. A merge points `merged_into` at the surviving person and is undone with an unmerge; nothing merges by itself:
+  `merge-suggestions` ranks pairs whose centroids are close, minus pairs marked `identity_not_same`.
+- **Decisions** (`face_assignments`) are append-only, grouped in `face_batches`; a face's newest decision whose batch is not undone wins, so any
+  batch is undone in one step.
+- **pgvector** lives in `public` and the service's connection searches only `stratamodels`, so the type, operator and operator class are
+  schema-qualified (`strata_python.db.vectors`). SQLite (tests) keeps vectors as text and searches in Python.

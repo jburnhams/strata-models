@@ -38,6 +38,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/images/file?path=            one generated or uploaded picture
   POST /api/images/upload?name=          a reference picture (body = the file) -> {path}
   /api/evals...                          experiments, analyses, write-ups, blind judging: see evals/api.py
+  /api/faces..., /api/identities...      the face store: index, search, cluster, people, decisions, crops: see faces/api.py
 Every other path serves `server/static/index.html` when built (`cd web && npm run build`), else `landing.html` (strata_python.web.add_web)."""
 
 import os
@@ -504,8 +505,10 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         return dict(path=p)
 
     from stratamodels.evals import api as evals_api
+    from stratamodels.faces import api as faces_api
 
     evals_api.mount(app, s)
+    faces_api.mount(app, s)
 
     web.add_web(
         app, STATIC, LANDING
