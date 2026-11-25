@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**font-match: a line whose capitals are measured as its x-height is not set half as big again (branch `line-sizes`)**
+strata-scan's first finished PDF of a book had a line set 1.4 to 1.6 times too big on four of 25 pages ("Polly.-Whiskey!", "Dr.-Well sir I am a Doctor."), over the line above. A line's x-height is measured as the band of rows with over 40 % of its profile's peak ink; on a short line of tall letters that band reaches the capitals' tops (46 px against the page's 31), the fit starts from it, and it searches only 18 % either way.
+- `runtimes/fontfit.py`: `_sizes0`: a line measured over `TALLER` (1.2) times the page's median x-height, and not in capitals, also tries the size at which that height is its capitals', and the better fit wins. Only such lines: offered to every line, a misread line of body type ("name Poxca?") took the smaller size.
+- 18 pages of the 1874 book in one face, old and new code: every page's F1 the same or better, 22 lines changed size by over 8 %. Three lines that changed fit slightly worse ("the well.)" from 0.80 to 0.77, which takes the size of the lines round it; the others by 0.006 and 0.002).
+- `tests/unit/test_fontfit.py`: a set line that the old code sets at 52.8 px for 40, and when a second size is tried.
+
 **shot-boundaries: no false cut on the second frame of a clip (branch `shots-clip-lead-in`)**
 Eval `shots-vhs` run through the service on omarchy gave every ffmpeg candidate one false cut, 0.04 s into a window without cuts, which put TransNet V2 first; the whole tape has none there. yadif has no frame before the first it is given, so on fine stripes the second frame scores as a cut against it.
 - `runtimes/scenes.py`: when deinterlacing, the second frame is never a cut (its score is still answered). A shot one frame long at the very start is not something to cut.

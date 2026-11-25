@@ -393,6 +393,7 @@ class Scan:
         if not self.lines:
             raise RunError("no words with ink to fit")
         med = float(np.median([ln["xh"] for ln in self.lines]))
+        self.med_xh = med
         self.k = min(1.0, WORK_XH / med)  # working scale
         if self.k < 1.0:
             g = Image.fromarray(np.where(ink_full, 255, 0).astype(np.uint8))
@@ -509,6 +510,21 @@ def _size0(face, ln, k, style="roman"):
     return ln["xh"] * k / (ch if caps else xh)
 
 
+TALLER = 1.2  # times the page's median x-height: a line measured taller may be a heading, or its capitals measured for its x-height
+
+
+def _sizes0(scan, face, ln, k, style):
+    """The sizes a line's fit starts from: its measured x-height's (`_size0`) and, for a line `TALLER` than the page's that is not in capitals,
+    the size at which that height is its capitals' (the better fit of the two wins). A short line of tall letters ("Polly.—Whiskey!") has
+    ink over 40 % of its profile's peak up to its capitals' tops, so its x-height comes out half as tall again (2026-11-25: 46 px against the
+    page's 31 on four pages of the 1874 book, each such line set 1.4 to 1.6 times too big, over its neighbours), and the search reaches only
+    18 % either way."""
+    s = _size0(face, ln, k, style)
+    xh, ch, _ = x_ratio(face.file(style))
+    capitals = s * xh < ln["xh"] * k * 0.999  # _size0 took the height for the capitals'
+    return [s] if capitals or ln["xh"] <= TALLER * scan.med_xh else [s, ln["xh"] * k / ch]
+
+
 def fit_line(scan, ln, face, style, quick=False, p0=None):
     """((size, hscale, tracking, thr), F1) of one line in one face and style at working scale."""
     k = scan.k
@@ -522,7 +538,10 @@ def fit_line(scan, ln, face, style, quick=False, p0=None):
         return _f1(ref, got), (size, hs, trk, thr)
 
     if quick:  # the screen: three sizes at two weights (a scan is often heavier than the font, and a light face must not lose for that alone)
-        best = max((score(s0 * g, 0.0, t) for g in (0.9, 1.0, 1.1) for t in (0.3, 0.5)), key=lambda r: r[0])
+        starts = [s0] if p0 else _sizes0(scan, face, ln, k, style)
+        best = max(
+            (score(s * g, 0.0, t) for s in starts for g in (0.9, 1.0, 1.1) for t in (0.3, 0.5)), key=lambda r: r[0]
+        )
         return best[1], best[0]
     best = max(
         (score(s0 * g, 0.0, p0[3] if p0 else 0.5) for g in (0.82, 0.88, 0.94, 1.0, 1.06, 1.12, 1.18)),
