@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bucketSeries, describeJob, finding, processName, seconds, spendFinding, ticksOf, usd, vramParts } from '../../src/logic'
 import { jobsUrl, spendUrl } from '../../src/api'
-import { byApp } from '../../src/components/UsagePage'
+import { appParts, byApp } from '../../src/components/UsagePage'
 import { fixtures, spendFixtures } from '../utils/server'
 
 describe('words for jobs and processes', () => {
@@ -56,6 +56,16 @@ describe('the VRAM breakdown and the finding', () => {
   })
   it('totals usage by app, most first', () => {
     expect(byApp(fixtures.usage().rows)).toEqual([['strata-stills', 600], ['bright-horizons', 15]])
+  })
+  it('keeps the bar to five parts, folding the smallest apps into Other', () => {
+    const apps = (n: number) => Array.from({ length: n }, (_, i): [string, number] => [`app${i}`, 100 - i])
+    expect(appParts(apps(5)).map(p => p.label)).toEqual(['app0', 'app1', 'app2', 'app3', 'app4'])
+    const six = appParts(apps(6))
+    expect(six).toHaveLength(5)
+    expect(six[4]).toEqual({ key: '__other', label: 'Other (2 apps)', value: 96 + 95 })
+    const many = appParts(apps(20))
+    expect(many).toHaveLength(5)
+    expect(many.reduce((s, p) => s + p.value, 0)).toBe(apps(20).reduce((s, [, v]) => s + v, 0))
   })
 })
 
