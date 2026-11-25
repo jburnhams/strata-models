@@ -275,3 +275,20 @@ def test_a_torn_frame_beside_a_gap_does_not_hide_a_cut_before_it(monkeypatch, tm
     monkeypatch.setattr(scenes, "widen_blank", lambda runs, *a: runs)  # the gap starts where it is found
     r = scenes.run(dict(HANDLE), {"path": str(video)})
     assert [c["frame"] for c in r["cuts"]] == [75, 95]
+
+
+def test_the_second_frame_is_not_a_cut_when_deinterlacing(monkeypatch, tmp_path):
+    """yadif fills the first frame's missing field from its neighbours' lines, so the second scores high against it on fine detail."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    def fake_run(cmd, cwd, **kw):
+        with open(f"{cwd}/frames.txt", "w", encoding="utf8") as f:
+            for i in range(50):
+                f.write(f"frame:{i} pts:{i} pts_time:{i / 25}\nlavfi.scene_score={ {1: 0.34, 30: 0.5}.get(i, 0.01) }\n")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(scenes.subprocess, "run", fake_run)
+    plain = {"path": str(video), "blank": False}
+    assert [c["frame"] for c in scenes.run(dict(HANDLE), plain)["cuts"]] == [30]
+    assert [c["frame"] for c in scenes.run(dict(HANDLE), {**plain, "deinterlace": False})["cuts"]] == [1, 30]

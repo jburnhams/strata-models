@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**shot-boundaries: no false cut on the second frame of a clip (branch `shots-clip-lead-in`)**
+Eval `shots-vhs` run through the service on omarchy gave every ffmpeg candidate one false cut, 0.04 s into a window without cuts, which put TransNet V2 first; the whole tape has none there. yadif has no frame before the first it is given, so on fine stripes the second frame scores as a cut against it.
+- `runtimes/scenes.py`: when deinterlacing, the second frame is never a cut (its score is still answered). A shot one frame long at the very start is not something to cut.
+- `tests/unit/test_scenes_runtime.py`.
+
 **Claude Message Batches API, automatic for bulk jobs: half price (branch `claude/project-thread-ul9xch`)**
 For bulk work that can wait (an archive of photos to caption, an eval's cloud candidates), the same Claude call costs half through the Batches API and comes back within 24 hours (most within one). It is automatic: jobs for a Claude model that keep arriving (less than 10 s apart) are held, and once they stop (or 10 000 are held, or the oldest has waited 5 minutes) 20 or more go as one batch; fewer run at once as before. `batch = false` in a job's params opts out, `batch = true` always batches, and a `high` priority job is never held. Nothing else changes for an app: it submits and waits as before, and gets the same result plus `batch` (the vendor's id).
 - `src/stratamodels/batches.py`: **new**. The batcher holds those jobs out of the CPU lane (`gap_s` 10 s, `max_wait_s` 300 s, `min_jobs` 20, `max_jobs` 10 000, `max_bytes` 200 MB; the API takes 256), lets go the groups too small to batch, polls each open batch every `poll_s` (60 s) and finishes every job from its outcome. Jobs are `running` while in a batch, their `note` naming it; `/api/status` lists the open batches. On a model without a batch API the flag is dropped and the job runs at once.
