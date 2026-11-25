@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**A page of display type is set in each line's own face; missing symbols take a fallback face; no word set as a dot (branch `line-faces`)**
+strata-scan's finished PDF kept 10 of the 1874 book's 25 set pages as scans. Eight are adverts, which hold five typefaces or more: one face for the page agrees with the scan's ink by 0.64 to 0.76.
+- `runtimes/fontfit.py`: a page whose lines are of very different sizes (`is_mixed`: 90th percentile of x-height over 1.8 times the 10th) has each line screened in every face of the catalogue and fitted in full in its best three (`line_faces`); a face of its own must gain 0.02. Param `mix = false` keeps one face. Words carry their `face`. On three adverts the fit's F1 rose from 0.714 to 0.760, 0.679 to 0.785 and 0.705 to 0.810, in 51 to 103 s instead of 14 to 23. The test picks exactly the adverts and title pages among 26 pages of the 1874 book and 12 of the 1828 book, and no page of body type.
+- `runtimes/pagebuild.py`: words are drawn in their own face; `cover_glyphs`: a character its face has no glyph for takes TeX Gyre Schola's, the rest of its word keeping the face (a footnote's dagger printed as a box or a blank; both pages of the 1828 book that lost theirs print them); `LEAST`: a word that overruns its box is set no smaller than 0.75 of its line ("a" boxed as a speck was a dot); `even_weight`: a block of body text in one face takes its median weight, so a line fitted lighter does not stand out.
+- `tests/unit/test_fontfit.py`, `tests/unit/test_pagebuild.py`.
+
 **font-match: a line whose capitals are measured as its x-height is not set half as big again (branch `line-sizes`)**
 strata-scan's first finished PDF of a book had a line set 1.4 to 1.6 times too big on four of 25 pages ("Polly.-Whiskey!", "Dr.-Well sir I am a Doctor."), over the line above. A line's x-height is measured as the band of rows with over 40 % of its profile's peak ink; on a short line of tall letters that band reaches the capitals' tops (46 px against the page's 31), the fit starts from it, and it searches only 18 % either way.
 - `runtimes/fontfit.py`: `_sizes0`: a line measured over `TALLER` (1.2) times the page's median x-height, and not in capitals, also tries the size at which that height is its capitals' and the page's own size (a line measured over two rows, 90 px, was set at 230 for 67), and the best fit wins. Only such lines: offered to every line, a misread line of body type ("name Poxca?") took the smaller size.
