@@ -1,0 +1,49 @@
+{
+ "type": "object",
+ "properties": {
+  "title": {
+   "type": "string"
+  },
+  "summary": {
+   "type": "string"
+  },
+  "inferred": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "guess": {
+      "type": "string"
+     },
+     "because": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "guess",
+     "because"
+    ],
+    "additionalProperties": false
+   },
+   "maxItems": 4
+  },
+  "tags": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 10
+  },
+  "mixed": {
+   "type": "boolean"
+  }
+ },
+ "required": [
+  "title",
+  "summary",
+  "inferred",
+  "tags",
+  "mixed"
+ ],
+ "additionalProperties": false
+}
