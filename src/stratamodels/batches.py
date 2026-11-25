@@ -1,22 +1,29 @@
 """Jobs sent through a vendor's batch API (the Claude Message Batches API: half the price of the same calls made at once, answered within
 24 hours, most within one), for bulk work that can wait: an archive of photos to caption, an eval's candidate run.
 
-An app asks for it per job: `batch = true` in the params of a job (or `batch` on a bulk submission, POST /api/jobs/bulk, which sends the
-whole lot at the next step instead of waiting for the window) on a model whose runtime has a batch API (claude-api). Nothing else
-changes for the app: it submits jobs and waits for each as it always does, and each job ends done or failed with the same result as a call
-made at once (plus `batch`, the vendor's id). On a model without a batch API the flag is dropped and the job runs at once. What to batch,
-how many, and what to do with an entry that failed (retry it at once, or later) stay with the app: this only sends the calls cheaper.
+Automatic. A job on a model whose runtime has a batch API (claude-api) is held while jobs for that model keep arriving: once none has come
+for `gap_s` (10 s), or `max_jobs` are held, or the oldest has been held `max_wait_s` (a steady trickle never waits for ever), the lot is
+decided: `min_jobs` (20) or more go as one batch; fewer are let go to run at once in the CPU lane, as they always did (a handful of calls is
+not worth waiting up to a day for). So an app that sends many jobs in quick succession gets the batch price without asking, and one call
+on its own is only delayed by the gap. The params decide it per job:
+  batch = false   never batched, never held (an app that needs the answer now)
+  batch = true    always batched, however few (and held like any other)
+  (not given)     automatic; a `high` priority job (someone waiting on the page) is never held
+A bulk submission (POST /api/jobs/bulk, Scheduler.submit_many) is decided at the batcher's next step: the whole lot is already here.
+Nothing else changes for the app: it submits jobs and waits for each as it always does, and each job ends done or failed with the same result
+as a call made at once (plus `batch`, the vendor's id). On a model without a batch API the flag is dropped and the job runs at once. What to
+do with an entry that failed (retry it at once, or later) stays with the app.
 
-The batcher (one per scheduler, stepped on its own thread) takes the queued jobs that asked for it out of the CPU lane and:
-  submit  once the oldest queued batch job of a model has waited `wait_s` (so a stream of submissions becomes one batch), or `max_jobs` of
-          them are queued: each job's request is built as the runtime would send it, its worst case (at the batch price) held of the budget
-          in one check (spend.reserve_many: the jobs that do not fit fail with OverBudget, the rest go), the batch row written (api_batches),
-          the batch sent; the jobs are running from then on, their `note` naming the batch. A batch stays under `max_bytes` of requests
-          (the API takes 256 MB) and `max_jobs` (it takes 100 000); what is left over waits for the next.
+The batcher (one per scheduler, stepped on its own thread) takes the queued jobs it holds out of the CPU lane and:
+  submit  each job's request is built as the runtime would send it, its worst case (at the batch price) held of the budget in one check
+          (spend.reserve_many: the jobs that do not fit fail with OverBudget, the rest go), the batch row written (api_batches), the batch
+          sent; the jobs are running from then on, their `note` naming the batch. A batch stays under `max_bytes` of requests (the API
+          takes 256 MB) and `max_jobs` (it takes 100 000); what is left over waits for the next.
   poll    each open batch every `poll_s`; once it has ended, every entry's outcome is recorded in the ledger at the batch price (spend.record,
           freeing its hold) and its job finished. An entry that errored, expired or was cancelled fails its job (nothing is billed for it).
   resume  after a restart: open batches keep their jobs running (Store.recover leaves them), and their holds are taken again (spend.hold,
-          no check: the calls are made). A batch whose row was written but that was never confirmed sent fails its jobs.
+          no check: the calls are made). A batch whose row was written but that was never confirmed sent fails its jobs. Held jobs are
+          still queued, so they are simply decided again.
 
 The runtime side is the `batch_*` functions of runtimes/claude.py: batch_request, batch_submit, batch_poll, batch_results, batch_answer."""
 
@@ -30,7 +37,9 @@ PREFIX = "job-"  # an entry's custom_id is PREFIX + the job id
 
 
 def wants(params):
-    return bool((params or {}).get(BATCH))
+    """True (always batch), False (never), or None (automatic) from a job's params."""
+    v = (params or {}).get(BATCH)
+    return None if v is None else bool(v)
 
 
 def clean(params):
@@ -41,19 +50,27 @@ def clean(params):
 
 
 class Batcher:
-    def __init__(self, scheduler, wait_s=60.0, poll_s=60.0, max_jobs=10_000, max_bytes=200 * 1024 * 1024):
+    def __init__(
+        self,
+        scheduler,
+        gap_s=10.0,
+        max_wait_s=300.0,
+        min_jobs=20,
+        poll_s=60.0,
+        max_jobs=10_000,
+        max_bytes=200 * 1024 * 1024,
+    ):
         self.s = scheduler
-        self.wait_s, self.poll_s, self.max_jobs, self.max_bytes = (
-            float(wait_s),
-            float(poll_s),
-            int(max_jobs),
-            int(max_bytes),
-        )
+        self.gap_s, self.max_wait_s, self.min_jobs = float(gap_s), float(max_wait_s), int(min_jobs)
+        self.poll_s, self.max_jobs, self.max_bytes = float(poll_s), int(max_jobs), int(max_bytes)
+        self.released = (
+            set()
+        )  # ids of queued jobs held, then let go to run at once (too few to batch): the CPU lane's now
         self.handles = {}  # model key -> (settings hash, handle): the batcher's own client, apart from the CPU lane's
         self.tickets = {}  # job id -> its spend hold, until its outcome is recorded
         self.now = (
             set()
-        )  # model keys whose queued batch jobs go at the next step, without waiting wait_s (a bulk submission)
+        )  # model keys whose held jobs are decided at the next step, without waiting for the gap (a bulk submission)
 
     @property
     def store(self):
@@ -67,8 +84,12 @@ class Batcher:
         return rt if hasattr(rt, "batch_submit") else None
 
     def takes(self, j):
-        """Whether a queued job is the batcher's (a run that asked for a batch, on a served model with a batch API), not the CPU lane's."""
-        if j["kind"] != "run" or not wants(j["params"]):
+        """Whether a queued job is the batcher's (held, or to be batched), not the CPU lane's: a run on a served model with a batch API that
+        did not say batch = false, is not high priority unless it said batch = true, and was not let go already."""
+        from stratamodels.scheduler import rank
+
+        w = wants(j["params"])
+        if j["kind"] != "run" or w is False or j["id"] in self.released or (w is None and rank(j["priority"]) == 0):
             return False
         model = self.s._model_of(j)
         return model is not None and model.served and self._runtime(model) is not None
@@ -97,18 +118,32 @@ class Batcher:
 
     # ---- submit ---------------------------------------------------------------------------------------------------------------------
     def due(self, now=None):
-        """{model key: (model, queued jobs, oldest first)} of the models whose batch is due."""
+        """{model key: (model, jobs to batch, jobs to let go)} of the models whose held jobs are decided now: none has arrived for gap_s,
+        max_jobs are held, the oldest has waited max_wait_s, or they came in one bulk submission. min_jobs or more are all batched; fewer,
+        only those that said batch = true."""
         now = self.s.clock() if now is None else now
+        queued = self.store.queued()
+        self.released &= {j["id"] for j in queued}  # forget the ones that have left the queue
         groups = {}
-        for j in self.store.queued():
+        for j in queued:
             if self.takes(j) and not self.s._waiting_on_step(j):
                 m = self.s._model_of(j)
                 groups.setdefault(m.key, (m, []))[1].append(j)
-        return {
-            k: (m, js)
-            for k, (m, js) in groups.items()
-            if k in self.now or len(js) >= self.max_jobs or now - min(j["submitted_at"] for j in js) >= self.wait_s
-        }
+        out = {}
+        for k, (m, js) in groups.items():
+            arrived = [j["submitted_at"] for j in js]
+            if not (
+                k in self.now
+                or len(js) >= self.max_jobs
+                or now - max(arrived) >= self.gap_s
+                or now - min(arrived) >= self.max_wait_s
+            ):
+                continue
+            if len(js) >= self.min_jobs:
+                out[k] = (m, js, [])
+            else:
+                out[k] = (m, [j for j in js if wants(j["params"])], [j for j in js if not wants(j["params"])])
+        return out
 
     def submit(self, model, jobs):
         """Send one batch of `jobs` (queued, on `model`); returns its row, or None when nothing was sent. Jobs past the size limits stay queued."""
@@ -274,12 +309,15 @@ class Batcher:
         for b in self.store.batches(status="submitted"):
             if b["vendor_id"] is not None and (b["polled_at"] is None or now - b["polled_at"] >= self.poll_s):
                 out.append(self.poll(b, now))
-        for key, (model, jobs) in self.due(now).items():
+        let_go = 0
+        for key, (model, jobs, release) in self.due(now).items():
             self.now.discard(key)
-            b = self.submit(model, jobs)
+            self.released |= {j["id"] for j in release}
+            let_go += len(release)
+            b = self.submit(model, jobs) if jobs else None
             if b is not None:
                 out.append(b)
-        if out:
+        if out or let_go:
             self.s._notify()
         return out
 

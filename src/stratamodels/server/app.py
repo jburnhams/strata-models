@@ -16,7 +16,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   POST /api/models/{key}/load|unload     ask the worker to load or free a model
   POST /api/jobs                         {role, params, app, priority?, model?} queue a model job
   POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?, batch?} queue many jobs in one call: {ids}
-                                         (batch: through the model's batch API, sent at once: half price on Claude, answered within a day)
+                                         (batch: through the model's batch API, half price on Claude, answered within a day; batches.py)
   POST /api/run/{role}                   {params, app, priority?, model?, timeout?} queue it and wait for the result (504 with the job if it takes longer)
   GET  /api/jobs?status=&role=&app=&kind=&before=&limit=   history, newest first, cursor `before` = the last id shown
   GET  /api/jobs/{id}?wait=              one job with its result; waits up to `wait` seconds for it to finish
@@ -73,7 +73,7 @@ class BulkIn(BaseModel):
     priority: str = "normal"
     model: str | None = None
     options: dict | None = None
-    batch: bool = False
+    batch: bool | None = None
 
 
 class RunIn(BaseModel):
