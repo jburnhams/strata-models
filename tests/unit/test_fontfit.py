@@ -44,7 +44,7 @@ def handle(models):
 def block(tmp_path, ttf, size=40.0, hscale=1.1, text=("Punch and Judy", "with the Baby")):
     """A grey scan of two lines set in the font at `size` px, stretched by `hscale`; its words and boxes as Tesseract gives them."""
     face = F.Face("tinos", {"roman": ttf})
-    W, H = 700, 160
+    W, H = 700, 40 + 60 * len(text)
     canvas = np.zeros((H, W), dtype=bool)
     lines = []
     for i, ln in enumerate(text):
@@ -444,3 +444,29 @@ def test_rendered_words_are_kept_within_a_byte_budget(ttf, monkeypatch):
     assert (ttf, "Punch", 40.0, 1.0, 0.0, 0.5, False) not in F._renders  # the oldest went first
     big = F.render_word(ttf, "Punch", 800.0, 1.0, 0.0, 0.5)  # over an eighth of the budget: answered, not kept
     assert big[0].nbytes > F.RENDER_CACHE_BYTES // 8 and (ttf, "Punch", 800.0, 1.0, 0.0, 0.5, False) not in F._renders
+
+
+def test_a_line_whose_capitals_are_measured_as_its_x_height_is_set_at_the_size_of_the_others(tmp_path, ttf, models):
+    """Nearly every letter of the last line is tall, so its profile's band reaches the capitals' tops and its x-height reads half as big again."""
+    text = ("some more nice news", "we are as sure as ever", "our own rose vase", "Dill, Till, Lilli")
+    img, lines = block(tmp_path, ttf, size=40.0, hscale=1.0, text=text)
+    r = F.run(handle(models), dict(image=img, lines=lines, candidates=["tinos"], out=str(tmp_path / "fit.png")))
+    sizes = [ln["size_px"] for b in r["blocks"] for ln in b["lines"]]
+    assert len(sizes) == 4
+    assert sizes[-1] == pytest.approx(40.0, rel=0.08)
+    assert max(sizes) / min(sizes) < 1.1
+
+
+def test_only_a_line_taller_than_the_page_that_is_not_in_capitals_gets_a_second_size_to_start_from(ttf):
+    face = F.Face("tinos", {"roman": ttf})
+    xh, ch, _ = F.x_ratio(ttf)
+
+    class Page:
+        med_xh = 30.0
+
+    def starts(h, text):
+        return F._sizes0(Page, face, dict(xh=h, text=text), 1.0, "roman")
+
+    assert starts(30, "Why I am not sick!") == [30 / xh]
+    assert starts(47, "Polly.—Whiskey!") == pytest.approx([47 / xh, 47 / ch, 30 / xh])
+    assert starts(47, "ACT THE SECOND") == [47 / ch]
