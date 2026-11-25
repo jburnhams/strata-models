@@ -101,6 +101,11 @@ def _free_port():
         return s.getsockname()[1]
 
 
+# llama-server keeps old prompts' states in RAM, 8 GB by default: on omarchy the Qwen3.5-9B process held 8-9 GB after tens of photo jobs (130-190 MB
+# an entry, evicting all the time) on top of the card. 1 GB keeps the last few. A model's own `args` come later on the line, so they can change it.
+CACHE_RAM_MB = 1024
+
+
 def command(exe, files, port, ctx, args):
     cmd = [
         exe,
@@ -117,6 +122,8 @@ def command(exe, files, port, ctx, args):
         "--no-webui",
         "-fa",
         "on",
+        "--cache-ram",
+        str(CACHE_RAM_MB),
     ]
     if files.get("mmproj"):
         cmd += ["--mmproj", files["mmproj"]]

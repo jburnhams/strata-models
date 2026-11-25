@@ -4,6 +4,10 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**llama-server keeps at most 1 GB of old prompts in RAM (branch `claude/llama-cache-ram`)**
+llama-server's prompt cache is 8 GB by default. On omarchy the Qwen3.5-9B server held 9 GB of RAM (6.6 GB resident, 2.7 GB swapped) after 100 jobs, and 8.5 GB 16 minutes after a restart, filled by 39 jobs whose photos rarely repeat.
+- `runtimes/llama.py`: `--cache-ram 1024` (`CACHE_RAM_MB`) before the model's own `args`, so a model can still set its own. The reuse of a prompt's shared beginning inside the running slot is separate and stays.
+
 **Claude Message Batches API, automatic for bulk jobs: half price (branch `claude/project-thread-ul9xch`)**
 For bulk work that can wait (an archive of photos to caption, an eval's cloud candidates), the same Claude call costs half through the Batches API and comes back within 24 hours (most within one). It is automatic: jobs for a Claude model that keep arriving (less than 10 s apart) are held, and once they stop (or 10 000 are held, or the oldest has waited 5 minutes) 20 or more go as one batch; fewer run at once as before. `batch = false` in a job's params opts out, `batch = true` always batches, and a `high` priority job is never held. Nothing else changes for an app: it submits and waits as before, and gets the same result plus `batch` (the vendor's id).
 - `src/stratamodels/batches.py`: **new**. The batcher holds those jobs out of the CPU lane (`gap_s` 10 s, `max_wait_s` 300 s, `min_jobs` 20, `max_jobs` 10 000, `max_bytes` 200 MB; the API takes 256), lets go the groups too small to batch, polls each open batch every `poll_s` (60 s) and finishes every job from its outcome. Jobs are `running` while in a batch, their `note` naming it; `/api/status` lists the open batches. On a model without a batch API the flag is dropped and the job runs at once.
