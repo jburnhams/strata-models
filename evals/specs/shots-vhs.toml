@@ -45,3 +45,30 @@ name = "ffmpeg-0.2-min0.2"
 model = "ffmpeg-scene-score"
 params = { threshold = 0.2, min_shot_s = 0.2 }
 note = "keeps a camcorder's quarter-second shots, at the risk of splitting torn restarts"
+
+# The rivals of eval shots-spliced (2026-11-25), at the settings that did best there and their libraries' defaults. They have no search for
+# stretches with no picture yet, so the flashes after the recording ends count against them (on omarchy, 2026-11-24, that was most of
+# TransNet V2's false cuts on this tape); read the `signal` windows apart from the rest.
+
+[[candidates]]
+name = "transnetv2-0.5"
+model = "transnetv2"
+params = { threshold = 0.5 }
+note = "TransNet V2 on the GPU at its authors' threshold"
+
+[[candidates]]
+name = "transnetv2-0.3"
+model = "transnetv2"
+params = { threshold = 0.3 }
+note = "the best TransNet V2 on shots-spliced (82 of 84), 7 false cuts on this tape when measured by hand"
+
+[[candidates]]
+name = "adaptive-3"
+model = "pyscenedetect-adaptive"
+params = { threshold = 3.0 }
+
+[[candidates]]
+name = "adaptive-2"
+model = "pyscenedetect-adaptive"
+params = { threshold = 2.0 }
+note = "82 of 84 on shots-spliced, 11 false cuts on this tape when measured by hand"

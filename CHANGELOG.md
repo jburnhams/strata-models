@@ -2,6 +2,12 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-25
+
+**Eval `shots-vhs`: the rival shot detectors as candidates (branch `claude/project-thread-avddmb`)**
+#123 (rival detectors) and #124 (the real tape's eval) are both merged; this puts the one into the other, so the eval runner can score them on the tape as it did by hand.
+- `evals/specs/shots-vhs.toml`: candidates transnetv2-0.5, transnetv2-0.3, adaptive-3 and adaptive-2. They have no search for stretches with no picture (the ffmpeg runtime's `blank`), so the tape's lost signal counts against them; the spec says so.
+
 ## 2026-11-24
 
 **shot-boundaries and scene-describe on a real VHS tape: threshold 0.2, the lost signal, preset v2 (branch `shots-vhs`)**
