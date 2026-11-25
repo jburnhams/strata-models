@@ -96,6 +96,13 @@ describe('Usage and Settings', () => {
     await user.click(screen.getByRole('tab', { name: 'Last 30 days' }))
     expect(await screen.findByText('Nothing used the GPU in this period')).toBeInTheDocument()
   })
+  it('draws the bar with more apps than chart colours', async () => {
+    const rows = Array.from({ length: 7 }, (_, i) => ({ app: `app-${i}`, kind: 'run' as const, role: 'text', jobs: 1, failed: 0, gpu_s: 70 - i }))
+    server.use(http.get('/api/usage', () => HttpResponse.json({ hours: 24, rows })))
+    setup(<App />, { route: '/usage' })
+    expect(await screen.findByText(/app-0 used the GPU most/)).toBeInTheDocument()
+    expect(screen.getAllByText('Other (3 apps)').length).toBeGreaterThan(0)
+  })
   it('saves the models folder and the VRAM reserve', async () => {
     const { user } = setup(<App />, { route: '/settings' })
     const reserve = await screen.findByLabelText('VRAM kept free (GB)')

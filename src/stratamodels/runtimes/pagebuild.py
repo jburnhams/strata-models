@@ -47,6 +47,7 @@ Answer: {pdf, png, path (the png again: the picture the Judge and Outputs tabs s
 indexes of page.figures found in the scan here, by `rules`, not named by a reader),
 grouper ({model, seconds, cost_usd} or {model, seconds, error}; null when no layout model was asked), cost_usd (the layout model's, when it cost any)}."""
 
+import dataclasses
 import functools
 import glob
 import hashlib
@@ -285,6 +286,8 @@ def _styled(
     return (style if style == "small-caps" else "roman"), f"{face}:roman"
 
 
+LEAST = 0.75  # of its line's size, the smallest a word that overruns its box is set: a misread word's box may be a speck's ("a" read as "."),
+# and set to it the word was a dot (2026-11-25)
 OVERRUN = 1.05  # a fitted word may be drawn this much wider than Tesseract's box for it before it is set smaller
 
 
@@ -320,7 +323,7 @@ def _shrink(
         ratios.append(drawn / w)
     line = statistics.median(ratios) if ratios else 1.0
     f = 1 / line if line > OVERRUN else 1.0
-    return [min(f, OVERRUN / r) if r * f > OVERRUN else f for r in ratios]
+    return [max(f * LEAST, min(f, OVERRUN / r)) if r * f > OVERRUN else f for r in ratios]
 
 
 def line_maker(
@@ -348,7 +351,7 @@ def line_maker(
         parts = text.split()
         if len(parts) == len(own) and len(known) == len(got):
             spans: list[Span] = []
-            styled = [_styled(face, fonts, wd, keep) for wd in known]
+            styled = [_styled(str(wd.get("face") or face), fonts, wd, keep) for wd in known]
             shrink = _shrink(parts, known, [fonts.get(key, "") for _st, key in styled], [w["box"] for w in own])
             for i, (t, wd) in enumerate(zip(parts, known, strict=True)):
                 style, key = styled[i]
@@ -367,7 +370,8 @@ def line_maker(
                 )
             return Line(box=box, spans=spans)
         styles = [str(k.get("style") or "roman") for k in known]
-        style, key = _styled(face, fonts, {"style": max(set(styles), key=styles.count)}, keep)
+        own_face = str(known[0].get("face") or face)
+        style, key = _styled(own_face, fonts, {"style": max(set(styles), key=styles.count)}, keep)
         return Line(
             box=box,
             spans=[
@@ -384,6 +388,62 @@ def line_maker(
         )
 
     return make
+
+
+FALLBACK = "texgyre-schola"  # a face of the catalogue that has the symbols period faces lack (a footnote's dagger and double dagger)
+
+
+@functools.lru_cache(maxsize=64)
+def _glyphs(path: str) -> frozenset[int]:
+    """The characters a font file has a glyph for; empty when it cannot be read (nothing is then taken for missing)."""
+    from fontTools.ttLib import TTFont  # pyright: ignore[reportMissingTypeStubs]
+
+    try:
+        return frozenset(cast("Any", TTFont(path, lazy=True)).getBestCmap() or {})
+    except Exception:
+        return frozenset()
+
+
+def cover_glyphs(page: Page, fonts: dict[str, str], fallback: Callable[[], str | None]) -> int:
+    """Characters their face has no glyph for take the fallback face when it has them (a missing one prints as a box or a blank): the span is cut
+    there, the rest keeping its face and following on. How many spans were cut; `fonts` gains the fallback when one was. `fallback` gives its
+    roman file, or None."""
+    n = 0
+    key = f"{FALLBACK}:roman"
+    for b in page.blocks:
+        for ln in b.lines:
+            spans: list[Span] = []
+            for s in ln.spans:
+                have = _glyphs(fonts.get(s.face or ln.face or "", ""))
+                lack = {c for c in s.text if not c.isspace() and ord(c) not in have} if have else set[str]()
+                path = (fonts.get(key) or fallback()) if lack else None
+                lack = {c for c in lack if path and ord(c) in _glyphs(path)}
+                if not lack or path is None:
+                    spans.append(s)
+                    continue
+                fonts[key] = path
+                n += 1
+                runs = [(k, "".join(g)) for k, g in itertools.groupby(s.text, key=lambda c: c in lack)]
+                for i, (missing, text) in enumerate(runs):
+                    # what follows the first run is set after it, where the renderer's cursor is
+                    follow = {} if i == 0 else {"x": None, "baseline_y": s.baseline_y}
+                    look = {"face": key, "stroke_em": 0.0} if missing else {}
+                    spans.append(dataclasses.replace(s, text=text, **follow, **look))
+            ln.spans = spans
+    return n
+
+
+def even_weight(page: Page) -> None:
+    """Every line of a block of text in one face takes the block's median weight (the stroke round its glyphs): the fit weighs each line alone,
+    and a worn line's came out lighter than its neighbours'. Not a block of several faces (an advert), whose lines differ on purpose."""
+    for b in page.blocks:
+        spans = [s for ln in b.lines for s in ln.spans]
+        families = {str(s.face or ln.face or "").split(":")[0] for ln in b.lines for s in ln.spans}
+        if b.role not in ("body", "footnote") or len(b.lines) < 3 or len(families) != 1 or len(spans) < 3:
+            continue
+        usual = statistics.median(s.stroke_em for s in spans)
+        for s in spans:
+            s.stroke_em = usual
 
 
 def snap_sizes(page: Page, within: float) -> None:
@@ -806,6 +866,17 @@ def page_of(params: Mapping[str, Any]) -> Page:
     raise RunError("give a page description (page), an ocr answer (ocr) or a layout (layout)")
 
 
+def _fallback(handle: dict[str, Any]) -> str | None:
+    from stratamodels.runtimes import fontfit  # pyright: ignore[reportMissingTypeStubs]  (not in the strict list yet)
+
+    if not handle.get("models_dir"):
+        return None
+    try:
+        return str(cast("Any", fontfit).fetch(FALLBACK, handle["models_dir"])["roman"])
+    except RunError:
+        return None  # the face could not be fetched: the word stays in its own
+
+
 def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     t0 = time.monotonic()
     if params.get("list_lines"):
@@ -853,7 +924,9 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         small_caps += fsc
         if params.get("snap"):
             snap_sizes(page, float(params["snap"]))
+            even_weight(page)
     fonts.update(_fonts(params))
+    cover_glyphs(page, fonts, lambda: _fallback(handle))
     fonts = {k: truetype(v) for k, v in fonts.items()}
     image = params.get("image")
     readers = len(page.figures)  # the figures a reader named; those after are found in the scan here (rules)

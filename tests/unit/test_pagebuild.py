@@ -744,3 +744,78 @@ def test_a_line_fitted_too_big_from_one_bad_box_is_set_to_its_words_boxes(ttf):
         1.0,
         1.0,
     ]  # a face that cannot be read: as fitted
+
+
+def test_a_word_overrunning_a_speck_of_a_box_is_not_set_as_a_dot(ttf):
+    font = ImageFont.truetype(ttf, 1000)
+    words = ["I", "am", "a", "jolly"]
+    boxes = [[0, 0, font.getlength(w) / 10, 100] for w in words]
+    boxes[2][2] = 4  # "a" read as a speck
+    shrink = pagebuild._shrink(words, [dict(size_px=100.0, hscale=1.0)] * 4, [ttf] * 4, boxes)
+    assert shrink == pytest.approx([1.0, 1.0, pagebuild.LEAST, 1.0])
+
+
+def test_a_line_fitted_lighter_takes_its_blocks_weight_and_a_block_of_several_faces_keeps_its_own(ttf):
+    def page(face2="caslon:roman"):
+        lines = [
+            pagebuild.Line(box=(0, 40.0 * i, 100, 30), spans=[pagebuild.Span("word", face=f, stroke_em=w)])
+            for i, (f, w) in enumerate((("caslon:roman", 0.03), (face2, 0.0), ("caslon:italic", 0.03)))
+        ]
+        block = pagebuild.Block(box=(0, 0, 100, 110), lines=lines, role="body", order=0)
+        return pagebuild.Page(width=200, height=200, dpi=200, blocks=[block])
+
+    even = page()
+    pagebuild.even_weight(even)
+    assert [ln.spans[0].stroke_em for ln in even.blocks[0].lines] == [0.03, 0.03, 0.03]
+    mixed = page("rye:roman")
+    pagebuild.even_weight(mixed)
+    assert [ln.spans[0].stroke_em for ln in mixed.blocks[0].lines] == [0.03, 0.0, 0.03]
+
+
+def without(ttf, path, char):
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(ttf)
+    for table in font["cmap"].tables:
+        table.cmap.pop(ord(char), None)
+    font.save(path)
+    return str(path)
+
+
+def test_only_the_symbol_its_face_lacks_takes_the_fallback_face(tmp_path, ttf):
+    lacking = without(ttf, tmp_path / "lacking.ttf", "&")
+    span = pagebuild.Span("Humour,& as", face="caslon:roman", x=30.0, baseline_y=90.0, stroke_em=0.02)
+    plain = pagebuild.Span("well", face="caslon:roman")
+    line = pagebuild.Line(box=(0, 0, 200, 30), spans=[span, plain])
+    page = pagebuild.Page(
+        width=300,
+        height=200,
+        dpi=200,
+        blocks=[pagebuild.Block(box=(0, 0, 200, 30), lines=[line], role="body", order=0)],
+    )
+    fonts = {"caslon:roman": lacking}
+    assert pagebuild.cover_glyphs(page, fonts, lambda: ttf) == 1
+    got = [(s.text, s.face, s.x, s.stroke_em) for s in line.spans]
+    key = f"{pagebuild.FALLBACK}:roman"
+    assert got[:3] == [
+        ("Humour,", "caslon:roman", 30.0, 0.02),
+        ("&", key, None, 0.0),
+        (" as", "caslon:roman", None, 0.02),
+    ]
+    assert got[3][:2] == ("well", "caslon:roman")
+    assert fonts[key] == ttf
+    assert pagebuild.cover_glyphs(page, {"caslon:roman": ttf}, lambda: ttf) == 0  # a face that has them
+    assert pagebuild.cover_glyphs(page, {"caslon:roman": lacking}, lambda: None) == 0  # no fallback to be had
+
+
+def test_without_a_fallback_to_be_had_the_word_stays_in_its_face(tmp_path, ttf, monkeypatch):
+    from stratamodels.runtimes import fontfit
+
+    assert pagebuild._fallback({}) is None
+
+    def fetch(fid, models_dir):
+        raise RunError("offline")
+
+    monkeypatch.setattr(fontfit, "fetch", fetch)
+    assert pagebuild._fallback({"models_dir": str(tmp_path)}) is None
+    assert pagebuild._glyphs(str(tmp_path / "no.ttf")) == frozenset()

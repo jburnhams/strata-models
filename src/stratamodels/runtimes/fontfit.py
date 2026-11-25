@@ -21,6 +21,8 @@ params:
               given directly. Neither: Tesseract reads the picture first (runtimes/tesseract.py)
   box         [x, y, w, h]: fit only the lines inside it (the page's coordinates are kept in the answer)
   candidates  as above; `face` fixes one face (the naive mode's default: tinos)
+  mix         false: one face for the page, even when its lines are of very different sizes (default: such a page's lines each take the face
+              that fits them best, of the whole catalogue)
   mode        fit (default) | measure (the first candidate, sized from the measured x-height and widths, no search: what a proposer alone
               gives) | naive (one face, the line's box height as the size and each word stretched to its box: Tesseract's own PDF overlay)
   propose     false: no proposer, even when the model has one (the eval's `exhaustive`)
@@ -834,11 +836,61 @@ def _final(scan, face, fit):
     return lines
 
 
-def _compose(scan, face, lines):
+MIXED = 1.8  # a page's lines of type this many times apart in height (10th to 90th percentile) are set in several faces: an advert, a title
+LINE_TRIES = 3  # faces given the full fit for each line of such a page, after the screen
+LINE_GAIN = 0.02  # F1 a line's own face must gain over the page's
+
+
+def is_mixed(scan):
+    """Whether the page's lines are of sizes far enough apart that one face cannot be theirs all (body type is one size)."""
+    xh = [ln["xh"] for ln in scan.lines]
+    return len(xh) >= 5 and float(np.percentile(xh, 90)) > MIXED * float(np.percentile(xh, 10))
+
+
+def line_faces(scan, faces, fit):
+    """(face id of each line, its fit) where a line's own face fits it better than the page's `fit` by LINE_GAIN. Each line is screened
+    in every face quickly, then its best LINE_TRIES are fitted in full: on a page of display type the lines' faces have nothing to do with
+    each other (the adverts of the 1874 book: five or more on a page, 2026-11-25)."""
+    quick = {fid: [_line_style(f, scan, ln, True) for ln in scan.lines] for fid, f in faces.items()}
+    out = []
+    for i, (ln, base) in enumerate(zip(scan.lines, fit["lines"])):
+        best, owner = base, fit["face"]
+        for fid in sorted(faces, key=lambda f: -quick[f][i][2])[:LINE_TRIES]:
+            if fid == fit["face"]:
+                continue
+            st, p, _ = quick[fid][i]
+            p, f1 = fit_line(scan, ln, faces[fid], st, p0=p)
+            if f1 > best["f1"] + (LINE_GAIN if owner == fit["face"] else 0.0):
+                best, owner = dict(style=st, p=p, f1=f1), fid
+        out.append((owner, best))
+    return out
+
+
+def _final_lines(scan, faces, owned):
+    """`_final` line by line: each line in its own face."""
+    lines = []
+    for ln, (fid, lf) in zip(scan.lines, owned):
+        one = _final(_Only(scan, [ln]), faces[fid], dict(lines=[lf]))[0]
+        lines.append(dict(one, face=fid))
+    return lines
+
+
+class _Only:
+    """A scan's working picture with some of its lines."""
+
+    def __init__(self, scan, lines):
+        self.__dict__.update(scan.__dict__)
+        self.lines = lines
+
+    fit_words = Scan.fit_words
+
+
+def _compose(scan, face, lines, faces=None):
     canvas = np.zeros_like(scan.full)
     for ln, lf in zip(scan.lines, lines):
+        f = (faces or {}).get(lf.get("face"), face)
         for wd, wf in zip(ln["words"], lf["words"]):
-            m, left, base = face.word(wf["style"], wd["text"], *wf["p"])
+            m, left, base = f.word(wf["style"], wd["text"], *wf["p"])
             _paste(canvas, m, left, base, wd["ink"][0] + wf["d"][0], lf["base"] + wf["d"][1])
     return canvas
 
@@ -897,6 +949,7 @@ def run(handle, params):
     if not faces:
         raise RunError("none of the candidate faces could be fetched")
     ranked, screen, top = [], [], 0
+    pool_kept = set(faces)
     if mode == "fit":
         top = int(params.get("top") or handle.get("top", 6))
         screen = (
@@ -908,7 +961,18 @@ def run(handle, params):
         fits = sorted((fit_face(scan, faces[fid]) for fid in keep), key=lambda r: -r["f1"])
         ranked = fits + screen[top:]
         best = faces[fits[0]["face"]]
-        flines = _final(scan, best, fits[0])
+        if params.get("mix", not params.get("face")) and is_mixed(
+            scan
+        ):  # `face` fixes the face, unless `mix` is asked for
+            for fid in cat:  # every face, not the page's shortlist: a page of display type has a face for each line
+                if fid not in faces:
+                    try:
+                        faces[fid] = Face(fid, fetch(fid, md, get))
+                    except RunError:
+                        continue
+            flines = _final_lines(scan, faces, line_faces(scan, faces, fits[0]))
+        else:
+            flines = _final(scan, best, fits[0])
     else:
         best = next(iter(faces.values()))
         style = "roman"
@@ -918,7 +982,7 @@ def run(handle, params):
         if m and mode == "measure" and m.group(1) in best.styles():
             style = m.group(1)
         flines = _naive(scan, best) if mode == "naive" else _measured(scan, best, style)
-    canvas = _compose(scan, best, flines)
+    canvas = _compose(scan, best, flines, faces)
     out = _out_path(params)
     Image.fromarray(np.where(canvas, 0, 255).astype(np.uint8)).save(out, dpi=(dpi, dpi))
     words_box = np.zeros_like(scan.full)
@@ -949,7 +1013,8 @@ def run(handle, params):
                     hscale=round(float(hs), 3),
                     tracking_em=round(float(trk), 3),
                     weight_delta=round(0.5 - float(thr), 2),
-                    stroke_em=stroke_em(best, wf["style"], wd["text"], sz, hs, trk, thr),
+                    stroke_em=stroke_em(faces.get(lf.get("face"), best), wf["style"], wd["text"], sz, hs, trk, thr),
+                    face=lf.get("face", best.id),
                 )
             )
             styles.append((wf["style"], wd["ink"][2]))
@@ -967,6 +1032,7 @@ def run(handle, params):
                 words=ws,
             )
         )
+    used = {lf.get("face", best.id) for lf in flines}
     tally = {}
     for st, w in styles:
         tally[st] = tally.get(st, 0) + w
@@ -978,7 +1044,7 @@ def run(handle, params):
             family=cat[fid]["family"], cls=cat[fid]["class"], like=cat[fid].get("like", ""), files=faces[fid].files
         )
         for fid in faces
-        if fid == best.id or mode == "fit"
+        if fid == best.id or (mode == "fit" and (fid in pool_kept or fid in used))
     }
     for v in fonts.values():
         v["class"] = v.pop("cls")
