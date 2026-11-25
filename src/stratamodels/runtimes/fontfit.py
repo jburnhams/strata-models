@@ -961,7 +961,9 @@ def run(handle, params):
         fits = sorted((fit_face(scan, faces[fid]) for fid in keep), key=lambda r: -r["f1"])
         ranked = fits + screen[top:]
         best = faces[fits[0]["face"]]
-        if params.get("mix", True) and is_mixed(scan):
+        if params.get("mix", not params.get("face")) and is_mixed(
+            scan
+        ):  # `face` fixes the face, unless `mix` is asked for
             for fid in cat:  # every face, not the page's shortlist: a page of display type has a face for each line
                 if fid not in faces:
                     try:

@@ -525,6 +525,8 @@ def test_each_line_of_a_page_of_mixed_sizes_takes_its_own_face(tmp_path, ttf):
     one = F.run(h, dict(job, mix=False))
     assert {w["face"] for ln in one["blocks"][0]["lines"] for w in ln["words"]} == {"tinos"}
     assert r["ink_f1"] > one["ink_f1"]
+    fixed = F.run(h, dict(job, face="tinos"))
+    assert {w["face"] for ln in fixed["blocks"][0]["lines"] for w in ln["words"]} == {"tinos"}
 
 
 def test_body_type_of_one_size_is_no_mixed_page():
