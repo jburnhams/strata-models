@@ -413,11 +413,28 @@ class FaceStore:
             i = row.merged_into
         return i
 
+    def _members(self, s, root_id):
+        """A person and everyone merged into them (directly or through another merge), the person first."""
+        out, todo = [root_id], [root_id]
+        while todo:
+            kids = list(s.scalars(sa.select(Identity.id).where(Identity.merged_into.in_(todo))))
+            todo = [k for k in kids if k not in out]
+            out += todo
+        return out
+
     def _identity_dict(self, s, row, app=None, counts=None):
-        apps = {
-            m.app: dict(app_ref=m.app_ref, fields=dict(m.fields or {}))
-            for m in s.scalars(sa.select(IdentityAppMetadata).where(IdentityAppMetadata.identity_id == row.id))
-        }
+        # An app's fields and id for a merged person stay on the merged row (so an unmerge gives them back) and are read
+        # through the survivor; the survivor's own win where both have them.
+        members = self._members(s, row.id)
+        rank = {m: i for i, m in enumerate(members)}
+        metas = sorted(
+            s.scalars(sa.select(IdentityAppMetadata).where(IdentityAppMetadata.identity_id.in_(members))),
+            key=lambda m: -rank[m.identity_id],
+        )
+        apps = {}
+        for m in metas:
+            had = apps.get(m.app, dict(app_ref=None, fields={}))
+            apps[m.app] = dict(app_ref=m.app_ref or had["app_ref"], fields=dict(had["fields"], **(m.fields or {})))
         glob = dict(row.fields or {})
         fields = dict(glob, **({"name": row.name} if row.name else {}))
         if app and app in apps:
@@ -454,20 +471,19 @@ class FaceStore:
 
     def identities(self, app=None, q=None, app_ref=None, limit=200):
         with self.session() as s:
-            stmt = (
-                sa.select(Identity)
-                .where(Identity.merged_into.is_(None))
-                .order_by(Identity.id)
-                .limit(max(1, min(int(limit), 2000)))
-            )
-            if app_ref is not None:
-                stmt = stmt.where(
-                    Identity.id.in_(
-                        sa.select(IdentityAppMetadata.identity_id).where(
-                            IdentityAppMetadata.app == app, IdentityAppMetadata.app_ref == app_ref
-                        )
+            limit = max(1, min(int(limit), 2000))
+            stmt = sa.select(Identity).where(Identity.merged_into.is_(None)).order_by(Identity.id)
+            if app_ref is not None:  # the app's id may sit on a person since merged into another: answer the survivor
+                owners = s.scalars(
+                    sa.select(IdentityAppMetadata.identity_id).where(
+                        IdentityAppMetadata.app == app, IdentityAppMetadata.app_ref == str(app_ref)
                     )
                 )
+                stmt = stmt.where(Identity.id.in_({self._root(s, o) for o in owners}))
+            if (
+                not q
+            ):  # a text search reads every person and limits after matching, so a match past the first `limit` is found
+                stmt = stmt.limit(limit)
             rows = list(s.scalars(stmt))
             counts = self._face_counts(s)
             out = [self._identity_dict(s, r, app, counts) for r in rows]
@@ -481,7 +497,7 @@ class FaceStore:
                         for v in [i["name"], *i["fields"].values(), *(m["app_ref"] for m in i["apps"].values())]
                         if v
                     )
-                ]
+                ][:limit]
             return out
 
     def create_identity(self, name=None, fields=None, app=None, app_fields=None, app_ref=None):
@@ -528,7 +544,9 @@ class FaceStore:
                 )
             )
             if taken is not None and taken.identity_id != identity_id:
-                raise ValueError(f"{app} already calls person {taken.identity_id} {app_ref!r}")
+                if self._root(s, taken.identity_id) != self._root(s, identity_id):
+                    raise ValueError(f"{app} already calls person {taken.identity_id} {app_ref!r}")
+                app_ref = None  # a person merged into this one holds it, and it is already read through this one
         m = s.get(IdentityAppMetadata, (identity_id, app))
         if m is None:
             m = IdentityAppMetadata(identity_id=identity_id, app=app, updated_at=self.clock())

@@ -142,6 +142,20 @@ def test_faces_made_elsewhere_and_bad_requests(client, tmp_path):
         json=dict(app="strata-360", ref="x", faces=[made], model="buffalo_l", path=str(tmp_path / "gone.jpg")),
     )
     assert r.status_code == 200 and r.json()["faces"][0]["found_by"] == "import" and r.json()["medium"] is None
+    big = client.post(
+        "/api/faces/images",
+        json=dict(
+            app="strata-360", ref="big", faces=[made], model="buffalo_l", path=picture(tmp_path, "big.jpg", 2400, 1200)
+        ),
+    ).json()
+    assert (big["width"], big["height"]) == (2400, 1200) and big[
+        "medium"
+    ]  # the original's size, so a crop from the 1600 px copy scales its box
+    given = client.post(
+        "/api/faces/images",
+        json=dict(app="strata-360", ref="w", faces=[made], model="buffalo_l", width=640, height=480),
+    ).json()
+    assert (given["width"], given["height"]) == (640, 480)
     assert client.get(f"/api/faces/images/{r.json()['id']}/picture").status_code == 404
     assert (
         client.get(f"/api/faces/{r.json()['faces'][0]['id']}/crop").status_code == 404

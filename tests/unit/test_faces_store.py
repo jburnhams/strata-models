@@ -204,6 +204,14 @@ def test_merge_reads_faces_through_and_unmerges(fs):
     assert [f["identity_id"] for f in fs.image(1)["faces"]] == [y, y]
     assert fs.identity(x)["id"] == y  # asking for the merged one answers the person it lives in
     assert [i["id"] for i in fs.identities()] == [y]
+    # the merged person's app fields and id are read through the survivor, and stay on the merged row for an unmerge
+    assert fs.identity(y, "bright-horizons")["fields"]["name"] == "Ada"
+    assert fs.identity(y)["apps"]["bright-horizons"]["app_ref"] == "c7"
+    assert [i["id"] for i in fs.identities("bright-horizons", app_ref="c7")] == [y]
+    fs.set_app_fields(
+        y, "bright-horizons", {"room": "Robins"}, app_ref="c7"
+    )  # the same app id, already the survivor's through x
+    assert fs.identity(y, "bright-horizons")["fields"] == {"name": "Ada", "room": "Robins"}
     b = fs.assign(ids[:1], x, "a")  # deciding for a merged person decides for the one it lives in
     assert fs.face(ids[0])["identity_id"] == y
     with pytest.raises(ValueError, match="a merge"):
@@ -212,6 +220,7 @@ def test_merge_reads_faces_through_and_unmerges(fs):
         fs.merge(x, y, "a")
     fs.unmerge(x)
     assert sorted(i["id"] for i in fs.identities()) == [x, y]
+    assert [i["id"] for i in fs.identities("bright-horizons", app_ref="c7")] == [x]
     with pytest.raises(NotFound):
         fs.merge(x, 999, "a")
     with pytest.raises(NotFound):
@@ -262,3 +271,12 @@ def test_cluster_groups_undecided_faces(fs):
     assert [g["size"] for g in fs.cluster("buffalo_l", tags=["nursery"], min_size=4)] == [4]  # undone: free again
     assert fs.cluster("buffalo_l", tags=["nursery"], min_score=0.95) == []
     assert [g["size"] for g in fs.cluster("buffalo_l", tags=["nursery"], threshold=1.5, min_size=8)] == [8]
+
+
+def test_a_text_search_looks_past_the_limit(fs):
+    for n in range(5):
+        fs.create_identity(name=f"Person {n}")
+    fs.create_identity(name="Grace")
+    assert [i["name"] for i in fs.identities(q="grace", limit=2)] == ["Grace"]
+    assert len(fs.identities(q="person", limit=2)) == 2
+    assert len(fs.identities(limit=2)) == 2

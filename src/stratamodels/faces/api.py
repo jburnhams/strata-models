@@ -1,6 +1,6 @@
 """The face store's HTTP API, mounted by server/app.py (the client is strata_python.clients.faces).
 
-  POST /api/faces/images                 {app, ref, path?, url?, tags?, taken_at?, priority?, det_thresh?, force?, faces?, model?} index one picture:
+  POST /api/faces/images                 {app, ref, path?, url?, tags?, taken_at?, priority?, det_thresh?, force?, faces?, model?, width?, height?} index one picture:
                                          run the `faces` role on `path` (or take `faces` an app already has, made with `model`), keep a 1600 px
                                          WebP copy, store faces and embeddings. Indexing the same ref with the same model and settings again
                                          answers the stored picture without a job (unless `force`).
@@ -22,6 +22,7 @@
 
 The `model` of a search or clustering defaults to the `faces` role's model: embeddings of different models are never compared."""
 
+import hashlib
 import os
 import time
 from typing import Any
@@ -51,6 +52,8 @@ class IndexIn(BaseModel):
     force: bool = False
     faces: list[dict] | None = None
     model: str | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class SearchIn(BaseModel):
@@ -124,6 +127,26 @@ def faces_dir():
     return os.path.join(settings.data_dir(), "faces")
 
 
+def picture_size(path):
+    """(width, height) of a picture Pillow can read, else (0, 0): imported faces' boxes are in the original's pixels, and a crop
+    from the kept copy scales them by the copy's width over this."""
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            return im.width, im.height
+    except (OSError, ValueError, SyntaxError):
+        return 0, 0
+
+
+def detection_hash(settings_hash, det_thresh):
+    """The stored signature of an indexing: the model's settings plus the detection threshold asked for, so asking again at another
+    threshold runs again instead of answering the faces found at the old one."""
+    if det_thresh is None:
+        return settings_hash
+    return hashlib.sha256(f"{settings_hash}|det_thresh={float(det_thresh)}".encode()).hexdigest()[:16]
+
+
 def medium_copy(path):
     """The kept 1600 px WebP of a picture, relative to the data folder; None when Pillow cannot read it (a raw, a video: the app's own copy is
     then the only one, and the face store shows crops without their picture)."""
@@ -176,7 +199,9 @@ def mount(app, scheduler, store: FaceStore | None = None):
                 if not b.model:
                     raise ValueError("faces made elsewhere need the model that made their embeddings")
                 faces = [dict(f, found_by=f.get("found_by") or "import") for f in b.faces]
-                medium = medium_copy(b.path) if b.path and os.path.isfile(b.path) else None
+                here = bool(b.path and os.path.isfile(b.path))
+                medium = medium_copy(b.path) if here else None
+                w, h = (b.width, b.height) if b.width and b.height else picture_size(b.path) if here else (0, 0)
                 return fs.save_image(
                     app=b.app,
                     ref=b.ref,
@@ -187,12 +212,14 @@ def mount(app, scheduler, store: FaceStore | None = None):
                     url=b.url,
                     tags=b.tags,
                     taken_at=b.taken_at,
+                    width=w,
+                    height=h,
                     medium=medium,
                 )
             if not b.path or not os.path.isfile(b.path):
                 raise ValueError(f"no such picture: {b.path!r}")
             key, sh = role_model(b.model, b.app)
-            if not b.force and fs.is_current(b.app, b.ref, key, sh):
+            if not b.force and fs.is_current(b.app, b.ref, key, detection_hash(sh, b.det_thresh)):
                 return fs.find_image(b.app, b.ref)
         except ValueError as e:
             bad(e)
@@ -202,7 +229,7 @@ def mount(app, scheduler, store: FaceStore | None = None):
             ref=b.ref,
             faces=r.get("faces") or [],
             model=key,
-            settings_hash=sh,
+            settings_hash=detection_hash(sh, b.det_thresh),
             path=b.path,
             url=b.url,
             tags=b.tags,
