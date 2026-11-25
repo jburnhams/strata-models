@@ -470,3 +470,68 @@ def test_only_a_line_taller_than_the_page_that_is_not_in_capitals_gets_a_second_
     assert starts(30, "Why I am not sick!") == [30 / xh]
     assert starts(47, "Polly.—Whiskey!") == pytest.approx([47 / xh, 47 / ch, 30 / xh])
     assert starts(47, "ACT THE SECOND") == [47 / ch]
+
+
+def sheared(ttf, path, slope=0.7):
+    """A face unlike the first: every glyph leant over."""
+    from fontTools.pens.transformPen import TransformPen
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(ttf)
+    glyphs = font.getGlyphSet()
+    made = {}
+    for name in font.getGlyphOrder():
+        pen = TTGlyphPen(glyphs)
+        glyphs[name].draw(TransformPen(pen, (1, 0, slope, 1, 0, 0)))
+        made[name] = pen.glyph()
+    for name, g in made.items():
+        font["glyf"][name] = g
+    font.save(path)
+    return str(path)
+
+
+def test_each_line_of_a_page_of_mixed_sizes_takes_its_own_face(tmp_path, ttf):
+    other = sheared(ttf, tmp_path / "leaning.ttf")
+    models = tmp_path / "models"
+    for fid, file in (("tinos", ttf), ("old-standard", other)):
+        f = models / "fonts" / fid
+        f.mkdir(parents=True)
+        (f / "manifest.json").write_text(json.dumps({"roman": file}))
+    faces = {"tinos": F.Face("tinos", {"roman": ttf}), "old-standard": F.Face("old-standard", {"roman": other})}
+    W, H = 900, 620
+    canvas, lines, y = np.zeros((H, W), dtype=bool), [], 60
+    setting = (("SIGNOR BLITZ", 70, "old-standard"), ("and private parties", 26, "tinos"), ("In the city", 26, "tinos"))
+    setting += (("Apply at number", 26, "tinos"), ("Chestnut Street", 28, "tinos"), ("THORNLEY", 60, "old-standard"))
+    for text, size, fid in setting:
+        x, words = 40, []
+        for w in text.split():
+            m, left, base = faces[fid].word("roman", w, size, 1.0, 0.0, 0.5)
+            cols, rows = np.flatnonzero(m.any(0)), np.flatnonzero(m.any(1))
+            F._paste(canvas, m, left, base, x, y)
+            bw = int(cols[-1] - cols[0] + 1)
+            words.append(dict(text=w, box=[x, y - (base - int(rows[0])), bw, int(rows[-1] - rows[0] + 1)], conf=95.0))
+            x += bw + size // 3
+        lines.append(dict(text=text, box=F_union([w["box"] for w in words]), conf=95.0, block=1, words=words))
+        y += 90
+    p = str(tmp_path / "advert.png")
+    Image.fromarray(np.where(canvas, 50, 220).astype(np.uint8)).save(p, dpi=(300, 300))
+    job = dict(image=p, lines=lines, candidates=["tinos"], dpi=300, out=str(tmp_path / "fit.png"))
+    h = dict(key="fontfit", models_dir=str(models), top=2, get=no_network)
+    r = F.run(h, job)
+    got = [ln["words"][0]["face"] for ln in r["blocks"][0]["lines"]]
+    assert got == [fid for _, _, fid in setting]
+    assert set(r["fonts"]) >= {"tinos", "old-standard"}
+    one = F.run(h, dict(job, mix=False))
+    assert {w["face"] for ln in one["blocks"][0]["lines"] for w in ln["words"]} == {"tinos"}
+    assert r["ink_f1"] > one["ink_f1"]
+
+
+def test_body_type_of_one_size_is_no_mixed_page():
+    class Page:
+        def __init__(self, *xh):
+            self.lines = [dict(xh=x) for x in xh]
+
+    assert not F.is_mixed(Page(31, 30, 31, 46, 31, 30, 32, 31, 31, 30))
+    assert F.is_mixed(Page(60, 20, 24, 90, 33, 20, 70, 40, 25, 22))
+    assert not F.is_mixed(Page(20, 90))
