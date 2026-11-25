@@ -42,6 +42,12 @@ def test_code_a_metric_reaches_in_another_module_counts(monkeypatch):
     assert H.code(spec("page_ink_f1")) != ink and H.code(spec("wer")) == wer
 
 
+def test_how_a_metric_samples_counts(monkeypatch):
+    before = H.code(spec("pace_spread"))
+    edited(monkeypatch, "evals.metrics", "Metric", lambda s: s.replace("self.prepare is not None", "False"))
+    assert H.code(spec("pace_spread")) != before
+
+
 def test_a_docstring_does_not_count(monkeypatch):
     before = H.code(spec("wer"))
     edited(monkeypatch, "evals.core", "analyse", lambda s: s.replace("Everything a report says", "All a report says"))
