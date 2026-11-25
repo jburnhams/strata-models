@@ -93,6 +93,7 @@ def _finish(handle, job, log, r, ticket, seconds, batch=None):
         finish=r.stop_reason,
         request=log,
         response=text,
+        batch=batch,
         **u,
     )
     if refused:
@@ -212,6 +213,7 @@ def batch_answer(handle, log, outcome, ticket, vendor_id, seconds):
             seconds=seconds,
             model_key=handle["key"],
             request=log,
+            batch=vendor_id,
         )
         raise RunError(keys.redact(f"Claude batch {vendor_id}: {why}"))
     return _finish(handle, dict(schema=log.get("schema")), log, outcome.message, ticket, seconds, batch=vendor_id)

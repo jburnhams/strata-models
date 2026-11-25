@@ -93,8 +93,9 @@ describe('cloud spend', () => {
     expect(spendFinding([ps[3]])).toBe('No paid keys.')
   })
   it('fills every bucket to now and sums the providers shown', () => {
-    const pts = [{ t: 100, provider: 'claude' as const, cost_usd: 1, calls: 2, failed: 0, tokens: 9 }, { t: 100, provider: 'nim' as const, cost_usd: 0, calls: 3, failed: 0, tokens: 1 }]
+    const pts = [{ t: 100, provider: 'claude' as const, cost_usd: 1, calls: 2, failed: 0, tokens: 9, batch_cost_usd: 0.5, batch_calls: 1 }, { t: 100, provider: 'nim' as const, cost_usd: 0, calls: 3, failed: 0, tokens: 1, batch_cost_usd: 0, batch_calls: 0 }]
     expect(bucketSeries(pts, 0, 100, 250, 'calls')).toEqual([{ x: 0, y: 0 }, { x: 100_000, y: 5 }, { x: 200_000, y: 0 }])
+    expect(bucketSeries(pts, 0, 100, 150, 'batch_cost_usd')).toEqual([{ x: 0, y: 0 }, { x: 100_000, y: 0.5 }])
     expect(ticksOf([{ x: 0, y: 0 }, { x: 400, y: 1 }])).toEqual([0, 100, 200, 300, 400])
     expect(ticksOf([{ x: 5, y: 0 }])).toEqual([5])
     expect(ticksOf([])).toEqual([])

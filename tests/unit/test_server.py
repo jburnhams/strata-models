@@ -315,6 +315,8 @@ def test_spend_budgets_series_and_request_log(client, scheduler, monkeypatch):
     assert [
         c["provider"] for c in client.get("/api/spend/calls", params=dict(app="evals", ok=True, days=1)).json()["calls"]
     ] == ["claude"]
+    assert client.get("/api/spend/calls", params=dict(batch=True)).json()["calls"] == []  # none went in a batch
+    assert len(client.get("/api/spend/calls", params=dict(batch=False)).json()["calls"]) == 2
     one = client.get(f"/api/spend/calls/{calls[1]['id']}").json()
     assert (one["request"], one["response"], one["job_id"]) == ({"prompt": "hi"}, "ok", 9)
     assert client.get("/api/spend/calls/999").status_code == 404

@@ -25,6 +25,23 @@ describe('Cloud APIs', () => {
     expect(await screen.findByText(/one budget, no rollover · 1,200 calls · \$0\.25 held for calls under way/)).toBeInTheDocument()
   })
 
+  it('splits out what went through the batch API, in the budget, the breakdown, a chart and the log', async () => {
+    const s = spendFixtures.spend()
+    mock.spend = { ...s, providers: [{ ...s.providers[0], batch_spent: 12.5, batch_calls: 900, batch_saved: 12.5 }] }
+    const { user } = setup(<App />, { route: '/cloud' })
+    expect(await screen.findByText('$12.50 of it in batches (900 calls), about $12.50 less than made at once')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Spend in batches per day' })).toBeInTheDocument()
+    const table = await screen.findByRole('grid', { name: 'Spend by key, model and app' })
+    expect(within(table).getByText('$0.50 (6)')).toBeInTheDocument()
+    const log = await screen.findByRole('grid', { name: 'Request log' })
+    expect(within(log).getByText('In a batch')).toBeInTheDocument()
+    expect(within(log).getByText('At once')).toBeInTheDocument()
+    await user.click(within(log).getByRole('button', { name: /call #3/ }))
+    expect(await screen.findByText('msgbatch_1')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Sent'), 'false')
+    await waitFor(() => expect(within(screen.getByRole('grid', { name: 'Request log' })).queryByText('In a batch')).not.toBeInTheDocument())
+  })
+
   it('saves a budget and its rollover date, and says why a refusal failed', async () => {
     const { user } = setup(<App />, { route: '/cloud' })
     const claude = await screen.findByRole('group', { name: 'Claude API' })

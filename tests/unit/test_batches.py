@@ -132,7 +132,21 @@ def test_an_ended_batch_records_each_answer_at_half_price_and_finishes_its_jobs(
     )
     assert sch.store.api_call(log[a["id"]]["id"])["request"]["batch"] == "msgbatch_1"
     assert (log[b["id"]]["cost_usd"], log[b["id"]]["ok"]) == (0.0, False) and d["id"] not in log
-    assert spend.state("claude")["reserved"] == 0.0 and spend.state("claude")["spent"] == pytest.approx(0.00055)
+    st = spend.state("claude")
+    assert st["reserved"] == 0.0 and st["spent"] == pytest.approx(0.00055)
+    assert (st["batch_spent"], st["batch_calls"], st["batch_saved"]) == (
+        pytest.approx(0.00055),
+        3,
+        pytest.approx(0.00055),
+    )
+    assert [c["batch"] for c in sch.store.api_log(batch=True)] == [
+        "msgbatch_1"
+    ] * 3  # a's, b's and c's (failed, at no cost)
+    assert sch.store.api_log(batch=False) == []
+    (row,) = sch.store.api_breakdown(0.0)
+    assert (row["calls"], row["batch_calls"], row["batch_cost_usd"]) == (3, 3, pytest.approx(0.00055))
+    (pt,) = spend.series(0.0)
+    assert (pt["batch_calls"], pt["batch_cost_usd"]) == (3, pytest.approx(0.00055))
     assert sch.status()["batches"] == []
 
 

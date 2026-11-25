@@ -35,23 +35,27 @@ export type Provider = 'claude' | 'gemini' | 'gemini-free' | 'nim'
 export interface ProviderState {
   provider: Provider; label: string; budgeted: boolean; unit: 'usd'; budget: number | null; rollover: string | null; period_start: number | null; next_rollover: number | null
   spent: number; calls: number; reserved: number; left: number | null; used_share: number | null; warn: number | null
+  /** Of spent and calls, the part sent through a batch API (at its discount), and what those calls would have cost more made at once. */
+  batch_spent: number; batch_calls: number; batch_saved: number
 }
 export interface Spend { providers: ProviderState[]; keys: Record<string, boolean>; warn_at: number[] }
-export interface SpendPoint { t: number; provider: Provider; cost_usd: number; calls: number; failed: number; tokens: number }
-export interface SpendRow { provider: Provider; model: string; app: string | null; calls: number; failed: number; tokens_in: number; tokens_out: number; cost_usd: number }
+export interface SpendPoint { t: number; provider: Provider; cost_usd: number; calls: number; failed: number; tokens: number; batch_cost_usd: number; batch_calls: number }
+export interface SpendRow { provider: Provider; model: string; app: string | null; calls: number; failed: number; tokens_in: number; tokens_out: number; cost_usd: number; batch_calls: number; batch_cost_usd: number }
 export interface SpendSeries { since: number; bucket_s: number; points: SpendPoint[]; breakdown: SpendRow[]; options: { models: string[]; apps: string[] } }
 export interface ApiCall {
   id: number; at: number; provider: Provider; model: string; app: string | null; job_id: number | null; tokens_in: number; tokens_out: number; cache_read: number; cache_write: number
   cost_usd: number; ok: boolean; error: string | null; seconds: number | null; model_key: string | null; finish: string | null
+  /** The vendor's batch id when it went through a batch API (half price); null: made at once. */
+  batch: string | null
   request?: { system?: string | null; prompt?: string; images?: string[]; schema?: unknown; max_tokens?: number; effort?: string | null } | null; response?: string | null
 }
 export interface ApiCallPage { calls: ApiCall[]; next: number | null }
-export interface CallFilters { provider?: string; model?: string; app?: string; ok?: string; days?: number }
+export interface CallFilters { provider?: string; model?: string; app?: string; ok?: string; batch?: string; days?: number }
 export interface BudgetChange { claude_budget_usd?: number; claude_rollover?: string; gemini_budget_usd?: number; gemini_rollover?: string }
 
 export function spendUrl(path: string, f: CallFilters, extra: Record<string, string | number | undefined> = {}) {
   const p = new URLSearchParams()
-  for (const k of ['provider', 'model', 'app', 'ok'] as const) if (f[k]) p.set(k, f[k]!)
+  for (const k of ['provider', 'model', 'app', 'ok', 'batch'] as const) if (f[k]) p.set(k, f[k]!)
   if (f.days) p.set('days', String(f.days))
   for (const [k, v] of Object.entries(extra)) if (v !== undefined) p.set(k, String(v))
   return `${path}?${p}`

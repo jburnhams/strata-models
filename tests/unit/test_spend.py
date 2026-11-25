@@ -135,6 +135,8 @@ def test_series_buckets_by_provider(ledger, monkeypatch):  # noqa: F811
         tokens_in=3,
         tokens_out=6,
         cost_usd=pytest.approx(0.6),
+        batch_calls=0,
+        batch_cost_usd=0.0,
     )
     log = ledger.api_log(provider="claude", limit=2)
     assert [c["cost_usd"] for c in log] == [0.3, 0.2] and "request" not in log[0]

@@ -28,7 +28,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
   GET  /api/spend                        each cloud API key's budget, spent, left, period and warning level (spend.summary)
   GET  /api/spend/series?days=30&bucket=day   cost, calls and tokens per bucket and provider, the breakdown by provider, model and app (filtered), and the filter options
-  GET  /api/spend/calls?provider=&model=&app=&ok=&days=&before=&limit=   the ledger, newest first (without bodies)
+  GET  /api/spend/calls?provider=&model=&app=&ok=&batch=&days=&before=&limit=   the ledger, newest first (without bodies; batch: the vendor's batch id, or null)
   GET  /api/spend/calls/{id}             one call with what was sent and what came back
   GET  /api/catalogue                    every backend (local lanes, subscriptions, API keys) and cloud model, with roles, tier and cost (routing.py)
   GET  /api/route/{role}?goal=cheapest|best&private=&min_tier=&allowance=true   every way to serve the role, ranked, and the pick
@@ -332,9 +332,10 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         days: float | None = None,
         before: int | None = None,
         limit: int = 50,
+        batch: bool | None = None,
     ):
         since = None if days is None else s.clock() - days * 86400.0
-        calls = s.store.api_log(provider, model, app_name, ok, since, before, limit)
+        calls = s.store.api_log(provider, model, app_name, ok, since, before, limit, batch)
         return dict(calls=calls, next=calls[-1]["id"] if calls and len(calls) >= limit else None)
 
     @app.get("/api/spend/calls/{call_id}")

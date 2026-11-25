@@ -12,6 +12,7 @@ For bulk work that can wait (an archive of photos to caption, an eval's cloud ca
 - `db/models.py`, `migrations/20261125_3531dcac671a_…`: table `api_batches` (provider, model, jobs and their held worst cases, the vendor's id, status and counts). Applied when the live service next restarts.
 - `store.py`: batch rows, `add_many`; `recover` leaves the jobs of an open batch running, and the batcher picks them up again at start (a batch written but never confirmed sent fails its jobs).
 - `scheduler.py`: the batcher, stepped on its own thread every 5 s; `_run` drops the flag. `submit_many`: many jobs on one role in one call and one transaction, checked before any is queued (`POST /api/jobs/bulk`, client `submit_many`), decided at the batcher's next step instead of after the gap.
+- Billing split: every ledger row says whether it went in a batch (`api_calls.batch`, the vendor's id). `/api/spend` gives each key's `batch_spent`, `batch_calls` and `batch_saved` (what those calls would have cost more made at once); the breakdown and the series carry `batch_calls`/`batch_cost_usd`; `/api/spend/calls?batch=true|false` filters the log. The Cloud page shows it under each budget, as a column of the breakdown, a "Spend in batches" chart, a "Sent" column and filter in the request log, and the batch id in a call's detail.
 - `evals/core.py`: `batch` is left out of an eval's result keys (how it was sent does not change the output).
 - `tests/unit/test_batches.py`: **new**, the vendor faked (`cloudfakes.FakeBatches`).
 

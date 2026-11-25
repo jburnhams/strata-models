@@ -28,7 +28,11 @@ function Budget({ p, hasKey }: { p: ProviderState; hasKey: boolean }) {
     <div className="grid gap-2 rounded-control border p-4">
       {p.budget ? (
         <Meter label={p.label} value={p.spent} max={p.budget} thresholds={THRESHOLDS} valueText={`${usd(p.spent)} of ${usd(p.budget)} spent`} detail={`${usd(p.left)} left ${until} · ${format.count(p.calls, 'call')}${p.reserved ? ` · ${usd(p.reserved)} held for calls under way` : ''}`} />
-      ) : (
+      ) : null}
+      {p.budget && p.batch_calls ? (
+        <p className="type-caption text-muted-foreground">{`${usd(p.batch_spent)} of it in batches (${format.count(p.batch_calls, 'call')}), about ${usd(p.batch_saved)} less than made at once`}</p>
+      ) : null}
+      {!p.budget && (
         <>
           <p className="type-body font-medium">{p.label}</p>
           <Status tone="danger">No budget set: every call is refused</Status>
@@ -77,6 +81,7 @@ const breakdownColumns: Column<SpendRow>[] = [
   { key: 'failed', header: 'Failed', numeric: true, cell: r => format.integer(r.failed), sort: (a, b) => a.failed - b.failed },
   { key: 'tokens', header: 'Tokens in / out', numeric: true, cell: r => `${format.compact(r.tokens_in)} / ${format.compact(r.tokens_out)}` },
   { key: 'cost', header: 'Cost', numeric: true, cell: r => usd(r.cost_usd), sort: (a, b) => a.cost_usd - b.cost_usd },
+  { key: 'batch', header: 'Of it in batches', numeric: true, cell: r => (r.batch_calls ? `${usd(r.batch_cost_usd)} (${format.integer(r.batch_calls)})` : '–'), sort: (a, b) => a.batch_cost_usd - b.batch_cost_usd },
 ]
 
 function Charts({ s }: { s: SpendSeries }) {
@@ -85,9 +90,11 @@ function Charts({ s }: { s: SpendSeries }) {
   const fx = (x: number) => (hourly ? format.clock(x) : format.shortDay(x))
   const cost = bucketSeries(s.points, s.since, s.bucket_s, now, 'cost_usd')
   const calls = bucketSeries(s.points, s.since, s.bucket_s, now, 'calls')
+  const batched = bucketSeries(s.points, s.since, s.bucket_s, now, 'batch_cost_usd')
   const per = hourly ? 'hour' : 'day'
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      {s.points.some(p => p.batch_calls) && <LineChart label={`Spend in batches per ${per}`} series={batched} seriesLabel="Spend in batches" formatX={fx} formatY={usd} xTicks={ticksOf(batched)} xLabel={hourly ? 'Hour' : 'Day'} end="none" readout height={180} />}
       <LineChart label={`Spend per ${per}`} series={cost} seriesLabel="Spend" formatX={fx} formatY={usd} xTicks={ticksOf(cost)} xLabel={hourly ? 'Hour' : 'Day'} end="none" readout height={180} />
       <LineChart label={`Calls per ${per}`} series={calls} seriesLabel="Calls" formatX={fx} formatY={y => format.integer(y)} xTicks={ticksOf(calls)} xLabel={hourly ? 'Hour' : 'Day'} end="none" readout height={180} />
     </div>
@@ -106,6 +113,7 @@ function CallDetail({ id }: { id: number }) {
             <dt className="text-muted-foreground">For</dt><dd>{c.app ?? '–'}{c.job_id ? `, job #${c.job_id}` : ''}</dd>
             <dt className="text-muted-foreground">Tokens</dt><dd>{format.integer(c.tokens_in)} in, {format.integer(c.cache_read)} from cache, {format.integer(c.cache_write)} written to cache, {format.integer(c.tokens_out)} out</dd>
             <dt className="text-muted-foreground">Ended</dt><dd>{c.finish ?? '–'}</dd>
+            <dt className="text-muted-foreground">Sent</dt><dd>{c.batch ? <>in batch <span className="font-mono">{c.batch}</span>, at half price</> : 'at once'}</dd>
             {c.request?.effort && <><dt className="text-muted-foreground">Effort</dt><dd>{c.request.effort}</dd></>}
             {c.request?.max_tokens && <><dt className="text-muted-foreground">Max tokens</dt><dd>{format.integer(c.request.max_tokens)}</dd></>}
             {c.request?.images?.length ? <><dt className="text-muted-foreground">Pictures</dt><dd className="font-mono break-all">{c.request.images.join(', ')}</dd></> : null}
@@ -128,6 +136,7 @@ const callColumns: Column<ApiCall>[] = [
   { key: 'app', header: 'App', cell: c => c.app ?? '–' },
   { key: 'ok', header: 'Outcome', cell: c => <Status tone={c.ok ? 'success' : 'danger'}>{c.ok ? 'Answered' : 'Failed'}</Status> },
   { key: 'tokens', header: 'Tokens in / out', numeric: true, cell: c => `${format.integer(c.tokens_in + c.cache_read + c.cache_write)} / ${format.integer(c.tokens_out)}` },
+  { key: 'sent', header: 'Sent', cell: c => (c.batch ? 'In a batch' : 'At once') },
   { key: 'took', header: 'Took', numeric: true, cell: c => seconds(c.seconds) },
   { key: 'cost', header: 'Cost', numeric: true, cell: c => usd(c.cost_usd) },
 ]
@@ -136,7 +145,7 @@ function Log({ filters }: { filters: CallFilters }) {
   const load = useInfiniteLoad<ApiCall, ApiCallPage, number>({ queryKey: ['calls', filters], queryFn: ({ cursor }) => api.calls(filters, cursor), items: p => p.calls, itemKey: c => String(c.id), cursorAfter: c => c.id, hasMore: p => p.next !== null })
   const expanded = useExpanded({ param: 'open' })
   return (
-    <DataView state={load} isEmpty={rows => rows.length === 0} skeleton={<TableSkeleton rows={6} columns={8} />} empty={<EmptyState title="No calls match">Calls to the cloud APIs show here as they are made.</EmptyState>}>
+    <DataView state={load} isEmpty={rows => rows.length === 0} skeleton={<TableSkeleton rows={6} columns={9} />} empty={<EmptyState title="No calls match">Calls to the cloud APIs show here as they are made.</EmptyState>}>
       {rows => (
         <div className="grid gap-3">
           <DataTable caption="Request log" columns={callColumns} rows={rows} rowKey={c => String(c.id)} expansion={{ expanded: expanded.expanded, onChange: expanded.onChange, rowLabel: c => `call #${c.id}`, detail: c => <CallDetail id={c.id} /> }} />
@@ -151,7 +160,7 @@ function Log({ filters }: { filters: CallFilters }) {
 export default function CloudPage() {
   const [params, setParams] = useSearchParams()
   const days = Number(params.get('days') || '30')
-  const filters: CallFilters = { provider: params.get('provider') || undefined, model: params.get('model') || undefined, app: params.get('app') || undefined, ok: params.get('ok') || undefined, days }
+  const filters: CallFilters = { provider: params.get('provider') || undefined, model: params.get('model') || undefined, app: params.get('app') || undefined, ok: params.get('ok') || undefined, batch: params.get('batch') || undefined, days }
   const setFilter = (k: string, v: string) => setParams(p => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); n.delete('open'); return n })
   const spend = useLoad({ queryKey: ['spend'], queryFn: api.spend, refetchInterval: 30_000 })
   const series = useLoad({ queryKey: ['spend-series', filters.provider, filters.model, filters.app, days], queryFn: () => api.spendSeries(filters) })
@@ -174,6 +183,7 @@ export default function CloudPage() {
         <Field label="Model"><NativeSelect value={filters.model ?? ''} onChange={e => setFilter('model', e.target.value)}><option value="">Every model</option>{models.map(m => <option key={m} value={m}>{m}</option>)}</NativeSelect></Field>
         <Field label="App"><NativeSelect value={filters.app ?? ''} onChange={e => setFilter('app', e.target.value)}><option value="">Every app</option>{apps.map(a => <option key={a} value={a}>{a}</option>)}</NativeSelect></Field>
         <Field label="Outcome"><NativeSelect value={filters.ok ?? ''} onChange={e => setFilter('ok', e.target.value)}><option value="">Any outcome</option><option value="true">Answered</option><option value="false">Failed</option></NativeSelect></Field>
+        <Field label="Sent"><NativeSelect value={filters.batch ?? ''} onChange={e => setFilter('batch', e.target.value)}><option value="">At once or in a batch</option><option value="true">In a batch</option><option value="false">At once</option></NativeSelect></Field>
       </div>
       <DataView state={series} isEmpty={() => false} skeleton={<Skeleton className="h-48 w-full" />} empty={null}>
         {s => (

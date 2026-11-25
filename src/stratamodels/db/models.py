@@ -174,6 +174,9 @@ class ApiCall(Base):
         sa.JSON, default=None
     )  # what was sent: text in full, pictures as their paths, settings
     response: Mapped[str | None] = mapped_column(sa.Text, default=None)  # the answer's text (up to 100 000 characters)
+    batch: Mapped[str | None] = mapped_column(
+        sa.String(128), default=None, index=True
+    )  # the vendor's batch id when it went through a batch API (at its discount); None: a call made at once
 
 
 class ApiBatch(Base):

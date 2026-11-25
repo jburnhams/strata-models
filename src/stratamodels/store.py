@@ -275,18 +275,20 @@ class Store:
             return {c.name: getattr(r, c.name) for c in ApiCall.__table__.columns}
 
     @locked
-    def api_spent(self, provider, since):
-        """(USD, calls) a provider's key spent since `since`."""
+    def api_spent(self, provider, since, batch=None):
+        """(USD, calls) a provider's key spent since `since`; `batch` True: only the calls sent in a batch, False: only those made at once."""
         q = sa.select(sa.func.coalesce(sa.func.sum(ApiCall.cost_usd), 0.0), sa.func.count()).where(
             ApiCall.provider == provider, ApiCall.at >= since
         )
+        if batch is not None:
+            q = q.where(ApiCall.batch.is_not(None) if batch else ApiCall.batch.is_(None))
         with Session(self.engine) as s:
             usd, n = s.execute(q).one()
             return float(usd or 0.0), int(n)
 
     @locked
     def api_breakdown(self, since):
-        """Per provider, model and app since `since`: calls, failures, tokens and USD."""
+        """Per provider, model and app since `since`: calls, failures, tokens and USD, and how many of the calls and dollars went in batches."""
         q = (
             sa.select(
                 ApiCall.provider,
@@ -297,6 +299,8 @@ class Store:
                 sa.func.sum(ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write),
                 sa.func.sum(ApiCall.tokens_out),
                 sa.func.sum(ApiCall.cost_usd),
+                sa.func.sum(sa.case((ApiCall.batch.is_not(None), 1), else_=0)),
+                sa.func.sum(sa.case((ApiCall.batch.is_not(None), ApiCall.cost_usd), else_=0.0)),
             )
             .where(ApiCall.at >= since)
             .group_by(ApiCall.provider, ApiCall.model, ApiCall.app)
@@ -313,12 +317,14 @@ class Store:
                     tokens_in=int(ti or 0),
                     tokens_out=int(to or 0),
                     cost_usd=float(c or 0.0),
+                    batch_calls=int(bn or 0),
+                    batch_cost_usd=float(bc or 0.0),
                 )
-                for p, m, a, n, f, ti, to, c in s.execute(q)
+                for p, m, a, n, f, ti, to, c, bn, bc in s.execute(q)
             ]
 
     @locked
-    def api_log(self, provider=None, model=None, app=None, ok=None, since=None, before=None, limit=50):
+    def api_log(self, provider=None, model=None, app=None, ok=None, since=None, before=None, limit=50, batch=None):
         """Ledger rows newest first, filtered, without the request and response bodies (`api_call` has them); cursor `before` = the last id."""
         q = sa.select(*[c for c in ApiCall.__table__.columns if c.name not in ("request", "response")]).order_by(
             ApiCall.id.desc()
@@ -330,6 +336,8 @@ class Store:
             q = q.where(ApiCall.at >= since)
         if before is not None:
             q = q.where(ApiCall.id < before)
+        if batch is not None:  # True: only calls sent in a batch; False: only those made at once
+            q = q.where(ApiCall.batch.is_not(None) if batch else ApiCall.batch.is_(None))
         with Session(self.engine) as s:
             return [dict(r._mapping) for r in s.execute(q.limit(max(1, min(int(limit), 500))))]
 
@@ -383,7 +391,7 @@ class Store:
 
     @locked
     def api_points(self, since):
-        """(at, provider, model, app, cost_usd, tokens, ok) of every call since `since`, oldest first: what the charts bucket."""
+        """(at, provider, model, app, cost_usd, tokens, ok, batch) of every call since `since`, oldest first: what the charts bucket."""
         q = (
             sa.select(
                 ApiCall.at,
@@ -393,6 +401,7 @@ class Store:
                 ApiCall.cost_usd,
                 ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write + ApiCall.tokens_out,
                 ApiCall.ok,
+                ApiCall.batch.is_not(None),
             )
             .where(ApiCall.at >= since)
             .order_by(ApiCall.at)

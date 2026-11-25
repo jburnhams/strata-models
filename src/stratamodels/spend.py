@@ -147,6 +147,7 @@ def state(provider, now=None):
     usd, rollover = settings.budget(provider) if info["budgeted"] else (None, None)
     start, nxt = period(rollover, now)
     spent, calls = _store.api_spent(provider, start) if _store is not None else (0.0, 0)
+    b_spent, b_calls = _store.api_spent(provider, start, batch=True) if _store is not None else (0.0, 0)
     with _lock:
         reserved = sum(_reserved.get(provider, {}).values())
     out = dict(
@@ -160,6 +161,11 @@ def state(provider, now=None):
         next_rollover=nxt,
         spent=round(spent, 6),
         calls=calls,
+        batch_spent=round(b_spent, 6),  # of `spent`, what went through a batch API (at its discount)
+        batch_calls=b_calls,
+        batch_saved=round(
+            b_spent * (1 / BATCH - 1), 6
+        ),  # what those calls would have cost more made at once (at the default discount)
         reserved=round(reserved, 6),
         left=None,
         used_share=None,
@@ -272,18 +278,28 @@ def per_task(since=0.0):
 
 
 def series(since, bucket_s=86400.0, provider=None, model=None, app=None):
-    """The ledger in time buckets since `since`, for the charts: [{t, provider, cost_usd, calls, failed, tokens}] with t the bucket start;
-    only the calls of `provider`, `model` (the vendor's id) and `app` when given."""
+    """The ledger in time buckets since `since`, for the charts: [{t, provider, cost_usd, calls, failed, tokens, batch_cost_usd,
+    batch_calls}] with t the bucket start (batch_*: the part sent through a batch API); only the calls of `provider`, `model` (the vendor's
+    id) and `app` when given."""
     if _store is None:
         return []
     out = {}
-    for at, provider_, model_, app_, usd, tokens, ok in _store.api_points(since):
+    for at, provider_, model_, app_, usd, tokens, ok, batched in _store.api_points(since):
         if (provider and provider_ != provider) or (model and model_ != model) or (app and app_ != app):
             continue
         t = since + ((at - since) // bucket_s) * bucket_s
-        b = out.setdefault((t, provider_), dict(t=t, provider=provider_, cost_usd=0.0, calls=0, failed=0, tokens=0))
+        b = out.setdefault(
+            (t, provider_),
+            dict(t=t, provider=provider_, cost_usd=0.0, calls=0, failed=0, tokens=0, batch_cost_usd=0.0, batch_calls=0),
+        )
         b["cost_usd"] += usd
         b["calls"] += 1
         b["failed"] += 0 if ok else 1
         b["tokens"] += int(tokens or 0)
-    return [dict(b, cost_usd=round(b["cost_usd"], 6)) for _, b in sorted(out.items())]
+        if batched:
+            b["batch_cost_usd"] += usd
+            b["batch_calls"] += 1
+    return [
+        dict(b, cost_usd=round(b["cost_usd"], 6), batch_cost_usd=round(b["batch_cost_usd"], 6))
+        for _, b in sorted(out.items())
+    ]
