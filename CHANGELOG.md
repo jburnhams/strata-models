@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**Normal and low work is queued in bulk; a single job is high priority; nothing is held for a batch (branch `claude/project-thread-ul9xch`)**
+Six hours after the batch API went live nothing had been batched (434 Claude calls): every app sends a call and waits for it, so no burst ever formed, while each call sat 10 to 15 s in case more came (Opus calls waited 13.4 s on average, 1.7 s before).
+- `batches.py`: no hold, no gap. Only a bulk call is batched: 20 or more on a Claude model (`batch=None`), always (`True`) or never (`False`). `Scheduler.submit_many` marks the jobs it batches (`batch = true` in their params); the batcher sends them at its next step. An item's own `batch` key, a preference's and a single job's are dropped.
+- `POST /api/jobs` and `POST /api/run/{role}` are for one high priority job (someone waiting on it): any other priority is refused (400) with a pointer to `POST /api/jobs/bulk`, which takes normal and low work.
+- Clients: `strata_models_client.submit` and `run` send a `high` job to `/api/jobs` and anything else to the bulk endpoint as a call of one; `run_many` is new. Evals queue their jobs in bulk with `batch=False` (they wait on each chunk and each verdict).
+- Apps that queue many jobs should use `submit_many` and then wait on each id; they get the batch price only that way.
+
 **font-match: a line whose capitals are measured as its x-height is not set half as big again (branch `line-sizes`)**
 strata-scan's first finished PDF of a book had a line set 1.4 to 1.6 times too big on four of 25 pages ("Polly.-Whiskey!", "Dr.-Well sir I am a Doctor."), over the line above. A line's x-height is measured as the band of rows with over 40 % of its profile's peak ink; on a short line of tall letters that band reaches the capitals' tops (46 px against the page's 31), the fit starts from it, and it searches only 18 % either way.
 - `runtimes/fontfit.py`: `_sizes0`: a line measured over `TALLER` (1.2) times the page's median x-height, and not in capitals, also tries the size at which that height is its capitals' and the page's own size (a line measured over two rows, 90 px, was set at 230 for 67), and the best fit wins. Only such lines: offered to every line, a misread line of body type ("name Poxca?") took the smaller size.

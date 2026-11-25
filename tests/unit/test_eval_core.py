@@ -212,9 +212,9 @@ def test_executors_pass_through(scheduler):
     calls = []
 
     class SM:
-        def submit(self, role, params, app, priority, model, options):
-            calls.append((role, app, priority, model, options))
-            return dict(id=7)
+        def submit_many(self, role, items, app, priority, model, options, batch=None):
+            calls.append((role, app, priority, model, options, batch, len(items)))
+            return [7]
 
         def wait_job(self, i):
             return dict(id=i, status="done")
@@ -223,7 +223,7 @@ def test_executors_pass_through(scheduler):
     assert (
         ex.submit("r", {}, "m", {}) == 7
         and ex.wait(7)["status"] == "done"
-        and calls == [("r", "evals", "low", "m", None)]
+        and calls == [("r", "evals", "low", "m", None, False, 1)]
     )
     j = C.SchedulerExecutor(scheduler).submit("echo", dict(x=1), "small", None)
     scheduler.step()

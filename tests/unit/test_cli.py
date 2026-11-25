@@ -124,9 +124,9 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
     class SM:
         available = staticmethod(lambda: True)
 
-        def submit(self, *a):
+        def submit_many(self, *a, **kw):
             calls.append(a)
-            return dict(id=len(calls))
+            return [len(calls)]
 
         def wait_job(self, i):
             return dict(id=i, status="done", result=dict(segments=[dict(text="x")]))

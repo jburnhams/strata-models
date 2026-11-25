@@ -150,9 +150,10 @@ class Scheduler:
             self._dirty = True
             self.cv.notify_all()
 
-    def submit(self, role, params, app, priority="normal", model=None, options=None):
+    def submit(self, role, params, app, priority="normal", model=None, options=None, _batch=False):
         """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
-        for an unknown role or a model that does not serve it."""
+        for an unknown role or a model that does not serve it. A job queued on its own is never batched (`batch` in its params is dropped):
+        only submit_many marks jobs for the batch API (`_batch`)."""
         app = str(app or "unknown")[:64]
         pref = self.registry.preference(app, role)
         m = self.registry.resolve(role, model, app)
@@ -160,6 +161,9 @@ class Scheduler:
             **((pref.params or {}) if pref else {}),
             **(params or {}),
         }  # the app's default params (preferences), its job's own over them
+        params.pop(batches.BATCH, None)
+        if _batch:
+            params[batches.BATCH] = True
         if options:
             m = self.registry.variant(m.key, options)
             params[OPTIONS] = dict(options)  # kept with the job, so a restart can rebuild the variant
@@ -174,8 +178,9 @@ class Scheduler:
 
     def submit_many(self, role, items, app, priority="normal", model=None, options=None, batch=None):
         """Queue one job per params dict in `items` (all on the same role, model and priority); returns their ids, in order. The role and model
-        are checked before any is queued, so a refused call queues nothing. `batch` (batches.py): None decides automatically, at the batcher's
-        next step rather than after the gap (the whole lot is already here); True always batches them, False never."""
+        are checked before any is queued, so a refused call queues nothing. `batch` (batches.py): on a model with a batch API, None batches
+        a call of Batcher.min_jobs or more, True always, False never; the jobs it batches are marked (`batch = true`) and sent at the batcher's
+        next step. An item's own `batch` key is not read: the call decides."""
         if not isinstance(items, list) or not all(isinstance(p, dict) for p in items):
             raise QueueError("items is a list of params objects")
         if len(items) > MAX_BULK:
@@ -183,23 +188,30 @@ class Scheduler:
         priority = self._priority(priority)
         app = str(app or "unknown")[:64]
         m = self.registry.resolve(role, model, app)
-        extra = {} if batch is None else {batches.BATCH: bool(batch)}
+        mark = self.batcher.decide(m, len(items), batch)
+        items = [{k: v for k, v in p.items() if k != batches.BATCH} for p in items]
+        extra = {batches.BATCH: True} if mark else {}
         if isinstance(m.options.get("upsample"), dict):  # each job may need its own upsampling step: one at a time
-            ids = [self.submit(role, {**p, **extra}, app, priority, model, options)["id"] for p in items]
+            ids = [self.submit(role, p, app, priority, model, options, _batch=mark)["id"] for p in items]
         else:  # one transaction for the lot: tens of thousands of rows in seconds
             pref = self.registry.preference(app, role)
-            base = dict((pref.params or {}) if pref else {})
+            base = {k: v for k, v in ((pref.params or {}) if pref else {}).items() if k != batches.BATCH}
             if options:
                 m = self.registry.variant(m.key, options)
                 base[OPTIONS] = dict(options)
             rows = [
-                dict(kind="run", role=role, model=m.key, app=app, priority=priority, params={**base, **p, **extra})
-                for p in items
+                dict(
+                    kind="run",
+                    role=role,
+                    model=m.key,
+                    app=app,
+                    priority=priority,
+                    params={**base, **{k: v for k, v in p.items() if k != "upsample"}, **extra},
+                )
+                for p in items  # `upsample` means nothing on a model without the step (as in submit, it is not stored)
             ]
             ids = self.store.add_many(rows)
             self._notify()
-        if batch is not False and ids:
-            self.batcher.now.add(m.key)
         return ids
 
     def _upsample_step(self, m, params, app, priority):

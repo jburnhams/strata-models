@@ -89,6 +89,19 @@ def test_submit_poll_and_list_jobs(client, scheduler):
     )
 
 
+def test_a_single_job_is_high_priority_and_never_batched(client, scheduler):
+    j = client.post("/api/jobs", json=dict(role="echo", params=dict(x=1, batch=True), app="bh")).json()
+    assert (j["priority"], j["params"]) == ("high", dict(x=1))
+    assert (
+        client.post("/api/jobs", json=dict(role="echo", app="bh", priority="interactive")).json()["priority"] == "high"
+    )
+    for path, body in (("/api/jobs", dict(role="echo")), ("/api/run/echo", {})):
+        for p in ("normal", "low"):
+            r = client.post(path, json=dict(body, app="bh", priority=p))
+            assert r.status_code == 400 and "POST /api/jobs/bulk" in r.json()["detail"]
+    assert len(scheduler.store.queued()) == 2
+
+
 def test_run_waits_for_the_result_or_says_why_not(client, scheduler):
     t = worker(scheduler)
     r = client.post("/api/run/echo", json=dict(params=dict(y=2), app="s360"))

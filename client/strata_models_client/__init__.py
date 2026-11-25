@@ -65,23 +65,43 @@ def available(timeout=2.0):
 
 
 def submit(role, params, app, priority="normal", model=None, options=None):
-    """Queue a job and return its row at once (poll with `wait`). `options` changes the model's load options (a variant loaded apart: evals)."""
-    return _call(
-        "POST",
-        "/api/jobs",
-        dict(role=role, params=params or {}, app=app, priority=priority, model=model, options=options),
-    )
+    """Queue one job and return its row at once (poll with `wait`). `options` changes the model's load options (a variant loaded apart:
+    evals). A `high` job (someone waiting on it) goes to POST /api/jobs; normal and low work is queued in bulk, as a call of one (see
+    `submit_many`, which an app with many jobs should use instead: only a bulk call of 20 or more is batched)."""
+    if priority == "high":
+        return _call("POST", "/api/jobs", dict(role=role, params=params or {}, app=app, model=model, options=options))
+    (job_id,) = submit_many(role, [params or {}], app, priority, model, options)
+    return _call("GET", f"/api/jobs/{int(job_id)}")
 
 
 def submit_many(role, items, app, priority="normal", model=None, options=None, batch=None):
     """Queue one job per params dict in `items` in a single call; returns their ids, in order (wait on each with `wait`). On a Claude model
-    enough of them go through the batch API (half the price, answered within 24 hours) automatically; `batch=True` always, `batch=False`
-    never. Nothing is queued when the role or model is refused."""
+    a call of 20 or more goes through the batch API (half the price, answered within 24 hours: wait accordingly); `batch=True` always,
+    `batch=False` never. Nothing is queued when the role or model is refused."""
     return _call(
         "POST",
         "/api/jobs/bulk",
-        dict(role=role, items=list(items), app=app, priority=priority, model=model, options=options, batch=batch),
+        dict(
+            role=role,
+            items=[dict(p or {}) for p in items],
+            app=app,
+            priority=priority,
+            model=model,
+            options=options,
+            batch=batch,
+        ),
     )["ids"]
+
+
+def run_many(role, items, app, priority="normal", model=None, options=None, batch=None, timeout=None):
+    """`submit_many`, then each result in order (a failed job's JobFailed is raised for it in its place: [result or JobFailed, ...])."""
+    out = []
+    for job_id in submit_many(role, items, app, priority, model, options, batch):
+        try:
+            out.append(wait(job_id, timeout))
+        except JobFailed as e:
+            out.append(e)
+    return out
 
 
 def wait_job(job_id):

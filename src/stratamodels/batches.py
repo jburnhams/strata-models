@@ -1,18 +1,15 @@
 """Jobs sent through a vendor's batch API (the Claude Message Batches API: half the price of the same calls made at once, answered within
 24 hours, most within one), for bulk work that can wait: an archive of photos to caption, an eval's candidate run.
 
-Automatic. A job on a model whose runtime has a batch API (claude-api) is held while jobs for that model keep arriving: once none has come
-for `gap_s` (10 s), or `max_jobs` are held, or the oldest has been held `max_wait_s` (a steady trickle never waits for ever), the lot is
-decided: `min_jobs` (20) or more go as one batch; fewer are let go to run at once in the CPU lane, as they always did (a handful of calls is
-not worth waiting up to a day for). So an app that sends many jobs in quick succession gets the batch price without asking, and one call
-on its own is only delayed by the gap. The params decide it per job:
-  batch = false   never batched, never held (an app that needs the answer now)
-  batch = true    always batched, however few (and held like any other)
-  (not given)     automatic; a `high` priority job (someone waiting on the page) is never held
-A bulk submission (POST /api/jobs/bulk, Scheduler.submit_many) is decided at the batcher's next step: the whole lot is already here.
-Nothing else changes for the app: it submits jobs and waits for each as it always does, and each job ends done or failed with the same result
-as a call made at once (plus `batch`, the vendor's id). On a model without a batch API the flag is dropped and the job runs at once. What to
-do with an entry that failed (retry it at once, or later) stays with the app.
+Only a bulk submission is batched (POST /api/jobs/bulk, Scheduler.submit_many): nothing is ever held to see whether more will come, so a
+job queued on its own runs at once, as it always did. The bulk call's `batch` decides it, on a model whose runtime has a batch API
+(claude-api; on any other the flag is dropped and the jobs run at once):
+  batch = false   never batched
+  batch = true    always batched, however few
+  (not given)     batched when the call has `min_jobs` (20) or more (a handful of calls is not worth waiting up to a day for)
+Submit_many marks each such job (`batch = true` in its params); the batcher sends the marked jobs of each model at its next step. Nothing
+else changes for the app: it waits for each job as it always does, and each ends done or failed with the same result as a call made at once
+(plus `batch`, the vendor's id). What to do with an entry that failed (retry it at once, or later) stays with the app.
 
 The batcher (one per scheduler, stepped on its own thread) takes the queued jobs it holds out of the CPU lane and:
   submit  each job's request is built as the runtime would send it, its worst case (at the batch price) held of the budget in one check
@@ -38,9 +35,8 @@ PREFIX = "job-"  # an entry's custom_id is PREFIX + the job id
 
 
 def wants(params):
-    """True (always batch), False (never), or None (automatic) from a job's params."""
-    v = (params or {}).get(BATCH)
-    return None if v is None else bool(v)
+    """Whether a job's params mark it for the batch API (submit_many sets the mark)."""
+    return bool((params or {}).get(BATCH))
 
 
 def clean(params):
@@ -74,28 +70,28 @@ class Batcher:
     def __init__(
         self,
         scheduler,
-        gap_s=10.0,
-        max_wait_s=300.0,
         min_jobs=20,
         poll_s=60.0,
         max_jobs=10_000,
         max_bytes=200 * 1024 * 1024,
     ):
         self.s = scheduler
-        self.gap_s, self.max_wait_s, self.min_jobs = float(gap_s), float(max_wait_s), int(min_jobs)
+        self.min_jobs = int(min_jobs)
         self.poll_s, self.max_jobs, self.max_bytes = float(poll_s), int(max_jobs), int(max_bytes)
-        self.released = (
-            set()
-        )  # ids of queued jobs held, then let go to run at once (too few to batch): the CPU lane's now
         self.handles = {}  # model key -> (settings hash, handle): the batcher's own client, apart from the CPU lane's
         self.tickets = {}  # job id -> its spend hold, until its outcome is recorded
-        self.now = (
-            set()
-        )  # model keys whose held jobs are decided at the next step, without waiting for the gap (a bulk submission)
 
     @property
     def store(self):
         return self.s.store
+
+    def batchable(self, model):
+        """Whether jobs on `model` can go through a batch API (a served model whose runtime has one)."""
+        return model is not None and model.served and self._runtime(model) is not None
+
+    def decide(self, model, n, batch):
+        """Whether a bulk submission of `n` jobs on `model` is batched: `batch` True always, False never, None from min_jobs."""
+        return self.batchable(model) and batch is not False and (batch is True or n >= self.min_jobs)
 
     def _runtime(self, model):
         try:
@@ -105,15 +101,10 @@ class Batcher:
         return rt if hasattr(rt, "batch_submit") else None
 
     def takes(self, j):
-        """Whether a queued job is the batcher's (held, or to be batched), not the CPU lane's: a run on a served model with a batch API that
-        did not say batch = false, is not high priority unless it said batch = true, and was not let go already."""
-        from stratamodels.scheduler import rank
-
-        w = wants(j["params"])
-        if j["kind"] != "run" or w is False or j["id"] in self.released or (w is None and rank(j["priority"]) == 0):
+        """Whether a queued job is the batcher's, not the CPU lane's: a run marked for the batch API on a model that has one."""
+        if j["kind"] != "run" or not wants(j["params"]):
             return False
-        model = self.s._model_of(j)
-        return model is not None and model.served and self._runtime(model) is not None
+        return self.batchable(self.s._model_of(j))
 
     def _handle(self, model):
         return self._handle_for(model.runtime, model.key, model.options)
@@ -144,33 +135,14 @@ class Batcher:
             spend.release(t)
 
     # ---- submit ---------------------------------------------------------------------------------------------------------------------
-    def due(self, now=None):
-        """{model key: (model, jobs to batch, jobs to let go)} of the models whose held jobs are decided now: none has arrived for gap_s,
-        max_jobs are held, the oldest has waited max_wait_s, or they came in one bulk submission. min_jobs or more are all batched; fewer,
-        only those that said batch = true."""
-        now = self.s.clock() if now is None else now
-        queued = self.store.queued()
-        self.released &= {j["id"] for j in queued}  # forget the ones that have left the queue
+    def due(self):
+        """{model key: (model, jobs to batch)}: the queued jobs marked for the batch API, by model (those waiting on a step stay)."""
         groups = {}
-        for j in queued:
+        for j in self.store.queued():
             if self.takes(j) and not self.s._waiting_on_step(j):
                 m = self.s._model_of(j)
                 groups.setdefault(m.key, (m, []))[1].append(j)
-        out = {}
-        for k, (m, js) in groups.items():
-            arrived = [j["submitted_at"] for j in js]
-            if not (
-                k in self.now
-                or len(js) >= self.max_jobs
-                or now - max(arrived) >= self.gap_s
-                or now - min(arrived) >= self.max_wait_s
-            ):
-                continue
-            if len(js) >= self.min_jobs:
-                out[k] = (m, js, [])
-            else:
-                out[k] = (m, [j for j in js if wants(j["params"])], [j for j in js if not wants(j["params"])])
-        return out
+        return groups
 
     def submit(self, model, jobs):
         """Send one batch of `jobs` (queued, on `model`); returns its row, or None when nothing was sent. Jobs past the size limits stay queued."""
@@ -326,15 +298,11 @@ class Batcher:
         for b in self.store.batches(status="submitted"):
             if b["vendor_id"] is not None and (b["polled_at"] is None or now - b["polled_at"] >= self.poll_s):
                 out.append(self.poll(b, now))
-        let_go = 0
-        for key, (model, jobs, release) in self.due(now).items():
-            self.now.discard(key)
-            self.released |= {j["id"] for j in release}
-            let_go += len(release)
-            b = self.submit(model, jobs) if jobs else None
+        for model, jobs in self.due().values():
+            b = self.submit(model, jobs)
             if b is not None:
                 out.append(b)
-        if out or let_go:
+        if out:
             self.s._notify()
         return out
 
