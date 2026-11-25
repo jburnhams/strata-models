@@ -44,9 +44,57 @@ class Post:
         return r
 
 
+class FakeBatches:
+    """messages.batches: `create` records each batch's requests (or raises `error`); `status` is what retrieve says; `outcomes` (custom_id ->
+    outcome, see succeeded/errored/ended) is what results yields once asked, or `broken` raised after the first."""
+
+    def __init__(self):
+        self.created, self.status, self.outcomes, self.error, self.broken = [], "in_progress", {}, None, None
+
+    def create(self, requests):
+        if self.error is not None:
+            raise self.error
+        self.created.append(requests)
+        return SimpleNamespace(id=f"msgbatch_{len(self.created)}")
+
+    def retrieve(self, batch_id):
+        if isinstance(self.status, BaseException):
+            raise self.status
+        n = len(self.created[-1]) if self.created else 0
+        done = self.status == "ended"
+        return SimpleNamespace(
+            id=batch_id,
+            processing_status=self.status,
+            request_counts=SimpleNamespace(
+                processing=0 if done else n, succeeded=n if done else 0, errored=0, canceled=0, expired=0
+            ),
+        )
+
+    def results(self, batch_id):
+        for i, (cid, o) in enumerate(self.outcomes.items()):
+            if self.broken is not None and i == 1:
+                raise self.broken
+            yield SimpleNamespace(custom_id=cid, result=o)
+
+
+def succeeded(reply):
+    return SimpleNamespace(type="succeeded", message=reply)
+
+
+def errored(kind="invalid_request_error", message="bad image"):
+    return SimpleNamespace(
+        type="errored", error=SimpleNamespace(type="error", error=SimpleNamespace(type=kind, message=message))
+    )
+
+
+def ended(kind="expired"):
+    return SimpleNamespace(type=kind)
+
+
 class FakeMessages:
     def __init__(self, count=100, reply=None, error=None):
         self.count, self.reply, self.error, self.created = count, reply, error, []
+        self.batches = FakeBatches()
 
     def count_tokens(self, **kw):
         if isinstance(self.count, BaseException):

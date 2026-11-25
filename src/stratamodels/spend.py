@@ -18,7 +18,11 @@ bills for it: nothing for a refused request).
 A price (USD per million tokens) is a table under the model's options:
   price = { input = 0.10, output = 0.50, cache_read = 0.01, cache_write = 0.125, over = 100000, input_over = 0.50, output_over = 2.50 }
 cache_read defaults to a tenth of input, cache_write to 1.25 x input; `over`: above that many prompt tokens the *_over prices apply. A list
-of such tables with `from = "YYYY-MM-DD"` gives prices that change on a date (the latest one that has started applies)."""
+of such tables with `from = "YYYY-MM-DD"` gives prices that change on a date (the latest one that has started applies). A call sent through
+a vendor's batch API (batches.py) costs `batch` times the whole price (default BATCH, half: the Claude Message Batches discount).
+
+A batch holds its calls' worst cases from submission until its results are in (up to a day): `reserve_many` takes them in one check, and
+`hold` puts them back after a restart without checking (the batch was already sent, so its cost is coming whatever is left)."""
 
 import calendar
 import contextlib
@@ -83,8 +87,12 @@ def price_now(price, now=None):
     return max(started, key=lambda p: str(p.get("from", ""))) if started else None
 
 
-def cost(price, tokens_in=0, tokens_out=0, cache_read=0, cache_write=0, now=None):
-    """USD for a call's usage at a model's price (tokens_in: uncached input). 0 for a model with no price (a free provider)."""
+BATCH = 0.5  # what a batch API call costs against the same call made at once, unless the price table says (`batch`)
+
+
+def cost(price, tokens_in=0, tokens_out=0, cache_read=0, cache_write=0, now=None, batch=False):
+    """USD for a call's usage at a model's price (tokens_in: uncached input). 0 for a model with no price (a free provider). `batch`: sent
+    through the vendor's batch API, at its discount."""
     p = price_now(price, now)
     if not p:
         return 0.0
@@ -94,12 +102,13 @@ def cost(price, tokens_in=0, tokens_out=0, cache_read=0, cache_write=0, now=None
     pout = float(p.get("output_over", p["output"]) if over else p["output"])
     pread = float(p.get("cache_read", pin / 10))
     pwrite = float(p.get("cache_write", pin * 1.25))
-    return (tokens_in * pin + tokens_out * pout + cache_read * pread + cache_write * pwrite) / 1e6
+    usd = (tokens_in * pin + tokens_out * pout + cache_read * pread + cache_write * pwrite) / 1e6
+    return usd * float(p.get("batch", BATCH)) if batch else usd
 
 
-def worst(price, tokens_in, max_tokens, now=None):
+def worst(price, tokens_in, max_tokens, now=None, batch=False):
     """The most a call can cost: all of its input uncached and every one of max_tokens produced."""
-    return cost(price, tokens_in=tokens_in, tokens_out=max_tokens, now=now)
+    return cost(price, tokens_in=tokens_in, tokens_out=max_tokens, now=now, batch=batch)
 
 
 # ---- periods -----------------------------------------------------------------------------------------------------------------------------
@@ -172,31 +181,60 @@ def summary(now=None):
     return [state(p, now) for p in PROVIDERS]
 
 
+def _left(provider, now=None):
+    """(what is left, the state) of a budgeted provider; raises OverBudget when there is no ledger or no budget."""
+    if _store is None:
+        raise OverBudget(f"no spend ledger: {PROVIDERS[provider]['label']} calls are refused")
+    st = state(provider, now)
+    if not st["budget"]:
+        raise OverBudget(
+            f"no budget is set for {st['label']}: set {provider}_budget_usd (and {provider}_rollover) first"
+        )
+    return st["left"], st
+
+
+def _refusal(st, usd, what="this call"):
+    until = (
+        f" until {datetime.datetime.fromtimestamp(st['next_rollover'], datetime.UTC).date()}"
+        if st["next_rollover"]
+        else ""
+    )
+    return OverBudget(
+        f"{st['label']}: {what} could cost ${usd:.4f} and ${st['left']:.4f} of the ${st['budget']:.2f} budget is left{until}"
+    )
+
+
+def hold(provider, worst_usd):
+    """Reserve `worst_usd` without checking what is left (a call already made: a batch sent before a restart); returns its ticket."""
+    with _lock:
+        _ticket[0] += 1
+        t = (provider, _ticket[0])
+        _reserved.setdefault(provider, {})[t] = float(worst_usd)
+    return t
+
+
 def reserve(provider, worst_usd, now=None):
     """Hold `worst_usd` of a provider's budget for a call about to be made; returns a ticket for `record`. Raises OverBudget if it does not fit."""
     with _budget:
         if PROVIDERS[provider]["budgeted"]:
-            if _store is None:
-                raise OverBudget(f"no spend ledger: {PROVIDERS[provider]['label']} calls are refused")
-            st = state(provider, now)
-            if not st["budget"]:
-                raise OverBudget(
-                    f"no budget is set for {st['label']}: set {provider}_budget_usd (and {provider}_rollover) first"
-                )
-            if worst_usd > st["left"]:
-                raise OverBudget(
-                    f"{st['label']}: this call could cost ${worst_usd:.4f} and ${st['left']:.4f} of the ${st['budget']:.2f} budget is left"
-                    + (
-                        f" until {datetime.datetime.fromtimestamp(st['next_rollover'], datetime.UTC).date()}"
-                        if st["next_rollover"]
-                        else ""
-                    )
-                )
-        with _lock:
-            _ticket[0] += 1
-            t = (provider, _ticket[0])
-            _reserved.setdefault(provider, {})[t] = float(worst_usd)
-        return t
+            left, st = _left(provider, now)
+            if worst_usd > left:
+                raise _refusal(st, worst_usd)
+        return hold(provider, worst_usd)
+
+
+def reserve_many(provider, worsts, now=None):
+    """Tickets for as many of `worsts` (each call's worst case, in order) as fit what is left together, checked once: a batch of thousands
+    reads the ledger once, not per call. The calls past the first that does not fit get none: returns (tickets, refusal or None)."""
+    with _budget:
+        left, st = _left(provider, now) if PROVIDERS[provider]["budgeted"] else (float("inf"), None)
+        tickets, total = [], 0.0
+        for w in worsts:
+            if total + w > left:
+                return tickets, _refusal(st, total + w, f"{len(tickets) + 1} calls of this batch")
+            total += w
+            tickets.append(hold(provider, w))
+        return tickets, None
 
 
 def release(ticket):

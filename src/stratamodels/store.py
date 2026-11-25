@@ -10,7 +10,7 @@ import time
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from stratamodels.db.models import ApiCall, Job, JobFile, JobResult
+from stratamodels.db.models import ApiBatch, ApiCall, Job, JobFile, JobResult
 
 FIELDS = [c.name for c in Job.__table__.columns]
 FINISHED = ("done", "failed", "cancelled", "expired")
@@ -24,6 +24,10 @@ def row(j, result=True, output=None):
     if d["started_at"] is not None:
         d["wait_s"] = round(d["started_at"] - d["submitted_at"], 3)
     return d
+
+
+def batch_row(b):
+    return {c.name: getattr(b, c.name) for c in ApiBatch.__table__.columns}
 
 
 def paths(x, key=None):
@@ -183,15 +187,47 @@ class Store:
 
     @locked
     def recover(self):
-        """At start: jobs a previous run left running cannot finish, so they fail (the apps that asked have long stopped waiting); returns how many."""
+        """At start: jobs a previous run left running cannot finish, so they fail (the apps that asked have long stopped waiting); returns how many.
+        A job in an open batch is the exception: the vendor is still answering it, and the batcher picks it up again."""
         with Session(self.engine) as s:
+            batched = [
+                int(k) for b in s.scalars(sa.select(ApiBatch).where(ApiBatch.status == "submitted")) for k in b.jobs
+            ]
+            q = sa.update(Job).where(Job.status == "running")
+            if batched:
+                q = q.where(Job.id.not_in(batched))
             n = s.execute(
-                sa.update(Job)
-                .where(Job.status == "running")
-                .values(status="failed", error="the service restarted while this ran", finished_at=self.clock())
+                q.values(status="failed", error="the service restarted while this ran", finished_at=self.clock())
             ).rowcount
             s.commit()
             return n
+
+    @locked
+    def add_batch(self, **kw):
+        with Session(self.engine, expire_on_commit=False) as s:
+            b = ApiBatch(**kw)
+            s.add(b)
+            s.commit()
+            return batch_row(b)
+
+    @locked
+    def update_batch(self, batch_id, **kw):
+        with Session(self.engine, expire_on_commit=False) as s:
+            b = s.get(ApiBatch, batch_id)
+            if b is None:
+                return None
+            for k, v in kw.items():
+                setattr(b, k, v)
+            s.commit()
+            return batch_row(b)
+
+    @locked
+    def batches(self, status=None, limit=50):
+        """Newest first (status submitted: the open ones, every one of them)."""
+        q = sa.select(ApiBatch).order_by(ApiBatch.id.desc())
+        q = q.where(ApiBatch.status == status) if status else q.limit(max(1, min(int(limit), 500)))
+        with Session(self.engine) as s:
+            return [batch_row(b) for b in s.scalars(q)]
 
     @locked
     def usage(self, since):

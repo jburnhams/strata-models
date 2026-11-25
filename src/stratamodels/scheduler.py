@@ -38,7 +38,7 @@ import collections
 import threading
 import time
 
-from stratamodels import gpu, runtimes, spend
+from stratamodels import batches, gpu, runtimes, spend
 from stratamodels.store import FINISHED
 
 PRIORITY = {
@@ -60,6 +60,7 @@ def rank(p):
 OPTIONS = "__options__"  # a job's params key holding the load options of a model variant (never passed to the runtime)
 AFTER = "__after__"  # a job's params key: the step job (a prompt upsampler) whose answer becomes this job's prompt; it waits for that job
 MB = 1024.0
+BATCH_TICK_S = 5.0  # how often the batcher looks (it polls each open batch every Batcher.poll_s)
 
 
 class QueueError(ValueError):
@@ -127,6 +128,7 @@ class Scheduler:
         self.running = {}  # job id -> (row, lane) of every job running now
         self._epoch = 0  # moves whenever GPU work starts or ends, so a load can tell whether its measurement overlapped other work
         self._dirty = False  # something changed since the dispatcher last looked
+        self.batcher = batches.Batcher(self)  # jobs that asked for a vendor's batch API (batches.py): never in a lane
         self._snap = None  # (epoch, card state) read once per dispatch: nvidia-smi is slow, and nothing moved while the epoch stands
 
     # ---- requests (any thread) -------------------------------------------------------------------------------------------------------
@@ -349,6 +351,7 @@ class Scheduler:
             leases=leases,
             queued=q,
             events=list(self.events)[-30:],
+            batches=self.batcher.status(),
         )
 
     @staticmethod
@@ -752,7 +755,9 @@ class Scheduler:
             t = self._do_control()
             if t is not None:
                 return t
-        queued = [q for q in self.store.queued() if not self._waiting_on_step(q)]  # a job waits for its upsampling step
+        queued = [
+            q for q in self.store.queued() if not self._waiting_on_step(q) and not self.batcher.takes(q)
+        ]  # a job waits for its upsampling step; a batch job is the batcher's
         gpu_q, cpu_q = [], []
         for q in queued:
             (gpu_q if self._lane(q) == "gpu" else cpu_q).append(q)
@@ -812,6 +817,7 @@ class Scheduler:
     def _run(self, j, model):
         params = dict(j["params"] or {})
         params.pop(OPTIONS, None)
+        params.pop(batches.BATCH, None)  # asked for a batch on a model without a batch API: it runs at once
         upsampled = self._from_step(params)
         load_s = 0.0
         try:
@@ -863,6 +869,7 @@ class Scheduler:
         n = self.store.recover()
         if n:
             self._event(f"{n} job(s) were running when the service stopped; marked failed")
+        self.batcher.resume()
 
         def loop():
             while not stop.is_set():
@@ -881,5 +888,13 @@ class Scheduler:
                         if not self._dirty:
                             self.cv.wait(1.0)
 
+        def batch_loop():
+            while not stop.wait(BATCH_TICK_S):
+                try:
+                    self.batcher.step()
+                except Exception as e:
+                    self._event(f"batcher error: {type(e).__name__}: {e}")
+
         threading.Thread(target=loop, name="gpu-dispatcher", daemon=True).start()
+        threading.Thread(target=batch_loop, name="batcher", daemon=True).start()
         return stop

@@ -721,3 +721,14 @@ def test_cached_failed_says_which_outputs_are_there_and_which_failed_without_loa
     C.save(engine, [mk("ok", None), mk("bad", "boom")])
     assert C.cached_failed(engine, ["ok", "bad", "missing"]) == {"ok": False, "bad": True}
     assert C.cached_failed(engine, []) == {}
+
+
+def test_sending_a_candidate_as_a_batch_keeps_its_result_keys(setup):
+    import copy
+
+    s = C.load_spec("fake-asr")
+    c = s.candidate("base")
+    it = C.load_dataset("speech").items[0]
+    batched = copy.copy(c)
+    batched.params = {**(c.params or {}), "batch": True}
+    assert C.result_key(s, batched, it) == C.result_key(s, c, it)

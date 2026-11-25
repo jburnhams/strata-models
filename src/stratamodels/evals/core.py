@@ -646,10 +646,11 @@ def job_params(spec, cand, item, inp=None):
 
 def result_key(spec, cand, item):
     """Everything that decides the output: role, model, load options, the job's params, the item (reference and tags left out: changing a label
-    re-scores, it does not re-run), and a pipeline's stages (their config: what they answer follows from it)."""
-    d = dict(
-        role=spec.role, model=cand.model, options=cand.options, params=job_params(spec, cand, item), item=item["id"]
-    )
+    re-scores, it does not re-run; `batch`, how it is sent, left out too), and a pipeline's stages (their config: what they answer follows from it)."""
+    params = {
+        k: v for k, v in job_params(spec, cand, item).items() if k != "batch"
+    }  # sent as a batch or at once: the same output
+    d = dict(role=spec.role, model=cand.model, options=cand.options, params=params, item=item["id"])
     if cand.stages:
         d["stages"] = cand.stages
         if (

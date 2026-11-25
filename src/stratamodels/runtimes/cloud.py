@@ -112,8 +112,9 @@ def portable(schema):
     return out
 
 
-def parse(params):
-    """{text, system, images: [(path, mime, base64)], schema, max_tokens, effort} from a job's params."""
+def parse(params, encode_images=True):
+    """{text, system, images: [(path, mime, base64)], schema, max_tokens, effort} from a job's params. The pictures are read and encoded, or left
+    unread ((path, None, None)) with `encode_images=False`: what reading a batch's answers needs, the pictures having been sent hours before."""
     from stratamodels.runtimes import llama
 
     unknown = set(params) - PARAMS
@@ -140,6 +141,9 @@ def parse(params):
         raise RunError("images is a list of paths")
     images = []
     for p in imgs:
+        if not encode_images:
+            images.append((str(p), None, None))
+            continue
         if not isinstance(p, str) or not os.path.isfile(p):
             raise RunError(f"no such image: {p!r}")
         images.append((p, *encode(p)))

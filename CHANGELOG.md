@@ -4,6 +4,16 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**Claude Message Batches API for bulk jobs: `batch = true`, half price (branch `claude/project-thread-ul9xch`)**
+For bulk work that can wait (an archive of photos to caption, an eval's cloud candidates), the same Claude call costs half through the Batches API and comes back within 24 hours (most within one). An app opts in per job; nothing else changes for it: it submits and waits as before, and gets the same result plus `batch` (the vendor's id). What to batch and what to do with an entry that failed stays with the app.
+- `src/stratamodels/batches.py`: **new**. The batcher takes queued jobs with `batch` in their params on a model whose runtime has a batch API out of the CPU lane, sends them as one batch once the oldest has waited `wait_s` (60 s) or `max_jobs` (10 000) are queued, under `max_bytes` (200 MB; the API takes 256), polls each open batch every `poll_s` (60 s) and finishes every job from its outcome. Jobs are `running` while in a batch, their `note` naming it; `/api/status` lists the open batches. On a model without a batch API the flag is dropped and the job runs at once.
+- `runtimes/claude.py`: `batch_request`, `batch_submit`, `batch_poll`, `batch_results`, `batch_answer`; `run` split into `_request` and `_finish`, which the batch path shares. The worst case of an entry is bounded without `count_tokens` (that would upload every picture twice): a token per byte of text, 10 000 per picture, 2 000 of framing.
+- `spend.py`: `cost`/`worst(batch=True)` at the batch discount (`BATCH` = 0.5, or the price table's `batch`); `reserve_many` checks a whole batch's worst cases against the budget once (jobs past what fits fail with OverBudget, the rest go); `hold` takes a hold back after a restart without a check. Every entry is still its own `api_calls` row, at the price it was billed, its request naming the batch.
+- `db/models.py`, `migrations/20261125_3531dcac671a_…`: table `api_batches` (provider, model, jobs and their held worst cases, the vendor's id, status and counts). Applied when the live service next restarts.
+- `store.py`: batch rows; `recover` leaves the jobs of an open batch running, and the batcher picks them up again at start (a batch written but never confirmed sent fails its jobs).
+- `scheduler.py`: the batcher, stepped on its own thread every 5 s; `_run` drops the flag.
+- `tests/unit/test_batches.py`: **new**, the vendor faked (`cloudfakes.FakeBatches`).
+
 **Eval `shots-vhs`: the rival shot detectors as candidates (branch `claude/project-thread-avddmb`)**
 #123 (rival detectors) and #124 (the real tape's eval) are both merged; this puts the one into the other, so the eval runner can score them on the tape as it did by hand.
 - `evals/summaries.py`: the summaries' log goes to stderr, not stdout. CI on this branch failed `test_smear_kernel` because a server test's background warm-up printed "eval summary fake-pipe: 3.8 s" into the TOML that test captured from stdout; the line came from another test, so it fails at random on a slow runner.
