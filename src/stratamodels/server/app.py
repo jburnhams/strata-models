@@ -48,7 +48,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from strata_python import web
 
-from stratamodels import __version__, gpu, keys, runtimes, settings, spend
+from stratamodels import __version__, gpu, keys, memory, runtimes, settings, spend
 from stratamodels.registry import Registry, RegistryError
 from stratamodels.scheduler import QueueError, Scheduler
 
@@ -122,6 +122,7 @@ class SettingsIn(BaseModel):
     gpu_jobs: int | None = None
     cpu_jobs: int | None = None
     whole_card_gb: float | None = None
+    idle_unload_min: float | None = None
     claude_budget_usd: float | None = None
     claude_rollover: str | None = None  # YYYY-MM-DD; "" clears it
     gemini_budget_usd: float | None = None
@@ -394,6 +395,11 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         except ValueError as e:
             raise HTTPException(404 if str(e).startswith("no role") else 400, str(e))
 
+    @app.get("/api/memory")
+    def get_memory():
+        """This process's memory (resident, swapped, and what the allocator holds free): what it would give back, what it really uses."""
+        return memory.snapshot()
+
     @app.get("/api/settings")
     def get_settings():
         return settings.all_settings()
@@ -412,6 +418,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             "gpu_jobs",
             "cpu_jobs",
             "whole_card_gb",
+            "idle_unload_min",
             "claude_budget_usd",
             "claude_rollover",
             "gemini_budget_usd",
@@ -427,6 +434,9 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             s.reserve_mb = settings.vram_reserve_gb() * 1024.0
         if "whole_card_gb" in changes:
             s.whole_card_mb = settings.whole_card_gb() * 1024.0
+            s._notify()
+        if "idle_unload_min" in changes:
+            s.idle_unload_s = settings.idle_unload_min() * 60.0
             s._notify()
         if "models_dir" in changes:
             s.models_dir = settings.models_dir()
@@ -503,13 +513,13 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     return app
 
 
-def build(memory=False, sample_every_s=5.0):
+def build(demo=False, sample_every_s=5.0):
     """The scheduler, sampler and app for this machine (the database, the registry, nvidia-smi), with the worker and sampler started."""
     from stratamodels import registry as reg
     from stratamodels.store import Store, memory_store
 
-    store = memory_store() if memory else Store.connect()
-    if not memory:
+    store = memory_store() if demo else Store.connect()
+    if not demo:
         settings.bind(store.engine)  # the settings live in the database (a demo keeps the file)
     try:
         reg.seed(store.engine, log=print)  # models.toml: new entries in, edited rows kept
@@ -526,11 +536,15 @@ def build(memory=False, sample_every_s=5.0):
         gpu_jobs=settings.jobs("gpu_jobs"),
         cpu_jobs=settings.jobs("cpu_jobs"),
         whole_card_gb=settings.whole_card_gb(),
+        idle_unload_min=settings.idle_unload_min(),
     )
     sch.start()
     history.start()
     app = create_app(sch, history)
-    if not memory:
+    if not demo:
+        from stratamodels.evals.process import Runner
+
+        app.state.eval_summaries.process = Runner()  # minutes of CPU each: not in the process that serves the API
         app.state.eval_summaries.warm()  # every experiment's analysis up to date in the background, before the page asks
     return app
 
@@ -545,6 +559,10 @@ def main(argv=None):
     a.add_argument("--port", type=int, default=8366)
     a.add_argument("--memory", action="store_true", help="keep jobs in memory (a demo without the database)")
     a = a.parse_args(argv)
-    app = build(memory=a.memory)
+    memory.tune()  # before the threads and the numerical libraries
+    app = build(demo=a.memory)
     print(f"models folder: {settings.models_dir()}\nhttp://{a.host}:{a.port}/")
-    uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+    try:
+        uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+    finally:
+        app.state.eval_summaries.stop()

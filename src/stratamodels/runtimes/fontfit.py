@@ -1006,3 +1006,7 @@ def unload(handle):
     if "proposer_unload" in handle:
         handle["proposer_unload"]()
     handle.clear()
+    _renders.clear()  # up to half a GB of drawn words, and the fonts they were drawn with
+    _render_bytes[0] = 0
+    _font.cache_clear()
+    x_ratio.cache_clear()

@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**Less held while idle: analyses in a process of their own, idle models unloaded, freed memory given back (branch `claude/idle-usage`)**
+On omarchy the service sat with 10 GB of VRAM held by models unused for hours, 10.5 GB of its own RAM and one core at work for up to an hour after a restart.
+- `evals/process.py`: **new**. A slow (or never run) analysis runs in a child process, nice 15, one numerical thread, no GPU: it does not hold the service's GIL and gives its memory back. Analyses under 1.5 s stay in the service. `Summaries.stop` ends it when the service stops.
+- `evals/codehash.py`: **new**. A kept analysis is redone when the code that decides it changes: the functions reachable from `core.analyse` and the experiment's own metrics, by syntax tree (no comments, docstrings or layout). Before, any byte of five whole files redid every experiment, and `ink.py` and `similarity.py` did not count. The first start redoes them all once more, as the hash itself is new.
+- Setting `idle_unload_min` (30; 0 = never; Settings page): a model no job has used for that long is unloaded, GPU and CPU models alike; one with a job queued stays.
+- `memory.py`: **new**. At start glibc keeps at most 4 arenas and maps allocations from 1 MB up on their own; at most once a minute, after jobs or unloads, freed pages go back (`malloc_trim`, about 0.1 s). Measured on six real font-match pages: 1,508 MB resident at the end, 965 MB with a trim, 945 MB with both, in the same time (352 to 354 s). `GET /api/memory` shows what the process holds.
+- `fontfit.unload` drops its caches of drawn words (up to 0.5 GB) and fonts: cleared and trimmed, the same process went to 62 MB.
+
 **llama-server keeps at most 1 GB of old prompts in RAM (branch `claude/llama-cache-ram`)**
 llama-server's prompt cache is 8 GB by default. On omarchy the Qwen3.5-9B server held 9 GB of RAM (6.6 GB resident, 2.7 GB swapped) after 100 jobs, and 8.5 GB 16 minutes after a restart, filled by 39 jobs whose photos rarely repeat.
 - `runtimes/llama.py`: `--cache-ram 1024` (`CACHE_RAM_MB`) before the model's own `args`, so a model can still set its own. The reuse of a prompt's shared beginning inside the running slot is separate and stays.
