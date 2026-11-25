@@ -1264,7 +1264,8 @@ class SchedulerExecutor:
         self.s, self.app = scheduler, app
 
     def submit(self, role, params, model, options):
-        return self.s.submit(role, explicit(params), self.app, "low", model, options or None)["id"]
+        # low priority work is queued in bulk; never batched: an eval waits on each chunk (and a judge on each verdict) before the next
+        return self.s.submit_many(role, [explicit(params)], self.app, "low", model, options or None, batch=False)[0]
 
     def wait(self, job_id):
         while True:
@@ -1280,7 +1281,7 @@ class ClientExecutor:
         self.sm, self.app = client, app
 
     def submit(self, role, params, model, options):
-        return self.sm.submit(role, explicit(params), self.app, "low", model, options or None)["id"]
+        return self.sm.submit_many(role, [explicit(params)], self.app, "low", model, options or None, batch=False)[0]
 
     def wait(self, job_id):
         return self.sm.wait_job(job_id)

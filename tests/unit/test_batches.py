@@ -49,19 +49,21 @@ def sch(clock, tmp_path, monkeypatch):
     settings.bind(None)
 
 
+def bulk(sch, role, items, app="app", batch=True, **kw):
+    """submit_many, returning the job rows."""
+    return [sch.store.get(i) for i in sch.submit_many(role, items, app, batch=batch, **kw)]
+
+
 def caption(sch, n, **params):
-    return [
-        sch.submit("caption", dict(prompt=f"describe {i}", max_tokens=100, batch=True, **params), "strata-stills")
-        for i in range(n)
-    ]
+    return bulk(
+        sch, "caption", [dict(prompt=f"describe {i}", max_tokens=100, **params) for i in range(n)], "strata-stills"
+    )
 
 
-def test_batch_jobs_wait_for_the_window_then_go_as_one_batch_holding_their_worst_case(sch, clock):
+def test_batch_jobs_go_as_one_batch_at_the_next_step_holding_their_worst_case(sch, clock):
     jobs = caption(sch, 3)
     assert sch.step() is None  # never in the CPU lane
-    assert sch.batcher.step() == []  # the oldest has not waited wait_s yet
-    clock.t += 60
-    (b,) = sch.batcher.step()
+    (b,) = sch.batcher.step()  # at once: nothing is held to see whether more come
     (sent,) = sch.client.messages.batches.created
     assert [r["custom_id"] for r in sent] == [f"job-{j['id']}" for j in jobs]
     assert sent[0]["params"] == dict(
@@ -199,7 +201,7 @@ def test_a_refused_batch_fails_its_jobs_and_frees_the_budget(sch, clock):
 
 
 def test_bad_params_fail_one_job_and_a_cancelled_job_is_not_sent(sch, clock):
-    (bad,) = [sch.submit("caption", dict(images=["/no/such.png"], prompt="x", batch=True), "app")]
+    (bad,) = bulk(sch, "caption", [dict(images=["/no/such.png"], prompt="x")])
     a, b = caption(sch, 2)
     sch.cancel(b["id"])
     clock.t += 60
@@ -210,7 +212,7 @@ def test_bad_params_fail_one_job_and_a_cancelled_job_is_not_sent(sch, clock):
 
 def test_a_batch_is_cut_at_max_jobs_and_max_bytes_and_the_rest_waits(sch, clock):
     sch.batcher.max_jobs, sch.batcher.poll_s = 2, 3600
-    caption(sch, 3)  # two are max_jobs: due at once
+    caption(sch, 3)
     (row,) = sch.batcher.step()
     assert len(row["jobs"]) == 2 and len(sch.store.queued()) == 1
     sch.batcher.max_jobs, sch.batcher.max_bytes = 10, 1
@@ -281,7 +283,7 @@ def test_a_batch_is_collected_with_the_price_and_prompt_it_was_sent_with(sch, cl
 
     (tmp_path / "p.md").write_text("old prompt")
     monkeypatch.setattr(llama, "preset", lambda name: ((tmp_path / f"{name}.md").read_text(), {"type": "object"}))
-    a = sch.submit("caption", dict(preset="p", max_tokens=100, batch=True), "app")
+    (a,) = bulk(sch, "caption", [dict(preset="p", max_tokens=100)])
     clock.t += 60
     sch.batcher.step()
     sch.registry.models["haiku"].options["price"] = dict(input=100.0, output=500.0)  # edited while the batch runs
@@ -306,7 +308,7 @@ def test_a_picture_that_cannot_be_read_fails_only_its_job(sch, clock, tmp_path, 
     bad = tmp_path / "bad.jpg"
     bad.write_bytes(b"x")
     monkeypatch.setattr(cloud, "encode", lambda p: (_ for _ in ()).throw(OSError("truncated")))
-    b = sch.submit("caption", dict(prompt="x", image=str(bad), batch=True), "app")
+    (b,) = bulk(sch, "caption", [dict(prompt="x", image=str(bad))])
     (a,) = caption(sch, 1)
     clock.t += 60
     (row,) = sch.batcher.step()
@@ -350,9 +352,9 @@ def test_the_batcher_loads_its_own_client_and_a_model_that_cannot_load_fails_its
 
 
 def test_a_model_without_a_batch_api_runs_the_job_at_once(sch):
-    j = sch.submit("echo", dict(x=1, batch=True), "app")
-    assert not sch.batcher.takes(j)
-    assert sch.step()["result"] == dict(model="small", echo=dict(x=1))  # the flag is not passed on
+    (j,) = bulk(sch, "echo", [dict(x=1)])
+    assert j["params"] == dict(x=1) and not sch.batcher.takes(j)  # not marked
+    assert sch.step()["result"] == dict(model="small", echo=dict(x=1))
 
 
 def test_batch_prices_and_reserving_many(ledger):  # noqa: F811
@@ -367,21 +369,32 @@ def test_batch_prices_and_reserving_many(ledger):  # noqa: F811
     assert spend.state("claude")["left"] == 0.0
 
 
-def test_a_bulk_submission_goes_as_one_batch_without_waiting_for_the_window(sch, clock):
-    ids = sch.submit_many(
-        "caption", [dict(prompt=f"describe {i}", max_tokens=100) for i in range(3)], "strata-stills", batch=True
-    )
-    assert [sch.store.get(i)["params"] for i in ids] == [
-        dict(prompt=f"describe {i}", max_tokens=100, batch=True) for i in range(3)
-    ]
-    (row,) = sch.batcher.step()  # at once: no gap
-    assert sorted(int(k) for k in row["jobs"]) == ids and sch.batcher.now == set()
-    later = sch.submit_many("caption", [dict(prompt="x")], "app", batch=False)  # never the batcher's
-    assert not sch.batcher.takes(sch.store.get(later[0])) and sch.batcher.now == set()
-    few = sch.submit_many(
-        "caption", [dict(prompt="y")], "app"
-    )  # automatic: decided at the next step, too few, so let go
-    assert sch.batcher.step() == [] and sch.batcher.released == set(few)
+def test_a_bulk_call_of_min_jobs_or_more_is_batched_and_fewer_run_at_once(sch, clock):
+    sch.batcher.min_jobs = 3
+    items = [
+        dict(prompt=f"describe {i}", max_tokens=100, batch=False) for i in range(3)
+    ]  # an item's own flag is not read
+    many = bulk(sch, "caption", items, batch=None)
+    assert [j["params"] for j in many] == [dict(prompt=f"describe {i}", max_tokens=100, batch=True) for i in range(3)]
+    (row,) = sch.batcher.step()
+    assert sorted(int(k) for k in row["jobs"]) == [j["id"] for j in many]
+    few = bulk(sch, "caption", [dict(prompt="a"), dict(prompt="b", batch=True)], batch=None)
+    never = bulk(sch, "caption", items, batch=False)
+    assert not any(sch.batcher.takes(j) or "batch" in j["params"] for j in few + never)
+    assert sch.batcher.step() == []
+    sch.client.messages.reply = claude_reply("now")
+    sch.client.messages.count = 50
+    r = sch.step()["result"]
+    assert r["text"] == "now" and "batch" not in r  # the CPU lane runs them as calls made at once
+    (one,) = bulk(sch, "caption", [dict(prompt="c")], batch=True)  # true: however few
+    assert sch.batcher.takes(one)
+
+
+def test_a_job_queued_on_its_own_is_never_batched(sch):
+    j = sch.submit("caption", dict(prompt="x", batch=True), "app", priority="high")
+    assert "batch" not in j["params"] and not sch.batcher.takes(j)
+    n = sch.submit("caption", dict(prompt="x", batch=True), "app")
+    assert not sch.batcher.takes(n)
 
 
 def test_a_bulk_submission_is_checked_before_anything_is_queued(sch):
@@ -395,52 +408,5 @@ def test_a_bulk_submission_is_checked_before_anything_is_queued(sch):
         sch.submit_many("caption", [{}], "app", priority="now")
     with pytest.raises(RegistryError):
         sch.submit_many("nope", [{}], "app")
-    assert sch.submit_many("caption", [], "app", batch=True) == [] and sch.batcher.now == set()
+    assert sch.submit_many("caption", [], "app", batch=True) == []
     assert sch.store.queued() == []
-
-
-def auto(sch, n, **kw):
-    return [
-        sch.submit("caption", dict(prompt=f"describe {i}", max_tokens=100), "strata-stills", **kw) for i in range(n)
-    ]
-
-
-def test_jobs_that_keep_arriving_are_held_and_go_as_a_batch_once_there_are_enough(sch, clock):
-    sch.batcher.min_jobs = 3
-    first = auto(sch, 2)
-    clock.t += 9
-    assert sch.step() is None and sch.batcher.step() == []  # held: the next came within the gap
-    more = auto(sch, 2)
-    clock.t += 9
-    assert sch.batcher.step() == []  # still arriving
-    clock.t += 1
-    (row,) = sch.batcher.step()  # 10 s with nothing new: four, enough for a batch
-    assert sorted(int(k) for k in row["jobs"]) == [j["id"] for j in first + more]
-
-
-def test_too_few_are_let_go_to_run_at_once_and_explicit_ones_still_batch(sch, clock, monkeypatch):
-    a, b = auto(sch, 2)
-    (c,) = caption(sch, 1)  # batch = true
-    clock.t += 10
-    (row,) = sch.batcher.step()
-    assert list(row["jobs"]) == [str(c["id"])] and sch.batcher.released == {a["id"], b["id"]}
-    sch.client.messages.reply = claude_reply("now")
-    sch.client.messages.count = 50
-    assert sch.step()["result"]["text"] == "now"  # the CPU lane runs them as calls made at once
-    assert "batch" not in sch.step()["result"]
-    sch.batcher.step()
-    assert sch.batcher.released == set()  # forgotten once they left the queue
-
-
-def test_a_high_priority_or_batch_false_job_is_never_held_and_a_trickle_still_goes(sch, clock):
-    (h,) = auto(sch, 1, priority="high")
-    n = sch.submit("caption", dict(prompt="x", batch=False), "app")
-    assert not sch.batcher.takes(h) and not sch.batcher.takes(n)
-    sch.store.update(h["id"], status="cancelled")
-    sch.store.update(n["id"], status="cancelled")
-    sch.batcher.min_jobs = 100
-    for _ in range(35):  # one every 9 s: never a gap, but after 34 the oldest has waited max_wait_s
-        auto(sch, 1)
-        clock.t += 9
-        assert sch.batcher.step() == []
-    assert len(sch.batcher.released) == 34 and len(sch.store.queued()) == 35

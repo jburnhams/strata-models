@@ -14,10 +14,11 @@ API (JSON), for apps (through the client in client/) and for the web app:
   PUT/DELETE /api/preferences/{app}/{role}   {model?, params?, note?} the model and default params an app's jobs for a role get
   GET  /api/files?path=|job=             which jobs read or wrote a file, or the files a job touched (paths only)
   POST /api/models/{key}/load|unload     ask the worker to load or free a model
-  POST /api/jobs                         {role, params, app, priority?, model?} queue a model job
-  POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?, batch?} queue many jobs in one call: {ids}
-                                         (batch: through the model's batch API, half price on Claude, answered within a day; batches.py)
-  POST /api/run/{role}                   {params, app, priority?, model?, timeout?} queue it and wait for the result (504 with the job if it takes longer)
+  POST /api/jobs                         {role, params, app, model?, options?} queue one high priority job (someone is waiting on it): never batched
+  POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?, batch?} queue normal or low work, one job per
+                                         item: {ids}. 20 or more on a Claude model go through its batch API (half price, answered within a day;
+                                         batch: true always, false never; batches.py)
+  POST /api/run/{role}                   {params, app, model?, timeout?} queue one high priority job and wait for the result (504 with the job if it takes longer)
   GET  /api/jobs?status=&role=&app=&kind=&before=&limit=   history, newest first, cursor `before` = the last id shown
   GET  /api/jobs/{id}?wait=              one job with its result; waits up to `wait` seconds for it to finish
   DELETE /api/jobs/{id}                  withdraw a queued job or give back a lease
@@ -61,7 +62,7 @@ class JobIn(BaseModel):
     role: str
     params: dict = Field(default_factory=dict)
     app: str = "unknown"
-    priority: str = "normal"
+    priority: str = "high"  # the only one: normal and low work goes through /api/jobs/bulk
     model: str | None = None
     options: dict | None = None
 
@@ -79,7 +80,7 @@ class BulkIn(BaseModel):
 class RunIn(BaseModel):
     params: dict = Field(default_factory=dict)
     app: str = "unknown"
-    priority: str = "high"
+    priority: str = "high"  # the only one, as for /api/jobs
     model: str | None = None
     timeout: float = 300.0
 
@@ -226,9 +227,17 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         s.request(action, key)
         return dict(ok=True)
 
+    def single(priority):
+        """A job queued on its own is high priority, someone waiting on it: the rest is queued in bulk (where it can be batched)."""
+        if s._priority(priority) != "high":
+            raise QueueError(
+                f"a single job is high priority, not {priority!r}: queue normal and low work with POST /api/jobs/bulk"
+            )
+        return "high"
+
     @app.post("/api/jobs", status_code=201)
     def post_job(b: JobIn):
-        return s.submit(b.role, b.params, b.app, b.priority, b.model, b.options)
+        return s.submit(b.role, b.params, b.app, single(b.priority), b.model, b.options)
 
     @app.post("/api/jobs/bulk", status_code=201)
     def post_jobs_bulk(b: BulkIn):
@@ -236,7 +245,7 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
 
     @app.post("/api/run/{role}")
     def post_run(role: str, b: RunIn):
-        j = s.submit(role, b.params, b.app, b.priority, b.model)
+        j = s.submit(role, b.params, b.app, single(b.priority), b.model)
         end = time.monotonic() + max(b.timeout, 0.0)
         while True:
             j = s.wait(j["id"], min(MAX_WAIT_S, max(end - time.monotonic(), 0.0)))

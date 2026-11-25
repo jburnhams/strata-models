@@ -19,6 +19,7 @@ def test_run_submit_wait_and_failures(service):
     assert sm.available()
     assert sm.run("echo", dict(a=1), app="it") == dict(model="echo-small", echo=dict(a=1))
     j = sm.submit("echo", dict(seconds=0.2), app="it")
+    assert j["priority"] == "normal"  # queued in bulk, as a call of one
     with pytest.raises(TimeoutError):
         sm.wait(j["id"], timeout=0.01)
     assert sm.wait(j["id"], timeout=10)["echo"] == dict(seconds=0.2)
@@ -37,6 +38,11 @@ def test_run_submit_wait_and_failures(service):
     hist = get(service, "/api/jobs?app=it")["items"]
     assert [x["status"] for x in hist[:2]] == ["failed", "done"]
     assert get(service, "/api/status")["resident"][0]["model"] == "echo-small"
+    assert sm.submit("echo", {}, app="it", priority="high")["priority"] == "high"  # the single job endpoint
+    out = sm.run_many("echo", [dict(b=1), dict(fail="not a real file")], app="it", timeout=20)
+    assert out[0] == dict(model="echo-small", echo=dict(b=1)) and isinstance(out[1], sm.JobFailed)
+    with pytest.raises(sm.JobFailed, match="jobs/bulk"):
+        sm._call("POST", "/api/jobs", dict(role="echo", app="it", priority="low"))
 
 
 def test_many_jobs_in_one_call(service):

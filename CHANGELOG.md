@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**Normal and low work is queued in bulk; a single job is high priority; nothing is held for a batch (branch `claude/project-thread-ul9xch`)**
+Six hours after the batch API went live nothing had been batched (434 Claude calls): every app sends a call and waits for it, so no burst ever formed, while each call sat 10 to 15 s in case more came (Opus calls waited 13.4 s on average, 1.7 s before).
+- `batches.py`: no hold, no gap. Only a bulk call is batched: 20 or more on a Claude model (`batch=None`), always (`True`) or never (`False`). `Scheduler.submit_many` marks the jobs it batches (`batch = true` in their params); the batcher sends them at its next step. An item's own `batch` key, a preference's and a single job's are dropped.
+- `POST /api/jobs` and `POST /api/run/{role}` are for one high priority job (someone waiting on it): any other priority is refused (400) with a pointer to `POST /api/jobs/bulk`, which takes normal and low work.
+- Clients: `strata_models_client.submit` and `run` send a `high` job to `/api/jobs` and anything else to the bulk endpoint as a call of one; `run_many` is new. Evals queue their jobs in bulk with `batch=False` (they wait on each chunk and each verdict).
+- Apps that queue many jobs should use `submit_many` and then wait on each id; they get the batch price only that way.
+
+
 **A page of display type is set in each line's own face; missing symbols take a fallback face; no word set as a dot (branch `line-faces`)**
 strata-scan's finished PDF kept 10 of the 1874 book's 25 set pages as scans. Eight are adverts, which hold five typefaces or more: one face for the page agrees with the scan's ink by 0.64 to 0.76.
 - `runtimes/fontfit.py`: a page whose lines are of very different sizes (`is_mixed`: 90th percentile of x-height over 1.8 times the 10th) has each line screened in every face of the catalogue and fitted in full in its best three (`line_faces`); a face of its own must gain 0.02. Param `mix = false` keeps one face. Words carry their `face`. On three adverts the fit's F1 rose from 0.714 to 0.760, 0.679 to 0.785 and 0.705 to 0.810, in 51 to 103 s instead of 14 to 23. The test picks exactly the adverts and title pages among 26 pages of the 1874 book and 12 of the 1828 book, and no page of body type.
