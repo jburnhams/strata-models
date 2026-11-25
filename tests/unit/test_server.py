@@ -56,6 +56,14 @@ def test_landing_page_and_built_static_index(scheduler, tmp_path, monkeypatch):
     assert c2.get("/api/nothing").status_code == 404
 
 
+def test_many_jobs_in_one_call(client, scheduler):
+    r = client.post("/api/jobs/bulk", json=dict(role="echo", items=[dict(x=1), dict(x=2)], app="bh", priority="low"))
+    assert r.status_code == 201 and r.json() == dict(ids=[1, 2])
+    assert [(j["params"], j["priority"]) for j in scheduler.store.queued()] == [(dict(x=1), "low"), (dict(x=2), "low")]
+    assert client.post("/api/jobs/bulk", json=dict(role="nope", items=[{}])).status_code in (400, 404, 422)
+    assert len(scheduler.store.queued()) == 2  # nothing queued for a refused call
+
+
 def test_submit_poll_and_list_jobs(client, scheduler):
     j = client.post("/api/jobs", json=dict(role="echo", params=dict(x=1), app="bh")).json()
     assert j["status"] == "queued" and client.get(f"/api/jobs/{j['id']}").json()["status"] == "queued"
@@ -307,6 +315,8 @@ def test_spend_budgets_series_and_request_log(client, scheduler, monkeypatch):
     assert [
         c["provider"] for c in client.get("/api/spend/calls", params=dict(app="evals", ok=True, days=1)).json()["calls"]
     ] == ["claude"]
+    assert client.get("/api/spend/calls", params=dict(batch=True)).json()["calls"] == []  # none went in a batch
+    assert len(client.get("/api/spend/calls", params=dict(batch=False)).json()["calls"]) == 2
     one = client.get(f"/api/spend/calls/{calls[1]['id']}").json()
     assert (one["request"], one["response"], one["job_id"]) == ({"prompt": "hi"}, "ok", 9)
     assert client.get("/api/spend/calls/999").status_code == 404

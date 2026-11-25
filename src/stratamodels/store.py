@@ -10,7 +10,7 @@ import time
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from stratamodels.db.models import ApiCall, Job, JobFile, JobResult
+from stratamodels.db.models import ApiBatch, ApiCall, Job, JobFile, JobResult
 
 FIELDS = [c.name for c in Job.__table__.columns]
 FINISHED = ("done", "failed", "cancelled", "expired")
@@ -24,6 +24,10 @@ def row(j, result=True, output=None):
     if d["started_at"] is not None:
         d["wait_s"] = round(d["started_at"] - d["submitted_at"], 3)
     return d
+
+
+def batch_row(b):
+    return {c.name: getattr(b, c.name) for c in ApiBatch.__table__.columns}
 
 
 def paths(x, key=None):
@@ -112,6 +116,19 @@ class Store:
             return row(j)
 
     @locked
+    def add_many(self, rows):
+        """Queue many jobs in one transaction (a bulk submission); returns their ids, in order."""
+        at = self.clock()
+        with Session(self.engine, expire_on_commit=False) as s:
+            jobs = [Job(**{"submitted_at": at, "status": "queued", **kw}) for kw in rows]
+            s.add_all(jobs)
+            s.flush()
+            for j in jobs:
+                _files(s, j.id, "input", j.params, at)
+            s.commit()
+            return [j.id for j in jobs]
+
+    @locked
     def update(self, job_id, **kw):
         """Change a job; `result=` stores its output (in results, with the paths it wrote in files)."""
         has, result = "result" in kw, kw.pop("result", None)
@@ -183,15 +200,47 @@ class Store:
 
     @locked
     def recover(self):
-        """At start: jobs a previous run left running cannot finish, so they fail (the apps that asked have long stopped waiting); returns how many."""
+        """At start: jobs a previous run left running cannot finish, so they fail (the apps that asked have long stopped waiting); returns how many.
+        A job in an open batch is the exception: the vendor is still answering it, and the batcher picks it up again."""
         with Session(self.engine) as s:
+            batched = [
+                int(k) for b in s.scalars(sa.select(ApiBatch).where(ApiBatch.status == "submitted")) for k in b.jobs
+            ]
+            q = sa.update(Job).where(Job.status == "running")
+            if batched:
+                q = q.where(Job.id.not_in(batched))
             n = s.execute(
-                sa.update(Job)
-                .where(Job.status == "running")
-                .values(status="failed", error="the service restarted while this ran", finished_at=self.clock())
+                q.values(status="failed", error="the service restarted while this ran", finished_at=self.clock())
             ).rowcount
             s.commit()
             return n
+
+    @locked
+    def add_batch(self, **kw):
+        with Session(self.engine, expire_on_commit=False) as s:
+            b = ApiBatch(**kw)
+            s.add(b)
+            s.commit()
+            return batch_row(b)
+
+    @locked
+    def update_batch(self, batch_id, **kw):
+        with Session(self.engine, expire_on_commit=False) as s:
+            b = s.get(ApiBatch, batch_id)
+            if b is None:
+                return None
+            for k, v in kw.items():
+                setattr(b, k, v)
+            s.commit()
+            return batch_row(b)
+
+    @locked
+    def batches(self, status=None, limit=50):
+        """Newest first (status submitted: the open ones, every one of them)."""
+        q = sa.select(ApiBatch).order_by(ApiBatch.id.desc())
+        q = q.where(ApiBatch.status == status) if status else q.limit(max(1, min(int(limit), 500)))
+        with Session(self.engine) as s:
+            return [batch_row(b) for b in s.scalars(q)]
 
     @locked
     def usage(self, since):
@@ -226,18 +275,20 @@ class Store:
             return {c.name: getattr(r, c.name) for c in ApiCall.__table__.columns}
 
     @locked
-    def api_spent(self, provider, since):
-        """(USD, calls) a provider's key spent since `since`."""
+    def api_spent(self, provider, since, batch=None):
+        """(USD, calls) a provider's key spent since `since`; `batch` True: only the calls sent in a batch, False: only those made at once."""
         q = sa.select(sa.func.coalesce(sa.func.sum(ApiCall.cost_usd), 0.0), sa.func.count()).where(
             ApiCall.provider == provider, ApiCall.at >= since
         )
+        if batch is not None:
+            q = q.where(ApiCall.batch.is_not(None) if batch else ApiCall.batch.is_(None))
         with Session(self.engine) as s:
             usd, n = s.execute(q).one()
             return float(usd or 0.0), int(n)
 
     @locked
     def api_breakdown(self, since):
-        """Per provider, model and app since `since`: calls, failures, tokens and USD."""
+        """Per provider, model and app since `since`: calls, failures, tokens and USD, and how many of the calls and dollars went in batches."""
         q = (
             sa.select(
                 ApiCall.provider,
@@ -248,6 +299,8 @@ class Store:
                 sa.func.sum(ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write),
                 sa.func.sum(ApiCall.tokens_out),
                 sa.func.sum(ApiCall.cost_usd),
+                sa.func.sum(sa.case((ApiCall.batch.is_not(None), 1), else_=0)),
+                sa.func.sum(sa.case((ApiCall.batch.is_not(None), ApiCall.cost_usd), else_=0.0)),
             )
             .where(ApiCall.at >= since)
             .group_by(ApiCall.provider, ApiCall.model, ApiCall.app)
@@ -264,12 +317,14 @@ class Store:
                     tokens_in=int(ti or 0),
                     tokens_out=int(to or 0),
                     cost_usd=float(c or 0.0),
+                    batch_calls=int(bn or 0),
+                    batch_cost_usd=float(bc or 0.0),
                 )
-                for p, m, a, n, f, ti, to, c in s.execute(q)
+                for p, m, a, n, f, ti, to, c, bn, bc in s.execute(q)
             ]
 
     @locked
-    def api_log(self, provider=None, model=None, app=None, ok=None, since=None, before=None, limit=50):
+    def api_log(self, provider=None, model=None, app=None, ok=None, since=None, before=None, limit=50, batch=None):
         """Ledger rows newest first, filtered, without the request and response bodies (`api_call` has them); cursor `before` = the last id."""
         q = sa.select(*[c for c in ApiCall.__table__.columns if c.name not in ("request", "response")]).order_by(
             ApiCall.id.desc()
@@ -281,6 +336,8 @@ class Store:
             q = q.where(ApiCall.at >= since)
         if before is not None:
             q = q.where(ApiCall.id < before)
+        if batch is not None:  # True: only calls sent in a batch; False: only those made at once
+            q = q.where(ApiCall.batch.is_not(None) if batch else ApiCall.batch.is_(None))
         with Session(self.engine) as s:
             return [dict(r._mapping) for r in s.execute(q.limit(max(1, min(int(limit), 500))))]
 
@@ -334,7 +391,7 @@ class Store:
 
     @locked
     def api_points(self, since):
-        """(at, provider, model, app, cost_usd, tokens, ok) of every call since `since`, oldest first: what the charts bucket."""
+        """(at, provider, model, app, cost_usd, tokens, ok, batch) of every call since `since`, oldest first: what the charts bucket."""
         q = (
             sa.select(
                 ApiCall.at,
@@ -344,6 +401,7 @@ class Store:
                 ApiCall.cost_usd,
                 ApiCall.tokens_in + ApiCall.cache_read + ApiCall.cache_write + ApiCall.tokens_out,
                 ApiCall.ok,
+                ApiCall.batch.is_not(None),
             )
             .where(ApiCall.at >= since)
             .order_by(ApiCall.at)

@@ -39,6 +39,13 @@ def test_run_submit_wait_and_failures(service):
     assert get(service, "/api/status")["resident"][0]["model"] == "echo-small"
 
 
+def test_many_jobs_in_one_call(service):
+    ids = sm.submit_many("echo", [dict(a=1), dict(a=2)], app="it")
+    assert [sm.wait(i, timeout=10)["echo"] for i in ids] == [dict(a=1), dict(a=2)]
+    with pytest.raises(sm.JobFailed):
+        sm.submit_many("no-such-role", [dict(a=1)], app="it")
+
+
 def test_a_sized_lease_lets_jobs_run_beside_it(service):
     with sm.gpu_lease("it-stills", vram_gb=1, ttl_s=30, note="shared") as lease:
         assert lease.job["status"] == "running" and sm.run("echo", dict(z=1), app="it", timeout=20) == dict(

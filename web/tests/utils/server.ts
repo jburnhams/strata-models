@@ -27,8 +27,8 @@ export const fixtures = {
   jobs: (): Job[] => [job({ id: 3, status: 'failed', error: 'no such image: /p/x.jpg', run_s: null }), job({ id: 2, kind: 'lease', app: 'strata-stills', note: 'arena build', role: null, model: null, status: 'running', finished_at: null }), job({ id: 1 })],
   usage: (): Usage => ({ hours: 24, rows: [{ app: 'bright-horizons', kind: 'run', role: 'faces', jobs: 300, failed: 1, gpu_s: 15 }, { app: 'strata-stills', kind: 'lease', role: null, jobs: 2, failed: 0, gpu_s: 600 }] }),
 }
-const provider = (o: Partial<ProviderState>): ProviderState => ({ provider: 'claude', label: 'Claude API', budgeted: true, unit: 'usd', budget: 100, rollover: '2027-01-08', period_start: NOW - 86400 * 6, next_rollover: NOW + 86400 * 25, spent: 62.5, calls: 1200, reserved: 0, left: 37.5, used_share: 0.625, warn: 0.5, ...o })
-const call = (o: Partial<ApiCall>): ApiCall => ({ id: 1, at: NOW - 120, provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', job_id: 7, tokens_in: 900, tokens_out: 40, cache_read: 100, cache_write: 0, cost_usd: 0.00012, ok: true, error: null, seconds: 0.8, model_key: 'claude-haiku-5-5-api', finish: 'end_turn', ...o })
+const provider = (o: Partial<ProviderState>): ProviderState => ({ provider: 'claude', label: 'Claude API', budgeted: true, unit: 'usd', budget: 100, rollover: '2027-01-08', period_start: NOW - 86400 * 6, next_rollover: NOW + 86400 * 25, spent: 62.5, calls: 1200, reserved: 0, left: 37.5, used_share: 0.625, warn: 0.5, batch_spent: 0, batch_calls: 0, batch_saved: 0, ...o })
+const call = (o: Partial<ApiCall>): ApiCall => ({ id: 1, at: NOW - 120, provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', job_id: 7, tokens_in: 900, tokens_out: 40, cache_read: 100, cache_write: 0, cost_usd: 0.00012, ok: true, error: null, seconds: 0.8, model_key: 'claude-haiku-5-5-api', finish: 'end_turn', batch: null, ...o })
 export const spendFixtures = {
   spend: (): Spend => ({
     providers: [
@@ -43,9 +43,9 @@ export const spendFixtures = {
   series: (days = 30): SpendSeries => {
     const bucket = days <= 2 ? 3600 : 86400
     const since = Math.floor((Date.now() / 1000 - days * 86400) / bucket) * bucket
-    return { since, bucket_s: bucket, points: [{ t: since + bucket, provider: 'claude', cost_usd: 1.5, calls: 10, failed: 1, tokens: 5000 }, { t: since + bucket, provider: 'nim', cost_usd: 0, calls: 4, failed: 0, tokens: 900 }], breakdown: [{ provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', calls: 10, failed: 1, tokens_in: 4000, tokens_out: 1000, cost_usd: 1.5 }, { provider: 'nim', model: 'nvidia/nemotron', app: null, calls: 4, failed: 0, tokens_in: 800, tokens_out: 100, cost_usd: 0 }], options: { models: ['claude-haiku-5-5', 'nvidia/nemotron'], apps: ['evals'] } }
+    return { since, bucket_s: bucket, points: [{ t: since + bucket, provider: 'claude', cost_usd: 1.5, calls: 10, failed: 1, tokens: 5000, batch_cost_usd: 0.5, batch_calls: 6 }, { t: since + bucket, provider: 'nim', cost_usd: 0, calls: 4, failed: 0, tokens: 900, batch_cost_usd: 0, batch_calls: 0 }], breakdown: [{ provider: 'claude', model: 'claude-haiku-5-5', app: 'evals', calls: 10, failed: 1, tokens_in: 4000, tokens_out: 1000, cost_usd: 1.5, batch_calls: 6, batch_cost_usd: 0.5 }, { provider: 'nim', model: 'nvidia/nemotron', app: null, calls: 4, failed: 0, tokens_in: 800, tokens_out: 100, cost_usd: 0, batch_calls: 0, batch_cost_usd: 0 }], options: { models: ['claude-haiku-5-5', 'nvidia/nemotron'], apps: ['evals'] } }
   },
-  calls: (): ApiCall[] => [call({ id: 3 }), call({ id: 2, provider: 'nim', model: 'nvidia/nemotron', app: null, job_id: null, ok: false, error: 'HTTP 429: slow down', cost_usd: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, seconds: null, finish: null, model_key: null })],
+  calls: (): ApiCall[] => [call({ id: 3, batch: 'msgbatch_1', cost_usd: 0.00006 }), call({ id: 2, provider: 'nim', model: 'nvidia/nemotron', app: null, job_id: null, ok: false, error: 'HTTP 429: slow down', cost_usd: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, seconds: null, finish: null, model_key: null })],
   call: (id: number): ApiCall => ({ ...spendFixtures.calls().find(c => c.id === id)!, request: id === 3 ? { system: 'Be brief.', prompt: 'Describe the photo.', images: ['/p/a.jpg'], schema: { type: 'object' }, max_tokens: 512, effort: 'low' } : { prompt: 'hi' }, response: id === 3 ? '{"scene": "a beach"}' : null }),
 }
 const iv = (value: number, d = 0.01) => ({ value, low: value - d, high: value + d, n: 200 })
@@ -126,7 +126,7 @@ export const handlers = [
   http.get('/api/spend/calls', ({ request }) => {
     const q = new URL(request.url).searchParams
     if (q.get('before')) return HttpResponse.json({ calls: [{ ...spendFixtures.calls()[0], id: 1, model: 'claude-sonnet-5-5' }], next: null })
-    const calls = spendFixtures.calls().filter(c => (!q.get('provider') || c.provider === q.get('provider')) && (!q.get('ok') || String(c.ok) === q.get('ok')))
+    const calls = spendFixtures.calls().filter(c => (!q.get('provider') || c.provider === q.get('provider')) && (!q.get('ok') || String(c.ok) === q.get('ok')) && (!q.get('batch') || String(c.batch !== null) === q.get('batch')))
     return HttpResponse.json({ calls, next: mock.callPages > 1 && calls.length ? 2 : null })
   }),
   http.get('/api/spend/calls/:id', ({ params }) => HttpResponse.json(spendFixtures.call(Number(params.id)))),

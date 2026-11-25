@@ -799,3 +799,18 @@ def test_a_job_records_the_settings_it_ran_with_and_they_change_with_the_options
     )
     lease = scheduler.lease("x", vram_gb=1)
     assert scheduler.step()["id"] == lease["id"] and scheduler.store.get(lease["id"])["settings_hash"] is None
+
+
+def test_many_jobs_in_one_call_take_the_variant_and_the_limit(scheduler, monkeypatch):
+    from stratamodels import scheduler as S
+
+    ids = scheduler.submit_many("echo", [dict(x=1), dict(x=2)], "evals", model="small", options=dict(tweak=2))
+    rows = [scheduler.store.get(i) for i in ids]
+    assert {r["model"] for r in rows} == {
+        scheduler.submit("echo", {}, "evals", model="small", options=dict(tweak=2))["model"]
+    }
+    assert [r["params"] for r in rows] == [dict(x=1, __options__=dict(tweak=2)), dict(x=2, __options__=dict(tweak=2))]
+    assert scheduler.store.files(job_id=ids[0]) == []
+    monkeypatch.setattr(S, "MAX_BULK", 1)
+    with pytest.raises(QueueError, match="at most 1 jobs"):
+        scheduler.submit_many("echo", [{}, {}], "app")

@@ -15,6 +15,8 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/files?path=|job=             which jobs read or wrote a file, or the files a job touched (paths only)
   POST /api/models/{key}/load|unload     ask the worker to load or free a model
   POST /api/jobs                         {role, params, app, priority?, model?} queue a model job
+  POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?, batch?} queue many jobs in one call: {ids}
+                                         (batch: through the model's batch API, half price on Claude, answered within a day; batches.py)
   POST /api/run/{role}                   {params, app, priority?, model?, timeout?} queue it and wait for the result (504 with the job if it takes longer)
   GET  /api/jobs?status=&role=&app=&kind=&before=&limit=   history, newest first, cursor `before` = the last id shown
   GET  /api/jobs/{id}?wait=              one job with its result; waits up to `wait` seconds for it to finish
@@ -26,7 +28,7 @@ API (JSON), for apps (through the client in client/) and for the web app:
   GET  /api/usage?hours=24               jobs and GPU seconds per app and role
   GET  /api/spend                        each cloud API key's budget, spent, left, period and warning level (spend.summary)
   GET  /api/spend/series?days=30&bucket=day   cost, calls and tokens per bucket and provider, the breakdown by provider, model and app (filtered), and the filter options
-  GET  /api/spend/calls?provider=&model=&app=&ok=&days=&before=&limit=   the ledger, newest first (without bodies)
+  GET  /api/spend/calls?provider=&model=&app=&ok=&batch=&days=&before=&limit=   the ledger, newest first (without bodies; batch: the vendor's batch id, or null)
   GET  /api/spend/calls/{id}             one call with what was sent and what came back
   GET  /api/catalogue                    every backend (local lanes, subscriptions, API keys) and cloud model, with roles, tier and cost (routing.py)
   GET  /api/route/{role}?goal=cheapest|best&private=&min_tier=&allowance=true   every way to serve the role, ranked, and the pick
@@ -62,6 +64,16 @@ class JobIn(BaseModel):
     priority: str = "normal"
     model: str | None = None
     options: dict | None = None
+
+
+class BulkIn(BaseModel):
+    role: str
+    items: list[dict] = Field(default_factory=list)
+    app: str = "unknown"
+    priority: str = "normal"
+    model: str | None = None
+    options: dict | None = None
+    batch: bool | None = None
 
 
 class RunIn(BaseModel):
@@ -217,6 +229,10 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
     def post_job(b: JobIn):
         return s.submit(b.role, b.params, b.app, b.priority, b.model, b.options)
 
+    @app.post("/api/jobs/bulk", status_code=201)
+    def post_jobs_bulk(b: BulkIn):
+        return dict(ids=s.submit_many(b.role, b.items, b.app, b.priority, b.model, b.options, b.batch))
+
     @app.post("/api/run/{role}")
     def post_run(role: str, b: RunIn):
         j = s.submit(role, b.params, b.app, b.priority, b.model)
@@ -316,9 +332,10 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
         days: float | None = None,
         before: int | None = None,
         limit: int = 50,
+        batch: bool | None = None,
     ):
         since = None if days is None else s.clock() - days * 86400.0
-        calls = s.store.api_log(provider, model, app_name, ok, since, before, limit)
+        calls = s.store.api_log(provider, model, app_name, ok, since, before, limit, batch)
         return dict(calls=calls, next=calls[-1]["id"] if calls and len(calls) >= limit else None)
 
     @app.get("/api/spend/calls/{call_id}")

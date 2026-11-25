@@ -4,7 +4,7 @@ what the web app formats anyway.
   registry      models, roles, model_roles (which roles a model may serve; a role's `model` is the one chosen for it)
   config        settings (the service's own: folders, VRAM reserve), preferences (an app's own choice of model or default params for a role)
   requests      jobs (every run and lease), results (a run's output, dropped after a week), files (paths a job read or wrote: never the bytes)
-  spend         api_calls (every call to a cloud API, with its tokens and cost: what the budgets count)
+  spend         api_calls (every call to a cloud API, with its tokens and cost: what the budgets count), api_batches (calls sent as one batch)
   evals         eval_datasets + eval_items, eval_experiments + eval_candidates, eval_results (cached outputs), eval_judgments (blind A/B choices, people's and model judges')
 
 Files in the repository (models.toml, evals/specs/*.toml, dataset .jsonl files) are SEEDS: imported at start, and followed while the row has not
@@ -174,6 +174,32 @@ class ApiCall(Base):
         sa.JSON, default=None
     )  # what was sent: text in full, pictures as their paths, settings
     response: Mapped[str | None] = mapped_column(sa.Text, default=None)  # the answer's text (up to 100 000 characters)
+    batch: Mapped[str | None] = mapped_column(
+        sa.String(128), default=None, index=True
+    )  # the vendor's batch id when it went through a batch API (at its discount); None: a call made at once
+
+
+class ApiBatch(Base):
+    """One batch of calls sent through a vendor's batch API (the Claude Message Batches API: half price, answered within a day), made from
+    queued jobs that asked for it (`batch` in their params; batches.py). Open while `status` is submitted: the service polls it, and after a
+    restart picks it up again instead of failing its jobs. Each job's call is still its own row of api_calls once the results are in."""
+
+    __tablename__ = "api_batches"
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    provider: Mapped[str] = mapped_column(sa.String(16))  # the key it spends (claude)
+    model_key: Mapped[str] = mapped_column(sa.String(128))  # the registry's model the jobs ran on
+    submitted_at: Mapped[float]
+    status: Mapped[str] = mapped_column(sa.String(16), index=True)  # submitted | ended | failed
+    jobs: Mapped[dict] = mapped_column(sa.JSON)  # job id (as text) -> the worst case its call holds of the budget, USD
+    vendor_id: Mapped[str | None] = mapped_column(sa.String(128), default=None)  # the vendor's batch id (msgbatch_...)
+    vendor_status: Mapped[str | None] = mapped_column(sa.String(32), default=None)  # in_progress | canceling | ended
+    counts: Mapped[dict | None] = mapped_column(sa.JSON, default=None)  # the vendor's request counts at the last poll
+    polled_at: Mapped[float | None] = mapped_column(default=None)
+    ended_at: Mapped[float | None] = mapped_column(default=None)
+    error: Mapped[str | None] = mapped_column(sa.Text, default=None)
+    snapshot: Mapped[dict | None] = mapped_column(
+        sa.JSON, default=None
+    )  # what collecting it needs, as it was sent: the model's runtime and options, each job's request (batches.snapshot)
 
 
 # ---- registry and config -----------------------------------------------------------------------------------------------------------------

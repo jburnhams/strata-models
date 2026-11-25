@@ -88,7 +88,7 @@ export function spendFinding(ps: ProviderState[]): string {
 }
 
 /** One reading per bucket from `since` to `now`, zero where nothing was called, of one field summed over the providers shown. */
-export function bucketSeries(points: SpendPoint[], since: number, bucket: number, now: number, field: 'cost_usd' | 'calls' | 'tokens'): Point[] {
+export function bucketSeries(points: SpendPoint[], since: number, bucket: number, now: number, field: 'cost_usd' | 'calls' | 'tokens' | 'batch_cost_usd'): Point[] {
   const sums = new Map<number, number>()
   for (const p of points) sums.set(p.t, (sums.get(p.t) ?? 0) + p[field])
   const out: Point[] = []
