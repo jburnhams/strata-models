@@ -72,6 +72,8 @@ def test_load_starts_the_server_with_its_files_and_libraries(setup):
         and "--mmproj" in cmd
         and cmd[-2:] == ["--fit", "on"]
         and cmd[cmd.index("-c") + 1] == "8192"
+        and cmd.index("--cache-ram") < cmd.index("--fit")  # before the model's own args, which win
+        and cmd[cmd.index("--cache-ram") + 1] == str(llama.CACHE_RAM_MB)
     )
     assert "cudart-x" in procs[0].env["LD_LIBRARY_PATH"] and h["vision"] and h["url"].startswith("http://127.0.0.1:")
     llama.unload(h)
