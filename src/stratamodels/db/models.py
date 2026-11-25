@@ -5,6 +5,8 @@ what the web app formats anyway.
   config        settings (the service's own: folders, VRAM reserve), preferences (an app's own choice of model or default params for a role)
   requests      jobs (every run and lease), results (a run's output, dropped after a week), files (paths a job read or wrote: never the bytes)
   spend         api_calls (every call to a cloud API, with its tokens and cost: what the budgets count), api_batches (calls sent as one batch)
+  faces         face_images (+ face_image_tags, face_tags), faces, face_embeddings, identities (+ identity_app_metadata, identity_not_same),
+                face_assignments, face_batches: one face store for every app (stratamodels.faces)
   evals         eval_datasets + eval_items, eval_experiments + eval_candidates, eval_results (cached outputs), eval_judgments (blind A/B choices, people's and model judges')
 
 Files in the repository (models.toml, evals/specs/*.toml, dataset .jsonl files) are SEEDS: imported at start, and followed while the row has not
@@ -15,6 +17,7 @@ from typing import TYPE_CHECKING
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 from strata_python.db import make_base
+from strata_python.db.vectors import Vector, hnsw_index
 
 if (
     TYPE_CHECKING
@@ -332,3 +335,151 @@ class EvalCandidate(Base):
     params: Mapped[dict] = mapped_column(sa.JSON, default_factory=dict)
     options: Mapped[dict] = mapped_column(sa.JSON, default_factory=dict)
     note: Mapped[str] = mapped_column(sa.String(500), default="")
+
+
+# ---- faces: one store of faces, embeddings and people for every app (stratamodels.faces) -------------------------------------------------
+class FaceImage(Base):
+    """A picture (or video frame) an app indexed. The original stays where the app keeps it (`path`, or `url`); `medium` is the copy kept here
+    (1600 px WebP) so a face can be shown in its picture when the original is a raw, a video frame or on a share that is offline. `ref` is
+    the app's own key for it (a sha256, a photo id, `clip:frame`)."""
+
+    __tablename__ = "face_images"
+    __table_args__ = (sa.UniqueConstraint("app", "ref"),)
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    app: Mapped[str] = mapped_column(sa.String(64), index=True)
+    ref: Mapped[str] = mapped_column(sa.String(512))
+    created_at: Mapped[float]
+    path: Mapped[str | None] = mapped_column(sa.String(1024), default=None)
+    url: Mapped[str | None] = mapped_column(sa.String(1024), default=None)
+    width: Mapped[int] = mapped_column(default=0)
+    height: Mapped[int] = mapped_column(default=0)
+    taken_at: Mapped[float | None] = mapped_column(
+        default=None
+    )  # when the picture was taken, so a child's faces near the same date count most
+    medium: Mapped[str | None] = mapped_column(
+        sa.String(1024), default=None
+    )  # the kept copy, relative to the data folder
+    model: Mapped[str | None] = mapped_column(
+        sa.String(128), default=None
+    )  # the model and settings it was last indexed with
+    settings_hash: Mapped[str | None] = mapped_column(sa.String(32), default=None)
+
+
+class FaceImageTag(Base):
+    """A picture's tags: its app's name, and any the app adds (a project, a race, `nursery`). Searches filter on these."""
+
+    __tablename__ = "face_image_tags"
+    image_id: Mapped[int] = mapped_column(sa.ForeignKey("face_images.id", ondelete="CASCADE"), primary_key=True)
+    tag: Mapped[str] = mapped_column(sa.String(128), primary_key=True, index=True)
+
+
+class FaceTag(Base):
+    """A tag's own settings: `opt_in` leaves its pictures out of every search and clustering that does not name it (other people's
+    children)."""
+
+    __tablename__ = "face_tags"
+    tag: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    updated_at: Mapped[float]
+    opt_in: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    note: Mapped[str] = mapped_column(sa.String(500), default="")
+
+
+class Face(Base):
+    """A face found in a picture: its box (x0, y0, x1, y1) in the original's upright pixels, kept once whatever embedding model comes later."""
+
+    __tablename__ = "faces"
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    image_id: Mapped[int] = mapped_column(sa.ForeignKey("face_images.id", ondelete="CASCADE"), index=True)
+    x0: Mapped[float]
+    y0: Mapped[float]
+    x1: Mapped[float]
+    y1: Mapped[float]
+    det_score: Mapped[float]
+    created_at: Mapped[float]
+    kps: Mapped[list | None] = mapped_column(sa.JSON, default=None)
+    pose: Mapped[list | None] = mapped_column(sa.JSON, default=None)
+    found_by: Mapped[str] = mapped_column(sa.String(32), default="scan")  # scan | view | import
+
+
+class FaceEmbedding(Base):
+    """A face's embedding from one model (and settings): a better model is a backfill beside the old one, never a migration. 512 numbers
+    (ArcFace and its kin); a model of another size would get its own column, since an HNSW index needs one size."""
+
+    __tablename__ = "face_embeddings"
+    __table_args__ = (sa.UniqueConstraint("face_id", "model"), hnsw_index("face_embeddings_vector_hnsw", "vector"))
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    face_id: Mapped[int] = mapped_column(sa.ForeignKey("faces.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(sa.String(128), index=True)
+    vector: Mapped[list[float]] = mapped_column(Vector(512))
+    created_at: Mapped[float]
+    settings_hash: Mapped[str | None] = mapped_column(sa.String(32), default=None)
+
+
+class Identity(Base):
+    """One person, across every app. `fields` are the global ones (name aside); each app's own are in identity_app_metadata and win when that
+    app reads. A merged person points at the one it was merged into: nothing else is rewritten, so unmerging clears one column."""
+
+    __tablename__ = "identities"
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    created_at: Mapped[float]
+    updated_at: Mapped[float]
+    name: Mapped[str | None] = mapped_column(sa.String(300), default=None)
+    fields: Mapped[dict] = mapped_column(sa.JSON, default_factory=dict)
+    merged_into: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("identities.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+
+class IdentityAppMetadata(Base):
+    """An app's own view of a person: its key for them (`app_ref`: a bright-horizons child, strata-360's `me`) and fields that override the
+    global ones when that app reads the person (a name, a kind)."""
+
+    __tablename__ = "identity_app_metadata"
+    __table_args__ = (sa.UniqueConstraint("app", "app_ref"),)
+    identity_id: Mapped[int] = mapped_column(sa.ForeignKey("identities.id", ondelete="CASCADE"), primary_key=True)
+    app: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    updated_at: Mapped[float]
+    app_ref: Mapped[str | None] = mapped_column(sa.String(256), default=None)
+    fields: Mapped[dict] = mapped_column(sa.JSON, default_factory=dict)
+
+
+class FaceBatch(Base):
+    """One click, import or automatic run that assigned faces: undoing it undoes all of its decisions."""
+
+    __tablename__ = "face_batches"
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    kind: Mapped[str] = mapped_column(sa.String(32))  # assign | merge | import
+    app: Mapped[str] = mapped_column(sa.String(64))
+    at: Mapped[float]
+    note: Mapped[str | None] = mapped_column(sa.String(500), default=None)
+    undone_at: Mapped[float | None] = mapped_column(default=None)
+
+
+class FaceAssignment(Base):
+    """A decision about a face, append-only: the newest one not undone is its state. `confirmed` (it is this person), `rejected` (it is not:
+    with no person, not a face at all) or `suggested` (an app's proposal waiting for a person)."""
+
+    __tablename__ = "face_assignments"
+    __table_args__ = (sa.CheckConstraint("status in ('confirmed','rejected','suggested')", name="status_valid"),)
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    face_id: Mapped[int] = mapped_column(sa.ForeignKey("faces.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(sa.String(16))
+    app: Mapped[str] = mapped_column(sa.String(64))
+    at: Mapped[float]
+    identity_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("identities.id", ondelete="CASCADE"), index=True, default=None
+    )
+    source: Mapped[str] = mapped_column(sa.String(16), default="human")  # human | auto | import
+    batch_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("face_batches.id", ondelete="SET NULL"), index=True, default=None
+    )
+    confidence: Mapped[float | None] = mapped_column(default=None)
+
+
+class IdentityNotSame(Base):
+    """Two people a person said are different: never suggested for a merge again."""
+
+    __tablename__ = "identity_not_same"
+    a: Mapped[int] = mapped_column(sa.ForeignKey("identities.id", ondelete="CASCADE"), primary_key=True)
+    b: Mapped[int] = mapped_column(sa.ForeignKey("identities.id", ondelete="CASCADE"), primary_key=True)
+    at: Mapped[float]

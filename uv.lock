@@ -3038,7 +3038,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "sqlalchemy", specifier = ">=2" },
-    { name = "strata-python", extras = ["db", "pdf"], specifier = ">=0.2.2,<0.3" },
+    { name = "strata-python", extras = ["db", "pdf"], specifier = ">=0.2.21,<0.3" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
@@ -3068,7 +3068,7 @@ source = { editable = "client" }
 
 [[package]]
 name = "strata-python"
-version = "0.2.2"
+version = "0.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -3077,9 +3077,9 @@ dependencies = [
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/b0/9356974412ab0095de8063c38f63fd14f7eb39cd3678d89d0e0ba636e425/strata_python-0.2.2.tar.gz", hash = "sha256:9747650590ac7c543b2af5bfadbbd832340fed79ae25763f3ef8be3d7b3a5fcb", size = 114566, upload-time = "2026-11-14T18:59:21.351Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/57/8fb5a2f9575e858532dfc0c38bddf3170a3707273e0f7ff4cc98a72afd95/strata_python-0.2.21.tar.gz", hash = "sha256:7dcc8337065de359f4c755c3b2e5edf0fffc8d7b38e470d3444a0e218bb5ce24", size = 317863, upload-time = "2026-11-25T19:34:34.543Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/3d/f4972df1a430a4d96f7b06eaacc758fa56c46c4f30f7b9cd61ea7c10bd11/strata_python-0.2.2-py3-none-any.whl", hash = "sha256:686cb63a0f0b0ecb2b36ef9decccee1f6a5cbb711f26deb93cd8c80de2c8fbe7", size = 88362, upload-time = "2026-11-14T18:59:19.728Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/bb/df1ca539de734bd0d4704936a76cea5a4ec447e47163f70e6f8cac8f5dbc/strata_python-0.2.21-py3-none-any.whl", hash = "sha256:7fdd854f5a808b51079f59a5fbc99ab1f1721c889b5d4eb7e682a5d9fd14210d", size = 224031, upload-time = "2026-11-25T19:34:33.003Z" },
 ]
 
 [package.optional-dependencies]

@@ -34,7 +34,19 @@ jobs:
           case "$RUNNER_OS" in
             Linux) sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr ffmpeg ;;
             macOS) brew install tesseract ffmpeg ;;
-            Windows) choco install tesseract ffmpeg -y --no-progress ;;
+            # winget, not Chocolatey: its manifests point at the projects' own GitHub releases (UB Mannheim's Tesseract
+            # build, Gyan's ffmpeg), so a community.chocolatey.org outage (504s on 2026-11-25) no longer fails the job.
+            # winget changes the machine PATH, which later steps do not see, so the folders go on GITHUB_PATH.
+            Windows)
+              for pkg in UB-Mannheim.TesseractOCR Gyan.FFmpeg; do
+                winget install --id "$pkg" --exact --silent --disable-interactivity --accept-source-agreements --accept-package-agreements || exit 1
+              done
+              # Gyan's build is a portable zip: winget unpacks it under WinGet\Packages and links it only where symlinks
+              # are allowed, so put the folder that holds ffmpeg.exe itself on the PATH.
+              ff=$(dirname "$(find "$(cygpath "$LOCALAPPDATA")/Microsoft/WinGet/Packages" -name ffmpeg.exe | head -1)")
+              "/c/Program Files/Tesseract-OCR/tesseract.exe" --version && "$ff/ffmpeg.exe" -version | head -1 || exit 1
+              echo "C:\Program Files\Tesseract-OCR" >> "$GITHUB_PATH"
+              cygpath -w "$ff" >> "$GITHUB_PATH" ;;
           esac
       - run: uv sync --locked
       - name: Integration tests (CLI and HTTP API end-to-end)
