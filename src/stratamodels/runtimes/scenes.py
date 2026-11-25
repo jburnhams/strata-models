@@ -295,6 +295,10 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     flashing = widen_blank(flashing, scores, times, threshold, min_shot_s)
     ends_at = sorted({i for run in flashing for i in run if 0 < i < len(frames)})
     outside = scores[:]
+    if deinterlace and len(outside) > 1:
+        # yadif had no frame before the first, so it filled that one's other field from the lines around; on fine stripes the next frame, done
+        # properly, scored 0.34 against it: a false cut on a clip's second frame (eval shots-vhs, 2026-11-25). Its score is answered as it is.
+        outside[1] = 0.0
     for a, b in flashing:
         outside[a:b] = [0.0] * (b - a)
     # dropped before the choice: a frame that loses to a gap's end must not first have won over a real cut on its other side

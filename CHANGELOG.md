@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-25
 
+**shot-boundaries: no false cut on the second frame of a clip (branch `shots-clip-lead-in`)**
+Eval `shots-vhs` run through the service on omarchy gave every ffmpeg candidate one false cut, 0.04 s into a window without cuts, which put TransNet V2 first; the whole tape has none there. yadif has no frame before the first it is given, so on fine stripes the second frame scores as a cut against it.
+- `runtimes/scenes.py`: when deinterlacing, the second frame is never a cut (its score is still answered). A shot one frame long at the very start is not something to cut.
+- `tests/unit/test_scenes_runtime.py`.
+
 **Less held while idle: analyses in a process of their own, idle models unloaded, freed memory given back (branch `claude/idle-usage`)**
 On omarchy the service sat with 10 GB of VRAM held by models unused for hours, 10.5 GB of its own RAM and one core at work for up to an hour after a restart.
 - `evals/process.py`: **new**. A slow (or never run) analysis runs in a child process, nice 15, one numerical thread, no GPU: it does not hold the service's GIL and gives its memory back. Analyses under 1.5 s stay in the service. `Summaries.stop` ends it when the service stops.
