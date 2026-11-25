@@ -468,5 +468,5 @@ def test_only_a_line_taller_than_the_page_that_is_not_in_capitals_gets_a_second_
         return F._sizes0(Page, face, dict(xh=h, text=text), 1.0, "roman")
 
     assert starts(30, "Why I am not sick!") == [30 / xh]
-    assert starts(47, "Polly.—Whiskey!") == pytest.approx([47 / xh, 47 / ch])
+    assert starts(47, "Polly.—Whiskey!") == pytest.approx([47 / xh, 47 / ch, 30 / xh])
     assert starts(47, "ACT THE SECOND") == [47 / ch]

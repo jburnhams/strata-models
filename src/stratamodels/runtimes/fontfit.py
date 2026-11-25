@@ -515,14 +515,16 @@ TALLER = 1.2  # times the page's median x-height: a line measured taller may be 
 
 def _sizes0(scan, face, ln, k, style):
     """The sizes a line's fit starts from: its measured x-height's (`_size0`) and, for a line `TALLER` than the page's that is not in capitals,
-    the size at which that height is its capitals' (the better fit of the two wins). A short line of tall letters ("Polly.—Whiskey!") has
+    the size at which that height is its capitals' and the page's own size (the best fit wins). A short line of tall letters ("Polly.—Whiskey!") has
     ink over 40 % of its profile's peak up to its capitals' tops, so its x-height comes out half as tall again (2026-11-25: 46 px against the
     page's 31 on four pages of the 1874 book, each such line set 1.4 to 1.6 times too big, over its neighbours), and the search reaches only
-    18 % either way."""
+    18 % either way. The page's own size is for a line measured over two rows of type (90 px, set at 230 for 67)."""
     s = _size0(face, ln, k, style)
     xh, ch, _ = x_ratio(face.file(style))
     capitals = s * xh < ln["xh"] * k * 0.999  # _size0 took the height for the capitals'
-    return [s] if capitals or ln["xh"] <= TALLER * scan.med_xh else [s, ln["xh"] * k / ch]
+    if capitals or ln["xh"] <= TALLER * scan.med_xh:
+        return [s]
+    return [s, ln["xh"] * k / ch, scan.med_xh * k / xh]
 
 
 def fit_line(scan, ln, face, style, quick=False, p0=None):
