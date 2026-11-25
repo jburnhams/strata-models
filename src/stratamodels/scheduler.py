@@ -38,7 +38,7 @@ import collections
 import threading
 import time
 
-from stratamodels import batches, gpu, runtimes, spend
+from stratamodels import batches, gpu, memory, runtimes, spend
 from stratamodels.store import FINISHED
 
 PRIORITY = {
@@ -61,6 +61,7 @@ OPTIONS = "__options__"  # a job's params key holding the load options of a mode
 AFTER = "__after__"  # a job's params key: the step job (a prompt upsampler) whose answer becomes this job's prompt; it waits for that job
 MB = 1024.0
 MAX_BULK = 100_000  # jobs in one submit_many (the Claude batch API takes 100 000 requests in a batch)
+TIDY_S = 60.0  # at most this often memory is given back to the system (memory.trim)
 BATCH_TICK_S = 5.0  # how often the batcher looks (it polls each open batch every Batcher.poll_s)
 
 
@@ -112,11 +113,14 @@ class Scheduler:
         gpu_jobs=2,
         cpu_jobs=4,
         whole_card_gb=10.0,
+        idle_unload_min=0.0,
     ):
         self.store, self.registry, self.models_dir, self.probe = store, registry, models_dir, probe
         self.reserve_mb, self.clock, self.get_runtime, self.max_skip_s = reserve_gb * MB, clock, get_runtime, max_skip_s
         self.gpu_jobs, self.cpu_jobs = max(int(gpu_jobs), 1), max(int(cpu_jobs), 1)
         self.whole_card_mb = whole_card_gb * MB
+        self.idle_unload_s = idle_unload_min * 60.0  # 0: a model stays loaded until the room is needed
+        self.trim = memory.trim
         self.alone = set()  # keys of the models running or loading with the whole card to themselves
         self.resident = collections.OrderedDict()  # model key -> Resident, least recently used first
         self.cv = threading.Condition()
@@ -128,6 +132,8 @@ class Scheduler:
         self.loading = {}  # model key -> MB promised to a load in progress
         self.running = {}  # job id -> (row, lane) of every job running now
         self._epoch = 0  # moves whenever GPU work starts or ends, so a load can tell whether its measurement overlapped other work
+        self._tidy_due = None  # "jobs" ran or "models" were unloaded since memory was last given back (memory.trim)
+        self._tidied = clock()
         self._dirty = False  # something changed since the dispatcher last looked
         self.batcher = batches.Batcher(self)  # jobs that asked for a vendor's batch API (batches.py): never in a lane
         self._snap = None  # (epoch, card state) read once per dispatch: nvidia-smi is slow, and nothing moved while the epoch stands
@@ -452,6 +458,7 @@ class Scheduler:
             self.get_runtime(r.model.runtime).unload(r.handle)
         except Exception:
             pass  # freeing must not fail the job that needed the room
+        self._tidy_due = "models"
         self._event(f"unloaded {key} ({why})")
 
     def _idle(self):
@@ -477,6 +484,18 @@ class Scheduler:
         if self._gpu_busy():
             return "the jobs running on it finish first"
         return None
+
+    def _unload_idle(self):
+        """Unload what no job has used for idle_unload_s (dispatcher thread, like every eviction, so nothing can start on it meanwhile). A model
+        with a job queued stays: it is waiting for room or a lease, not idle."""
+        if not self.idle_unload_s:
+            return
+        since = self.clock() - self.idle_unload_s
+        old = [(k, r) for k, r in self._idle() if max(r.last_used, r.loaded_at) < since]
+        wanted = {q["model"] for q in self.store.queued()} if old else set()
+        for k, _ in old:
+            if k not in wanted:
+                self._unload(k, f"idle for {self.idle_unload_s / 60:g} min")
 
     def _make_room(self, need_mb, keep=None, why="lease wants the whole GPU"):
         """Unload idle models, least recently used first, until `need_mb` fits (None: every idle GPU model). Without a GPU there is no budget
@@ -834,6 +853,7 @@ class Scheduler:
                 return None
             return self._run(t["job"], t["model"])
         finally:
+            self._tidy_due = self._tidy_due or "jobs"
             with self.cv:
                 if t["key"] is not None:
                     self.busy.pop(t["key"], None)
@@ -886,6 +906,14 @@ class Scheduler:
                 load_s=round(load_s, 3),
             )
 
+    def _tidy(self):
+        """Give memory freed since last time back to the system, at most every TIDY_S."""
+        due = self._tidy_due
+        if due is None or self.clock() - self._tidied < TIDY_S:
+            return
+        self._tidy_due, self._tidied = None, self.clock()
+        self.trim(collect=due == "models")
+
     def step(self):
         """Decide one thing and do it here, start to finish (what the tests drive): a load/unload request, then the next job that can run
         beside the sized leases held. Returns the job or lease it handled, or None."""
@@ -907,6 +935,8 @@ class Scheduler:
                 with self.cv:
                     self._dirty = False
                 try:
+                    self._unload_idle()
+                    self._tidy()
                     t = self.dispatch()
                 except Exception as e:
                     t = None

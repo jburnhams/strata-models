@@ -41,6 +41,16 @@ def test_save_load_reset_and_refusals():
         settings.save(dict(whole_card_gb="big"))
 
 
+def test_idle_unload_minutes_default_validate_and_fall_back(monkeypatch):
+    assert settings.idle_unload_min() == 30.0 and settings.all_settings()["idle_unload_min"] == 30.0
+    assert settings.save(dict(idle_unload_min=0))["idle_unload_min"] == "0" and settings.idle_unload_min() == 0.0
+    for bad in ("soon", -1, 2000):
+        with pytest.raises(ValueError, match="idle_unload_min must be"):
+            settings.save(dict(idle_unload_min=bad))
+    monkeypatch.setenv("STRATAMODELS_IDLE_UNLOAD_MIN", "later")
+    assert settings.idle_unload_min() == 30.0
+
+
 def test_job_slots_default_validate_and_come_from_the_environment(monkeypatch):
     assert settings.all_settings()["gpu_jobs"] == 2 and settings.jobs("cpu_jobs") == 4
     assert settings.save(dict(gpu_jobs=" 3 "))["gpu_jobs"] == "3" and settings.jobs("gpu_jobs") == 3

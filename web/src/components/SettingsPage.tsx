@@ -1,4 +1,4 @@
-// One question: "Where do the weights live, how much VRAM is kept free, how many jobs run at once, and how big a model gets the card to itself?" Saved settings take effect at once (the reserve, the job counts, the whole-card size) or for the next load (the folder).
+// One question: "Where do the weights live, how much VRAM is kept free, how many jobs run at once, how long an idle model stays loaded, and how big a model gets the card to itself?" Saved settings take effect at once (the reserve, the job counts, the whole-card size, the idle time) or for the next load (the folder).
 import { useState, type FormEvent } from 'react'
 import { Alert, AsyncButton, ColorSchemeChoice, DataView, EmptyState, Field, Input, PageHeader, Skeleton, useAsyncAction, useLoad } from 'strata-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -7,8 +7,8 @@ import { api, type Settings } from '../api'
 function Form({ s }: { s: Settings }) {
   const qc = useQueryClient()
   const [models, setModels] = useState(s.models_dir), [reserve, setReserve] = useState(String(s.vram_reserve_gb))
-  const [gpuJobs, setGpuJobs] = useState(String(s.gpu_jobs)), [cpuJobs, setCpuJobs] = useState(String(s.cpu_jobs)), [whole, setWhole] = useState(String(s.whole_card_gb))
-  const save = useAsyncAction(async () => { await api.saveSettings({ models_dir: models.trim(), vram_reserve_gb: Number(reserve), gpu_jobs: Number(gpuJobs), cpu_jobs: Number(cpuJobs), whole_card_gb: Number(whole) }); await qc.invalidateQueries({ queryKey: ['settings'] }) })
+  const [gpuJobs, setGpuJobs] = useState(String(s.gpu_jobs)), [cpuJobs, setCpuJobs] = useState(String(s.cpu_jobs)), [whole, setWhole] = useState(String(s.whole_card_gb)), [idle, setIdle] = useState(String(s.idle_unload_min))
+  const save = useAsyncAction(async () => { await api.saveSettings({ models_dir: models.trim(), vram_reserve_gb: Number(reserve), gpu_jobs: Number(gpuJobs), cpu_jobs: Number(cpuJobs), whole_card_gb: Number(whole), idle_unload_min: Number(idle) }); await qc.invalidateQueries({ queryKey: ['settings'] }) })
   const onSubmit = (e: FormEvent) => { e.preventDefault(); save.run() }
   return (
     <form onSubmit={onSubmit} className="grid max-w-xl gap-4">
@@ -17,6 +17,7 @@ function Form({ s }: { s: Settings }) {
       <Field label="GPU jobs at once" hint="Jobs on different models share the card when they fit in its memory together. 1 runs one at a time."><Input inputMode="numeric" value={gpuJobs} onChange={e => setGpuJobs(e.target.value)} /></Field>
       <Field label="Whole card above (GB)" hint="A model or lease that needs more than this waits for the card to be empty, then runs alone on it with the reserve ignored: a way to try models too big to budget for, at their own risk."><Input inputMode="decimal" value={whole} onChange={e => setWhole(e.target.value)} /></Field>
       <Field label="Jobs without the GPU at once" hint="Recorded outputs, CPU models and cloud calls: they run beside the GPU's jobs and never wait for the card."><Input inputMode="numeric" value={cpuJobs} onChange={e => setCpuJobs(e.target.value)} /></Field>
+      <Field label="Unload idle models after (minutes)" hint="A model no job has used for this long gives back its GPU memory and RAM; the next job loads it again (3 to 10 s for most). 0 keeps models until the room is needed."><Input inputMode="decimal" value={idle} onChange={e => setIdle(e.target.value)} /></Field>
       <p className="type-body-sm text-muted-foreground">Service files: <span className="font-mono">{s.data_dir}</span></p>
       {save.error && <Alert tone="danger" announce title="Not saved">{save.error}</Alert>}
       <div><AsyncButton type="submit" variant="default" phase={save.phase} error={save.error} labels={{ idle: 'Save settings', pending: 'Saving…', done: 'Saved' }} /></div>
