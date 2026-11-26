@@ -60,6 +60,13 @@ export const faceHandlers = [
     faceMock.people = faceMock.people.map(p => (p.id === Number(params.id) ? { ...p, name: b.name } : p))
     return HttpResponse.json(faceMock.people.find(p => p.id === Number(params.id)))
   }),
+  http.get('/api/identities/:id/review', ({ params, request }) => {
+    const id = Number(params.id), limit = Number(new URL(request.url).searchParams.get('limit') || 48)
+    faceMock.calls.push(`review ${id} up to ${limit}`)
+    const items = (faceMock.suggested[id] ?? []).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 })).slice(0, limit)
+    const confirmed = (faceMock.faces[id] ?? []).length
+    return HttpResponse.json({ basis: items.length ? (confirmed >= 3 ? 'confirmed' : 'group') : null, basis_faces: confirmed >= 3 ? confirmed : items.length, suggested: items.length, confirmed, near: { '0.3': items.filter(f => f.distance < 0.3).length, '0.4': items.filter(f => f.distance < 0.4).length, '0.5': items.length }, left_out: 0, items })
+  }),
   http.get('/api/identities/:id/faces', ({ params, request }) => {
     const q = new URL(request.url).searchParams
     if (faceMock.fail === 'faces' && q.get('offset')) return HttpResponse.json({ detail: 'the face store is busy' }, { status: 500 })

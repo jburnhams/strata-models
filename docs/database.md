@@ -64,5 +64,9 @@ One face store for every app (design, survey and decisions: the face database pr
   A person confirms suggestions on the person's page in the web app (Suggested: a page of 200 at a time, confirm the chosen or all, or
   "not this person", which records a rejection); `GET /api/identities` counts `suggested` beside `faces` (confirmed), and the Unnamed
   groups screen asks `cluster` with `suggested: false`, so a face waiting on a suggestion is not shown as unnamed.
+  Thousands of suggestions for one person are reviewed in rounds (`GET /api/identities/{id}/review`): the most certain first, scored
+  afresh on every call against the person's own confirmed faces once there are 3 (centre of their densest bunch), before that against
+  the largest tight group (average linkage at 0.35) of their 2000 most confident suggestions; a suggestion nearer a face rejected for
+  them than to that centre is left out. So each round confirmed makes the next one surer, with nothing to re-run.
 - **pgvector** lives in `public` and the service's connection searches only `stratamodels`, so the type, operator and operator class are
   schema-qualified (`strata_python.db.vectors`). SQLite (tests) keeps vectors as text and searches in Python.

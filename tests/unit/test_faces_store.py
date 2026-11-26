@@ -410,3 +410,36 @@ def test_suggested_faces_are_counted_paged_and_kept_out_of_unnamed_groups_on_req
     every = sorted(f for g in fs.cluster("buffalo_l") for f in g["faces"])
     assert every == ids[1:]  # suggested faces still count as undecided by default
     assert sorted(f for g in fs.cluster("buffalo_l", suggested=False) for f in g["faces"]) == ids[4:]
+
+
+def test_review_offers_the_tightest_group_first_then_ranks_by_confirmed_faces(fs):
+    # 8 faces of person 1 suggested with low confidence, 4 of person 2 (wrongly) with high confidence: the largest tight group wins
+    ones = [index(fs, "immich", f"a{i}", [face(1, seed=i)])["faces"][0]["id"] for i in range(8)]
+    twos = [index(fs, "immich", f"b{i}", [face(2, seed=50 + i)])["faces"][0]["id"] for i in range(4)]
+    ann = fs.create_identity("Ann")
+    fs.assign(ones, ann["id"], "t", status="suggested", source="hint", confidence=0.6)
+    fs.assign(twos, ann["id"], "t", status="suggested", source="hint", confidence=0.9)
+    r = fs.review(ann["id"], "buffalo_l", limit=5)
+    assert (r["basis"], r["basis_faces"], r["suggested"], r["confirmed"]) == ("group", 8, 12, 0)
+    assert {f["id"] for f in r["items"]} <= set(ones) and len(r["items"]) == 5
+    assert r["items"][0]["distance"] <= r["items"][-1]["distance"] and r["items"][0]["status"] == "suggested"
+    assert r["near"]["0.3"] == 8 and r["left_out"] == 0
+    fs.assign(
+        twos[:1], ann["id"], "strata-models", status="rejected"
+    )  # one of the strays is not Ann: its lookalikes leave the round
+    fs.assign(ones[:3], ann["id"], "strata-models")  # three confirmed: the person's own faces now rank the rest
+    r = fs.review(ann["id"], "buffalo_l", limit=50)
+    assert (r["basis"], r["basis_faces"], r["suggested"], r["confirmed"]) == ("confirmed", 3, 8, 3)
+    got = [f["id"] for f in r["items"]]
+    assert set(got) == set(ones[3:]) and r["left_out"] == 3
+    single = fs.create_identity("Solo")
+    one = index(fs, "immich", "s", [face(3)])["faces"][0]["id"]
+    fs.assign([one], single["id"], "t", status="suggested")
+    assert [f["id"] for f in fs.review(single["id"], "buffalo_l")["items"]] == [one]
+    assert fs.review(fs.create_identity("Nobody")["id"], "buffalo_l")["items"] == []
+    other = index(fs, "immich", "x", [face(4)], model="other")["faces"][0]["id"]
+    nobody_here = fs.create_identity("Elsewhere")
+    fs.assign([other], nobody_here["id"], "t", status="suggested")
+    assert fs.review(nobody_here["id"], "buffalo_l")["items"] == []  # no embedding of this model
+    with pytest.raises(NotFound):
+        fs.review(999, "buffalo_l")
