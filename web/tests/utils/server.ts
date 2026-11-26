@@ -1,6 +1,7 @@
 // The service as the web app sees it: fixtures plus msw handlers for every endpoint the app calls (one without a handler fails the test).
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
+import { faceHandlers } from './faces'
 import type { Analysis, ApiCall, Disagreement, Evals, Job, Model, Pair, Progress, ProviderState, Registry, RunStatus, Settings, Spend, SpendSeries, Status, Usage } from '../../src/api'
 
 export const NOW = 1_800_000_000
@@ -89,6 +90,7 @@ export const mock = { spend: spendFixtures.spend(), callPages: 1, settings: { ..
 export const resetMock = () => { mock.spend = spendFixtures.spend(); mock.callPages = 1; mock.settings = { ...defaultSettings }; mock.calls = []; mock.status = fixtures.status(); mock.pageSize = 100; mock.run = { state: 'idle', log: [] }; mock.analysis = evalFixtures.analysis(); mock.disagreements = [{ item_id: 'u1', input: { prompt: 'a cat', image: '/d/cat.jpg' }, has_media: false, reference: null, a: 'large-v3', b: 'turbo', outputs: { 'large-v3': { segments: [{ text: ' plain cat' }] }, turbo: { segments: [{ text: ' rich cat' }] } }, person: 'large-v3', judge: 'turbo', reason: 'more detail', consistent: false, judgment_id: 7, borderline: false }, { item_id: 'u2', input: { text: 'a dog' }, has_media: true, reference: { text: 'a dog barks' }, a: 'large-v3', b: 'small', outputs: { 'large-v3': { segments: [{ text: ' dog' }] }, small: null }, person: 'tie', judge: 'small', reason: '', consistent: true, judgment_id: 8, borderline: true }] as Disagreement[]; mock.images = []; mock.progress = { candidates: [{ name: 'large-v3', total: 400, done: 400, failed: 0, steps: [] }], jobs: [], run: null, analysis: null, now: 100 } as Progress }
 
 export const handlers = [
+  ...faceHandlers,
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0', gpu: true })),
   http.get('/api/status', () => HttpResponse.json(mock.status)),
   http.get('/api/gpu/history', () => HttpResponse.json({ every_s: 5, samples: [0, 1, 2, 3].map(i => ({ at: NOW - 300 + i * 100, util_pct: i * 20, used_mb: 5000, own_mb: 4000 })) })),

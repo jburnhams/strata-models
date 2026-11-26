@@ -27,7 +27,7 @@ with sm.gpu_lease("strata-stills", vram_gb=4, note="arena build"):
     ...  # the GPU is yours until the block ends
 ```
 Standard library only; see [client/README.md](client/README.md). The **face store** (one database of pictures, faces and people for every
-app: `strata_python.clients.faces.index`, `search`, `cluster`, `assign`, ...) is described in [docs/database.md](docs/database.md#faces). Inputs are file paths: the service runs on the same machine.
+app: `strata_python.clients.faces.index`, `search`, `cluster`, `assign`, ...) is described in [docs/database.md](docs/database.md#faces); the web app's **Faces** screens (`/#/faces`) are where a person names groups, merges duplicates and sets tags. Inputs are file paths: the service runs on the same machine.
 
 ## Run it
 
