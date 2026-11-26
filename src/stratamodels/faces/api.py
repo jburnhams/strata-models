@@ -11,7 +11,12 @@
   POST /api/faces/search                 {app, face_id | embedding | path, k?, tags?, include?, named?, max_distance?, model?} nearest faces
   POST /api/faces/cluster                {app, tags?, include?, threshold?, min_size?, limit?, min_score?, model?} undecided faces, grouped
   POST /api/faces/assign                 {face_ids, identity_id, app, status?, source?, confidence?, note?} -> {batch}
-  POST /api/faces/batches/{id}/undo
+  POST /api/faces/batches/{id}/undo        an assign batch, a hints batch or a propose run
+  POST /api/faces/hints                  {app, hints: [{image_id, app_ref, face_id?, name?, status?}], note?} an app's possible labels -> {batch, added, skipped}
+  GET  /api/faces/hints?app=&image_id=&app_ref=&limit=   an app's hints
+  POST /api/faces/propose                {app, dry_run?, groups?, tags?, include?, limit?, model?, min_seeds?, min_purity?, max_distance?, margin?,
+                                         min_score?, group_share?, group_min?} turn the app's hints into suggested faces (dry_run, the default,
+                                         only counts); nothing is ever confirmed here
   GET  /api/faces/tags; PUT /api/faces/tags/{tag} {opt_in, note?}
   GET  /api/identities?app=&q=&app_ref=&limit=   people (as `app` sees them); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
   GET/PATCH /api/identities/{id}         one person (?app=); {name?, fields?} change the global ones
@@ -88,6 +93,29 @@ class AssignIn(BaseModel):
     source: str = "human"
     confidence: float | None = None
     note: str | None = None
+
+
+class HintsIn(BaseModel):
+    app: str
+    hints: list[dict]
+    note: str | None = None
+
+
+class ProposeIn(BaseModel):
+    app: str
+    dry_run: bool = True
+    groups: bool = False
+    tags: list[str] | None = None
+    include: list[str] = Field(default_factory=list)
+    limit: int | None = None
+    model: str | None = None
+    min_seeds: int | None = None
+    min_purity: float | None = None
+    max_distance: float | None = None
+    margin: float | None = None
+    min_score: float | None = None
+    group_share: float | None = None
+    group_min: int | None = None
 
 
 class TagIn(BaseModel):
@@ -374,6 +402,42 @@ def mount(app, scheduler, store: FaceStore | None = None):
         try:
             return fs.undo(batch_id)
         except ValueError as e:
+            bad(e)
+
+    @app.post("/api/faces/hints", status_code=201)
+    def post_hints(b: HintsIn):
+        try:
+            return fs.add_hints(b.app, b.hints, b.note)
+        except ValueError as e:
+            bad(e)
+
+    @app.get("/api/faces/hints")
+    def get_hints(
+        app_name: str = Query(..., alias="app"),
+        image_id: int | None = None,
+        app_ref: str | None = None,
+        limit: int = 500,
+    ):
+        return dict(items=fs.hints(app_name, image_id, app_ref, limit))
+
+    @app.post("/api/faces/propose")
+    def post_propose(b: ProposeIn):
+        model = b.model or role_model(None, b.app)[0]
+        params = b.model_dump(
+            include={"min_seeds", "min_purity", "max_distance", "margin", "min_score", "group_share", "group_min"}
+        )
+        try:
+            return fs.propose(
+                b.app,
+                model,
+                dry_run=b.dry_run,
+                groups=b.groups,
+                tags=b.tags,
+                include=b.include,
+                limit=b.limit,
+                **params,
+            )
+        except (ValueError, TypeError) as e:
             bad(e)
 
     @app.get("/api/identities")

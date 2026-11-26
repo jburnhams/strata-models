@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**faces: possible labels (`face_hints`) and proposing people from them (branch `claude/face-hints`)**
+One global layer of decisions stays (owner, 2026-11-26); an app's possible labels sit beside it and only ever produce `suggested` faces.
+- `db/models.py`, migration `7c41d9e2a0b3` (**new** table `face_hints`: app, picture, optional face, app_ref, name, status possible|confirmed, batch).
+- `faces/propose.py` (**new**): the plan, pure numpy: seeds, densest-bunch centroid, who qualifies (10+ seeds, 85 % within 0.5; faces scored under 0.7 left out), one clearly closest face per person per picture, unnamed groups mostly in one person's pictures.
+- `faces/store.py`: `add_hints`, `hints`, `propose` (dry run by default; a real run creates a person per unmapped app_ref and writes one undoable batch); `undo` takes hint batches; merge suggestions use suggested faces for a person with none confirmed (`basis_a`/`basis_b`).
+- `faces/api.py`: `POST/GET /api/faces/hints`, `POST /api/faces/propose`.
+- Tests: `tests/unit/test_faces_propose.py` (**new**), hints and propose in `test_faces_store.py` and `test_faces_api.py`.
+- Docs: database.md#faces, progress.md (the measurements behind the thresholds).
+
 **face-tracks labelling: name groups of tracks, not each track; blank ones are ignored (branch `claude/project-thread-csasv3`)**
 The first generous pass on nine real clips (2026-11-26) gave 12 to 354 tracks a clip, 1,188 in all: too many to name one by one.
 - `scripts/evals/face_tracks_labels.py`: `regroup` (run by `propose`, or alone on saved answers) groups each clip's tracks by embedding (average linkage at cosine 0.4; tracks seen together never share a group), one contact-sheet row a group with each track's best face and id; labels.toml names groups, with per-track fixes. A group or track left blank becomes `ignore` boxes.

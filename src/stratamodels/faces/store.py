@@ -6,13 +6,16 @@ consent). Decided with the owner 2026-11-25:
   - every picture carries its app as a tag; search and clustering cover every tag except opt-in ones (face_tags.opt_in, e.g. other people's
     children), which count only when the caller names them;
   - merges across apps are suggested here and made by a person, never automatically; undone by clearing `merged_into`;
-  - decisions about faces are append-only (face_assignments), the newest not undone wins, and a batch undoes as one.
+  - decisions about faces are append-only (face_assignments), the newest not undone wins, and a batch undoes as one;
+  - one global layer of decisions (2026-11-26): a confirmation counts for every app, its app kept as the source. An app's possible labels
+    (face_hints: names on a picture, or on a face) are not decisions; `propose` turns hints that agree into `suggested` faces for a person.
 
 Every call opens its own session (as store.Store does), so the API's threads never share one. Times are epoch seconds."""
 
 import dataclasses
 import time
 from collections import defaultdict
+from typing import cast
 
 import numpy as np
 import sqlalchemy as sa
@@ -24,6 +27,7 @@ from stratamodels.db.models import (
     FaceAssignment,
     FaceBatch,
     FaceEmbedding,
+    FaceHint,
     FaceImage,
     FaceImageTag,
     FaceTag,
@@ -31,8 +35,11 @@ from stratamodels.db.models import (
     IdentityAppMetadata,
     IdentityNotSame,
 )
+from stratamodels.faces import propose as plan_hints
 
 STATUSES = ("confirmed", "rejected", "suggested")
+HINT_STATUSES = ("possible", "confirmed")
+CHUNK = 5000  # ids per IN (...) when reading many pictures' faces
 CLUSTER_THRESHOLD = 0.55  # cosine distance on ArcFace embeddings: conservative (strata-360's `who`; bright-horizons' unknown groups used 0.55)
 MAX_CLUSTER = 5000  # faces grouped at once: average linkage keeps an n x n distance matrix (5000: 100 MB of float32)
 SUGGEST_MAX_DISTANCE = 0.6  # identity centroids further apart than this are not worth a person's look
@@ -626,7 +633,7 @@ class FaceStore:
             b = s.get(FaceBatch, int(batch_id))
             if b is None:
                 raise NotFound(f"no such batch: {batch_id}")
-            if b.kind != "assign":
+            if b.kind not in ("assign", "hint"):
                 raise ValueError(f"batch {batch_id} is a {b.kind}: undo a merge with unmerge")
             if b.undone_at is None:
                 b.undone_at = self.clock()
@@ -671,12 +678,22 @@ class FaceStore:
 
     def merge_suggestions(self, model, limit=50, max_distance=SUGGEST_MAX_DISTANCE):
         """Pairs of people whose confirmed faces sit close: the distance between their centroids (of up to EXEMPLARS best faces each), closest
-        first, leaving out pairs a person said are different. For a person to confirm; nothing is merged here."""
+        first, leaving out pairs a person said are different. For a person to confirm; nothing is merged here. A person with no confirmed face
+        yet (one `propose` made from an app's hints) is compared by their suggested faces (`basis_a`/`basis_b` say which)."""
         with self.session() as s:
-            by_person = defaultdict(list)
+            by_person, suggested = defaultdict(list), defaultdict(list)
             for a in self._current(s).values():
                 if a.status == "confirmed" and a.identity_id is not None:
                     by_person[a.identity_id].append(a.face_id)
+                elif a.status == "suggested" and a.identity_id is not None:
+                    suggested[a.identity_id].append(a.face_id)
+            basis = dict.fromkeys(by_person, "confirmed")
+            for (
+                pid,
+                fids,
+            ) in suggested.items():  # a person proposed from hints has only suggested faces until someone confirms one
+                if pid not in by_person:
+                    by_person[pid], basis[pid] = fids, "suggested"
             cent = {}
             for pid, fids in by_person.items():
                 rows = s.execute(
@@ -707,7 +724,225 @@ class FaceStore:
                 if (a, b) in apart or D[x, y] > max_distance:
                     continue
                 out.append(
-                    dict(a=a, b=b, distance=round(float(D[x, y]), 6), apps_a=sorted(apps[a]), apps_b=sorted(apps[b]))
+                    dict(
+                        a=a,
+                        b=b,
+                        distance=round(float(D[x, y]), 6),
+                        apps_a=sorted(apps[a]),
+                        apps_b=sorted(apps[b]),
+                        basis_a=basis[a],
+                        basis_b=basis[b],
+                    )
                 )
         out.sort(key=lambda p: p["distance"])
         return out[: max(1, min(int(limit), 500))]
+
+    # ---- hints: an app's possible labels, and proposing from them --------------------------------------------------------------------------
+    def add_hints(self, app, hints, note=None):
+        """Store an app's possible labels in one batch (undone as one). Each hint: {image_id, app_ref, face_id?, name?, status?}; `face_id`
+        must be a face of that picture. A hint the app already has (same picture, face, app_ref and status, batch not undone) is skipped.
+        Returns {batch, added, skipped}."""
+        app = str(app or "")[:64]
+        if not app:
+            raise ValueError("hints need an app")
+        rows = []
+        for h in hints:
+            ref = str(h.get("app_ref") or "").strip()[:256]
+            if not ref or h.get("image_id") is None:
+                raise ValueError("a hint needs image_id and app_ref")
+            status = h.get("status") or "possible"
+            if status not in HINT_STATUSES:
+                raise ValueError(f"a hint's status is one of {', '.join(HINT_STATUSES)}, not {status!r}")
+            face_id = None if h.get("face_id") is None else int(h["face_id"])
+            name = (str(h["name"]).strip()[:300] or None) if h.get("name") else None
+            rows.append((int(h["image_id"]), face_id, ref, name, status))
+        if not rows:
+            raise ValueError("no hints given")
+        now = self.clock()
+        with self.session() as s:
+            images = {r[0] for r in rows}
+            found = set()
+            for part in _chunks(sorted(images)):
+                found |= set(s.scalars(sa.select(FaceImage.id).where(FaceImage.id.in_(part))))
+            missing = sorted(images - found)
+            if missing:
+                raise NotFound(f"no such picture: {missing[0]}")
+            want = sorted({r[1] for r in rows if r[1] is not None})
+            face_img = {}
+            for part in _chunks(want):
+                face_img.update(s.execute(sa.select(Face.id, Face.image_id).where(Face.id.in_(part))).all())
+            for img, f, *_ in rows:
+                if f is not None and face_img.get(f) != img:
+                    raise ValueError(f"face {f} is not in picture {img}")
+            have = {(h.image_id, h.face_id, h.app_ref, h.status) for h in self._live_hints(s, app, images)}
+            b = FaceBatch(kind="hint", app=app, at=now, note=(str(note)[:500] if note else None))
+            s.add(b)
+            s.flush()
+            added = 0
+            for img, f, ref, name, status in rows:
+                if (img, f, ref, status) in have:
+                    continue
+                have.add((img, f, ref, status))
+                s.add(
+                    FaceHint(
+                        app=app, image_id=img, app_ref=ref, at=now, face_id=f, name=name, status=status, batch_id=b.id
+                    )
+                )
+                added += 1
+            s.commit()
+            return dict(batch=b.id, added=added, skipped=len(rows) - added)
+
+    def _live_hints(self, s, app, images=None):
+        live = sa.or_(
+            FaceHint.batch_id.is_(None),
+            FaceHint.batch_id.in_(sa.select(FaceBatch.id).where(FaceBatch.undone_at.is_(None))),
+        )
+        q = sa.select(FaceHint).where(FaceHint.app == app, live).order_by(FaceHint.id)
+        if images is None:
+            return list(s.scalars(q))
+        out = []
+        for part in _chunks(sorted(images)):
+            out += list(s.scalars(q.where(FaceHint.image_id.in_(part))))
+        return out
+
+    def hints(self, app, image_id=None, app_ref=None, limit=500):
+        """An app's hints (batches not undone), oldest first, optionally for one picture or one of its people."""
+        with self.session() as s:
+            rows = self._live_hints(s, str(app), None if image_id is None else [int(image_id)])
+            if app_ref is not None:
+                rows = [h for h in rows if h.app_ref == str(app_ref)]
+            return [
+                dict(
+                    id=h.id,
+                    app=h.app,
+                    image_id=h.image_id,
+                    face_id=h.face_id,
+                    app_ref=h.app_ref,
+                    name=h.name,
+                    status=h.status,
+                    batch=h.batch_id,
+                    at=h.at,
+                )
+                for h in rows[: max(1, min(int(limit), 5000))]
+            ]
+
+    def _faces_with_embeddings(self, s, model, images):
+        out = defaultdict(list)
+        for part in _chunks(sorted(images)):
+            for fid, img, score, vec in s.execute(
+                sa.select(Face.id, Face.image_id, Face.det_score, FaceEmbedding.vector)
+                .join(FaceEmbedding, FaceEmbedding.face_id == Face.id)
+                .where(FaceEmbedding.model == model, Face.image_id.in_(part))
+                .order_by(Face.id)
+            ):
+                out[img].append((fid, plan_hints.unit(np.array(vec, dtype=np.float64)), float(score)))
+        return dict(out)
+
+    def propose(self, app, model, *, dry_run=True, groups=False, tags=None, include=(), limit=None, **params):
+        """Turn an app's hints into suggested faces (faces/propose.py says how). `dry_run` (the default) only counts. Otherwise each person
+        who qualifies gets the global person their app_ref points at (identity_app_metadata), or a new one named from the hint, and their
+        suggestions are written as one batch (`suggested`, source `hint`, confidence 1 - distance), undone as one. `groups` also weighs the
+        unnamed groups of FaceStore.cluster (tags, include, limit: its scope). Returns {people: [...], qualifying, suggested, batch}."""
+        p = plan_hints.Params(**{k: v for k, v in params.items() if v is not None})
+        app = str(app)
+        group_list = []
+        if groups:
+            found = self.cluster(
+                model,
+                tags=tags,
+                include=include,
+                min_size=p.group_min,
+                min_score=p.min_score or None,
+                limit=MAX_CLUSTER if limit is None else limit,
+            )
+            group_list = [list(cast(list[int], g["faces"])) for g in found]
+        with self.session() as s:
+            rows = self._live_hints(s, app)
+            images = {h.image_id for h in rows}
+            if group_list:
+                members = sorted({f for g in group_list for f in g})
+                for part in _chunks(members):
+                    images |= set(s.scalars(sa.select(Face.image_id).where(Face.id.in_(part))))
+            faces = self._faces_with_embeddings(s, model, images)
+            state = self._current(s)
+            mapped = {}
+            for m in s.scalars(sa.select(IdentityAppMetadata).where(IdentityAppMetadata.app == app)):
+                if m.app_ref:
+                    mapped[m.app_ref] = self._root(s, m.identity_id)
+            by_person = defaultdict(list)
+            for a in state.values():
+                if a.status == "confirmed" and a.identity_id is not None:
+                    by_person[a.identity_id].append(a.face_id)
+            confirmed = {}
+            for ref, pid in mapped.items():
+                fids = by_person.get(pid)
+                if fids:
+                    confirmed[ref] = [
+                        plan_hints.unit(np.array(v, dtype=np.float64))
+                        for (v,) in s.execute(
+                            sa.select(FaceEmbedding.vector)
+                            .join(Face, Face.id == FaceEmbedding.face_id)
+                            .where(FaceEmbedding.model == model, FaceEmbedding.face_id.in_(fids))
+                            .order_by(Face.det_score.desc())
+                            .limit(200)
+                        )
+                    ]
+        hints = [plan_hints.Hint(h.image_id, h.app_ref, h.face_id, h.name, h.status) for h in rows]
+        people = plan_hints.plan(hints, faces, set(state), confirmed, group_list, p)
+        out = []
+        for ref, who in people.items():
+            row = who.summary()
+            row["identity_id"] = mapped.get(ref)
+            out.append(row)
+        result = dict(
+            app=app,
+            model=model,
+            dry_run=bool(dry_run),
+            params=dataclasses.asdict(p),
+            hinted_pictures=len({h.image_id for h in rows}),
+            people=out,
+            qualifying=sum(1 for w in people.values() if w.qualifies),
+            suggested=sum(len(w.suggestions) for w in people.values()),
+            groups=len(group_list),
+            batch=None,
+            created=0,
+        )
+        if dry_run or not result["suggested"]:
+            return result
+        now = self.clock()
+        with self.session() as s:
+            b = FaceBatch(kind="assign", app=app[:64], at=now, note=f"propose from {app} hints")
+            s.add(b)
+            s.flush()
+            for row, who in zip(out, people.values(), strict=True):
+                if not who.suggestions:
+                    continue
+                pid = row["identity_id"]
+                if pid is None:
+                    ident = Identity(created_at=now, updated_at=now, name=who.name or who.app_ref, fields={})
+                    s.add(ident)
+                    s.flush()
+                    self._set_app(s, ident.id, app, {}, who.app_ref)
+                    pid = row["identity_id"] = ident.id
+                    result["created"] += 1
+                for f, d, _how in who.suggestions:
+                    s.add(
+                        FaceAssignment(
+                            face_id=f,
+                            status="suggested",
+                            app=app[:64],
+                            at=now,
+                            identity_id=pid,
+                            source="hint",
+                            batch_id=b.id,
+                            confidence=round(max(0.0, 1.0 - d), 6),
+                        )
+                    )
+            s.commit()
+            result["batch"] = b.id
+        return result
+
+
+def _chunks(ids, n=CHUNK):
+    for i in range(0, len(ids), n):
+        yield ids[i : i + n]

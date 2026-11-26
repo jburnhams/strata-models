@@ -270,3 +270,30 @@ def test_any_picture_format_and_a_photo_taken_on_its_side(client, tmp_path):
         crop = client.get(f"/api/faces/{img['faces'][0]['id']}/crop", params=dict(px=32))
         assert crop.status_code == 200
         assert max(size_of(crop)) == 32
+
+
+def test_hints_and_propose_over_http(client, scheduler, tmp_path):
+    imgs = [index(client, scheduler, picture(tmp_path, f"s{i}.jpg"), f"s{i}") for i in range(10)]
+    hints = [dict(image_id=i["id"], app_ref="ann", name="Ann", face_id=i["faces"][0]["id"]) for i in imgs]
+    r = client.post("/api/faces/hints", json=dict(app="takeout", hints=hints, note="names"))
+    assert r.status_code == 201 and r.json()["added"] == 10
+    assert len(client.get("/api/faces/hints", params=dict(app="takeout", app_ref="ann")).json()["items"]) == 10
+    assert (
+        client.get("/api/faces/hints", params=dict(app="takeout", image_id=imgs[0]["id"])).json()["items"][0]["name"]
+        == "Ann"
+    )
+    assert (
+        client.post("/api/faces/hints", json=dict(app="takeout", hints=[dict(image_id=imgs[0]["id"])])).status_code
+        == 400
+    )
+    dry = client.post("/api/faces/propose", json=dict(app="takeout")).json()
+    assert (dry["model"], dry["dry_run"], dry["qualifying"], dry["suggested"]) == ("fakeface", True, 1, 10)
+    assert client.post("/api/faces/propose", json=dict(app="takeout", min_seeds=11)).json()["qualifying"] == 0
+    assert (
+        client.post("/api/faces/propose", json=dict(app="takeout", bogus_param=1, max_distance="x")).status_code == 422
+    )
+    done = client.post("/api/faces/propose", json=dict(app="takeout", dry_run=False, groups=True, limit=100)).json()
+    assert done["created"] == 1 and done["batch"] is not None
+    (ann,) = client.get("/api/identities", params=dict(app="takeout", app_ref="ann")).json()["items"]
+    assert len(client.get(f"/api/identities/{ann['id']}/faces", params=dict(status="suggested")).json()["items"]) == 10
+    assert client.post(f"/api/faces/batches/{done['batch']}/undo").status_code == 200
