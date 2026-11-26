@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Make the venv a venv-worker model runs in: <models>/venvs/NAME (models dir: STRATAMODELS_MODELS, default ~/models). Needs uv (and git, curl).
-#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|dfn|clearvoice|resemble|audio|audio-quality|video|seedvr2|flashvsr-plus|vapoursynth|ocr|shots
+#   scripts/setup_worker_venv.sh kokoro|chatterbox|qwen3-tts|whisper|dfn|clearvoice|resemble|audio|audio-quality|speaker|video|seedvr2|flashvsr-plus|vapoursynth|ocr|shots
 # Each pins what its model needs; they are kept apart from the service's venv on purpose (Chatterbox wants torch 2.6, for one).
 set -euo pipefail
-name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, dfn, clearvoice, resemble, audio, audio-quality, video, seedvr2, flashvsr-plus, vapoursynth, ocr or shots}
+name=${1:?give the venv name: kokoro, chatterbox, qwen3-tts, whisper, dfn, clearvoice, resemble, audio, audio-quality, speaker, video, seedvr2, flashvsr-plus, vapoursynth, ocr or shots}
 models=${STRATAMODELS_MODELS:-$HOME/models}; venv=$models/venvs/$name
 TORCH_INDEX=https://download.pytorch.org/whl/cu128   # CUDA 12.8 wheels: they bring their own CUDA libraries, any recent driver runs them
 py=3.12
@@ -31,6 +31,7 @@ case $name in
   # workers/shots.py: TransNet V2 (its weights ship in the transnetv2-pytorch wheel, 30 MB) and PySceneDetect on frames ffmpeg decodes;
   # transnetv2-pytorch's ffmpeg-python, pandas and tqdm come along unused
   shots) pkgs="--index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch transnetv2-pytorch==1.0.5 scenedetect==0.7.3 opencv-python-headless numpy" ;;
+  speaker) pkgs="--index-strategy unsafe-best-match --extra-index-url $TORCH_INDEX torch==2.8.* torchaudio==2.8.* speechbrain>=1.0.2,<2 numpy" ;;   # workers/speaker.py (ECAPA, role speaker-embedding); weights into <models>/speechbrain on first load; torchaudio pinned with torch as for dfn; SpeechBrain from 1.0.2 (earlier ones pass huggingface_hub a use_auth_token it no longer takes)
   audio-quality) pkgs="--index-strategy unsafe-best-match --extra-index-url https://download.pytorch.org/whl/cpu torch==2.8.* torchaudio==2.8.* onnxruntime pesq pystoi numpy scipy soundfile" ;;   # CPU only
   *) echo "no recipe for $name" >&2; exit 2 ;;
 esac

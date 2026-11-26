@@ -53,9 +53,10 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `face-tracks` | insightface `buffalo_l` behind a tracker (`runtimes/facetracks.py`): ffmpeg decodes at 5 fps, faces are joined into one track per person per shot by position and embedding, each with its span, boxes, a quality-weighted embedding and its 3 best stills (size, sharpness, pose); which tracks were seen together. For strata-360 and strata-reels; eval `face-tracks-home` is to choose fps, tracker and still quality | not yet measured |
 | `scene-describe` | Qwen3.5-9B (llama-server, the same residency as `vision-language`) with preset `scene-describe-v2`: one scene of a home video from a few of its frames and its speech, what is seen (`observed`) kept apart from what is guessed (`inferred`, each with its evidence), people and children counted, tags and the picture's faults, for strata-reels. Claude Haiku is the other candidate | not yet measured |
 | `chapter-name` | Qwen3.5-9B (llama-server, text only) with preset `chapter-name-v1`: a title, a summary and guesses with their evidence for a run of a home video's scenes, from their descriptions and speech, for strata-reels' chapters. Claude Haiku is the other candidate | not yet measured |
+| `speaker-embedding` | ECAPA-TDNN on VoxCeleb (SpeechBrain, `workers/speaker.py`, venv `speaker`): one normalised 192-number vector per stretch of speech (`items: [{path, clip?}]`), for strata-voice to keep only the speaker's own sentences from a found recording | not yet measured |
 | `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
-The other roles in `models.toml` (vision-language, sound events, speaker embeddings, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.
+The other roles in `models.toml` (vision-language, sound events, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.
 
 ## Tests
 

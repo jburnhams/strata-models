@@ -4,6 +4,14 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**speaker-embedding is served: ECAPA in a worker venv of its own (branch `claude/project-thread-vao1r7`)**
+strata-voice is getting an Upload screen for found recordings of its speaker, which hold other voices too; it keeps the sentences that sound like the speaker's studio takes, so it needs a voice embedding per sentence. The role was listed with runtime `speechbrain`, which nothing here ran.
+- `workers/speaker.py` (**new**): SpeechBrain's `spkrec-ecapa-voxceleb` as a venv-worker. params `items: [{path, clip?}]` (a file named twice is decoded once); answer `{dim, embeddings, seconds}`, each vector L2-normalised, null for a stretch under 0.5 s, the middle 30 s of a longer one measured. Batches of 16.
+- `models.toml`: `ecapa-voxceleb` runs as `venv-worker` (`worker`/`venv` `speaker`), used by strata-voice too; the role's description gives the params. The registry seed updates the row, as it did for Whisper's move.
+- `scripts/setup_worker_venv.sh`: recipe `speaker` (torch and torchaudio 2.8 from PyTorch's CUDA 12.8 index, SpeechBrain 1.0.2 or later, numpy).
+- `tests/unit/test_speaker_worker.py` (**new**, a fake encoder, and ffmpeg stood in for by a reader of generated WAVs: the unit runners have no ffmpeg and unit tests launch no processes; review, Codex); `tests/gpu/test_real_runtimes.py`: the real model on the test audio. Not yet run on the GPU machine.
+- `README.md`: the role in "Roles served now".
+
 **face-tracks: faces in a video followed from frame to frame (branch `claude/project-thread-csasv3`)**
 A new role for strata-360 and strata-reels: one track per person per shot instead of a face per frame, so a person is named once per track and two tracks seen together are two people. Proposal: Claude Doc "Face tracks in video".
 - `runtimes/facetracks.py` (runtime `face-tracks`, model `buffalo_l-tracks`): ffmpeg decodes the first frame at or after each tick of `fps` (yadif on interlaced frames only), buffalo_l finds and embeds the faces, a tracker joins them (`iou`, `iou-emb` the default, or `byte` with ByteTrack's second pass on unsure faces), ending tracks at `cuts` and after `max_gap_s`. Each face gets a quality (detection score x size x sharpness x frontal); a track's embedding is the quality-weighted mean; its best `stills` (at least `still_gap_s` apart) are saved as JPEG frames. Answers `together`, the pairs of tracks seen in the same frame.
