@@ -90,7 +90,7 @@ def picture(tmp_path, name="p.jpg", w=200, h=100):
     return str(p)
 
 
-def size(r):
+def size_of(r):
     return Image.open(io.BytesIO(r.content)).size
 
 
@@ -129,10 +129,10 @@ def test_index_a_picture_keep_its_copy_and_cut_crops(client, scheduler, tmp_path
     f1 = img["faces"][0]["id"]
     assert client.get(f"/api/faces/{f1}").json()["id"] == f1
     crop = client.get(f"/api/faces/{f1}/crop", params=dict(px=64))
-    assert crop.status_code == 200 and max(size(crop)) == 64  # square, less what falls off the picture's edge
+    assert crop.status_code == 200 and max(size_of(crop)) == 64  # square, less what falls off the picture's edge
     os.remove(p)  # the original went away: the crop comes from the kept copy instead
     crop = client.get(f"/api/faces/{img['faces'][1]['id']}/crop", params=dict(px=48, pad=9))
-    assert crop.status_code == 200 and max(size(crop)) == 48
+    assert crop.status_code == 200 and max(size_of(crop)) == 48
 
 
 def test_faces_made_elsewhere_and_bad_requests(client, tmp_path):
@@ -245,3 +245,29 @@ def test_tags(client):
     assert client.put("/api/faces/tags/nursery", json=dict(opt_in=True, note="children")).json()["opt_in"] is True
     assert [t["tag"] for t in client.get("/api/faces/tags").json()["items"]] == ["nursery"]
     assert client.put("/api/faces/tags/%20", json=dict(opt_in=True)).status_code == 400
+
+
+def test_any_picture_format_and_a_photo_taken_on_its_side(client, tmp_path):
+    """A HEIC (an iPhone's) and a camera raw file get a kept copy and crops; a JPEG stored on its side reports its upright size, the
+    pixels its faces' boxes are in."""
+    from strata_python import images
+    from strata_python.testing import tiny_dng
+
+    images.extensions()  # teaches Pillow to write HEIC too, for this test's picture
+    made = dict(bbox=[10, 10, 40, 40], det_score=0.9, embedding=person(4))
+    heic = tmp_path / "phone.heic"
+    Image.new("RGB", (300, 200), (90, 60, 30)).save(heic)
+    raw = tiny_dng(tmp_path / "camera.dng", (120, 80))
+    turned = tmp_path / "turned.jpg"
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (300, 200)).save(turned, exif=exif.tobytes())
+    for ref, path, size in (("h", str(heic), (300, 200)), ("r", raw, (120, 80)), ("t", str(turned), (200, 300))):
+        img = client.post(
+            "/api/faces/images", json=dict(app="strata-stills", ref=ref, path=path, faces=[made], model="buffalo_l")
+        ).json()
+        assert (img["width"], img["height"]) == size
+        assert img["medium"].endswith(".webp")
+        crop = client.get(f"/api/faces/{img['faces'][0]['id']}/crop", params=dict(px=32))
+        assert crop.status_code == 200
+        assert max(size_of(crop)) == 32
