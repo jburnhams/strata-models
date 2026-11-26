@@ -67,6 +67,20 @@ def test_whisper_on_the_gpu(role):
 
 
 @pytest.mark.skipif(
+    not AUDIO or not os.path.isdir(os.path.join(MODELS, "venvs", "speaker")),
+    reason="needs STRATAMODELS_TEST_AUDIO and the speaker worker venv (scripts/setup_worker_venv.sh speaker)",
+)
+def test_speaker_embeddings_on_the_gpu():
+    """Two stretches of the sample (one speaker) come out close together; a stretch too short to place answers null."""
+    items = [dict(path=AUDIO, clip=[0.0, 4.0]), dict(path=AUDIO, clip=[5.0, 9.0]), dict(path=AUDIO, clip=[0.0, 0.2])]
+    out, _ = measure(Registry.load().resolve("speaker-embedding"), dict(items=items))
+    a, b, short = out["embeddings"]
+    assert out["dim"] == 192 and short is None and abs(sum(v * v for v in a) - 1) < 1e-3
+    print(f"same voice, two stretches: cosine {sum(x * y for x, y in zip(a, b)):.3f}")
+    assert sum(x * y for x, y in zip(a, b)) > 0.5
+
+
+@pytest.mark.skipif(
     not IMAGE or runtimes.available()["insightface"], reason="needs STRATAMODELS_TEST_IMAGE and insightface"
 )
 def test_views_give_boxes_back_in_the_original_picture(tmp_path):

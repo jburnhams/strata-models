@@ -68,7 +68,7 @@ description = "Label sounds in audio windows (AudioSet classes)"
 model = "ast-audioset"
 
 [roles.speaker-embedding]
-description = "Voice embeddings to tell speakers apart"
+description = "Voice embeddings to tell speakers apart: one normalised vector per stretch of speech ({items: [{path, clip?}]})"
 model = "ecapa-voxceleb"
 
 [roles.detect-people]
@@ -342,13 +342,14 @@ source = "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593"
 used_by = ["strata-360"]
 
 [models.ecapa-voxceleb]
-runtime = "speechbrain"
+runtime = "venv-worker"                      # workers/speaker.py in venv `speaker` (scripts/setup_worker_venv.sh speaker), 2026-11-26 for strata-voice
 name = "speechbrain/spkrec-ecapa-voxceleb"
 roles = ["speaker-embedding"]
 vram_gb = 0.3
 licence = "Apache-2.0"
 source = "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb"
-used_by = ["strata-360"]
+used_by = ["strata-360", "strata-voice"]
+options = { worker = "speaker", venv = "speaker" }
 
 [models.yolo11s-pose]
 runtime = "ultralytics"

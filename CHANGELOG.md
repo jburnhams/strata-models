@@ -2,6 +2,16 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-26
+
+**speaker-embedding is served: ECAPA in a worker venv of its own (branch `claude/project-thread-vao1r7`)**
+strata-voice is getting an Upload screen for found recordings of its speaker, which hold other voices too; it keeps the sentences that sound like the speaker's studio takes, so it needs a voice embedding per sentence. The role was listed with runtime `speechbrain`, which nothing here ran.
+- `workers/speaker.py` (**new**): SpeechBrain's `spkrec-ecapa-voxceleb` as a venv-worker. params `items: [{path, clip?}]` (a file named twice is decoded once); answer `{dim, embeddings, seconds}`, each vector L2-normalised, null for a stretch under 0.5 s, the middle 30 s of a longer one measured. Batches of 16.
+- `models.toml`: `ecapa-voxceleb` runs as `venv-worker` (`worker`/`venv` `speaker`), used by strata-voice too; the role's description gives the params. The registry seed updates the row, as it did for Whisper's move.
+- `scripts/setup_worker_venv.sh`: recipe `speaker` (torch and torchaudio 2.8 from PyTorch's CUDA 12.8 index, SpeechBrain 1.0.2 or later, numpy).
+- `tests/unit/test_speaker_worker.py` (**new**, a fake encoder and ffmpeg on a generated WAV); `tests/gpu/test_real_runtimes.py`: the real model on the test audio. Not yet run on the GPU machine.
+- `README.md`: the role in "Roles served now".
+
 ## 2026-11-25
 
 **Normal and low work is queued in bulk; a single job is high priority; nothing is held for a batch (branch `claude/project-thread-ul9xch`)**
