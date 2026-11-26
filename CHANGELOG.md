@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**page-build: a figure's own picture (branch `given-pictures`)**
+strata-scan now sets every page of a book with no scans but its pictures and patterns, and keeps a coloured print (a cover, a hand-coloured frontispiece) in colour; `crop` cuts a figure from the scan in grey with its paper whitened.
+- `runtimes/pagebuild.py`: a group's figure with an `image` (a picture file the app cut itself) is drawn from it, and `crop` leaves it alone. A path that is not a file is ignored and the figure is cut as before.
+- `tests/unit/test_pagebuild.py`.
+
 **Faces: confirm suggested faces on a person's page (branch `claude/faces-suggested`)**
 The propose step (#143) writes `suggested` faces, but the People screen only showed confirmed ones.
 - `faces/store.py`, `faces/api.py`: a person's `suggested` count beside `faces`; `GET /api/identities/{id}/faces` takes `offset`; `cluster` (and `POST /api/faces/cluster`) takes `suggested` (default true as before; false leaves out faces waiting on a suggestion).
