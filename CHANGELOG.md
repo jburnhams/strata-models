@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**face-tracks labelling: name groups of tracks, not each track; blank ones are ignored (branch `claude/project-thread-csasv3`)**
+The first generous pass on nine real clips (2026-11-26) gave 12 to 354 tracks a clip, 1,188 in all: too many to name one by one.
+- `scripts/evals/face_tracks_labels.py`: `regroup` (run by `propose`, or alone on saved answers) groups each clip's tracks by embedding (average linkage at cosine 0.4; tracks seen together never share a group), one contact-sheet row a group with each track's best face and id; labels.toml names groups, with per-track fixes. A group or track left blank becomes `ignore` boxes.
+- `evals/metrics.py`: an answered face on an `ignore` box that no label takes is not counted (MOT's "don't care" regions), so naming only the main people is enough.
+
 **face-tracks: faces in a video followed from frame to frame (branch `claude/project-thread-csasv3`)**
 A new role for strata-360 and strata-reels: one track per person per shot instead of a face per frame, so a person is named once per track and two tracks seen together are two people. Proposal: Claude Doc "Face tracks in video".
 - `runtimes/facetracks.py` (runtime `face-tracks`, model `buffalo_l-tracks`): ffmpeg decodes the first frame at or after each tick of `fps` (yadif on interlaced frames only), buffalo_l finds and embeds the faces, a tracker joins them (`iou`, `iou-emb` the default, or `byte` with ByteTrack's second pass on unsure faces), ending tracks at `cuts` and after `max_gap_s`. Each face gets a quality (detection score x size x sharpness x frontal); a track's embedding is the quality-weighted mean; its best `stills` (at least `still_gap_s` apart) are saved as JPEG frames. Answers `together`, the pairs of tracks seen in the same frame.

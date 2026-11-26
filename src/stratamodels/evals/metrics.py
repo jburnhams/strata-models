@@ -450,7 +450,8 @@ def _cut_f1(item, output, error):
 
 # ---- face tracks (role face-tracks) --------------------------------------------------------------------------------------------------------
 # An item's reference is a clip labelled at regular moments (scripts/evals/face_tracks_labels.py): `times` (every moment labelled, so a face
-# answered then that no label matches is a false one) and `people`: {name: [[time, x0, y0, x1, y1], ...]}. A track is looked up at a labelled
+# answered then that no label matches is a false one) and `people`: {name: [[time, x0, y0, x1, y1], ...]}, and `ignore` boxes (faces nobody
+# named: an answered face there that no label takes is not counted at all, MOT's "don't care" regions). A track is looked up at a labelled
 # moment by interpolating its boxes, so candidates that detect at different rates are compared at the same moments.
 TRACK_IOU = 0.5
 
@@ -482,16 +483,25 @@ def track_matches(item, output):
     for name, obs in (ref.get("people") or {}).items():
         for o in obs:
             by_time.setdefault(round(float(o[0]), 3), []).append((name, o[1:5]))
+    ignore = {}
+    for o in ref.get("ignore") or []:
+        ignore.setdefault(round(float(o[0]), 3), []).append(o[1:5])
     pairs, labelled, answered = [], 0, 0
     for t in [round(float(x), 3) for x in ref.get("times") or []]:
         gold = by_time.get(t, [])
         hyp = [(tr["id"], b) for tr in tracks if (b := track_box_at(tr.get("boxes") or [], t, fps)) is not None]
-        labelled, answered = labelled + len(gold), answered + len(hyp)
-        if not gold or not hyp:
-            continue
-        m = np.array([[iou(g[1], h[1]) for h in hyp] for g in gold])
-        rows, cols = linear_sum_assignment(-m)
-        pairs += [(gold[r][0], hyp[c][0], t) for r, c in zip(rows, cols, strict=True) if m[r, c] >= TRACK_IOU]
+        taken = set()
+        if gold and hyp:
+            m = np.array([[iou(g[1], h[1]) for h in hyp] for g in gold])
+            rows, cols = linear_sum_assignment(-m)
+            for r, c in zip(rows, cols, strict=True):
+                if m[r, c] >= TRACK_IOU:
+                    pairs.append((gold[r][0], hyp[c][0], t))
+                    taken.add(int(c))
+        dont_care = sum(
+            1 for c, h in enumerate(hyp) if c not in taken and any(iou(h[1], z) >= TRACK_IOU for z in ignore.get(t, []))
+        )
+        labelled, answered = labelled + len(gold), answered + len(hyp) - dont_care
     return pairs, labelled, answered
 
 
