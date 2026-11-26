@@ -512,7 +512,14 @@ def from_groups(
     for i, f in enumerate(cast("list[Mapping[str, Any]]", groups.get("figures") or [])):
         try:
             figures.append(
-                Figure(box=_permille(f.get("box"), w, h, f"figure {i}"), kind=str(f.get("kind") or "figure"))
+                Figure(
+                    box=_permille(f.get("box"), w, h, f"figure {i}"),
+                    kind=str(f.get("kind") or "figure"),
+                    # a picture the app cut itself (strata-scan keeps a coloured print in colour, which `crop` makes grey): drawn as given
+                    image=str(f["image"])
+                    if isinstance(f.get("image"), str) and os.path.isfile(str(f["image"]))
+                    else None,
+                )
             )
         except PageError as e:
             raise RunError(f"bad groups: {e}") from e
@@ -791,7 +798,14 @@ def from_layout(layout: Mapping[str, Any], w: float, h: float, dpi: float) -> Pa
     for i, f in enumerate(cast("list[Mapping[str, Any]]", layout.get("figures") or [])):
         try:
             figures.append(
-                Figure(box=_permille(f.get("box"), w, h, f"figure {i}"), kind=str(f.get("kind") or "figure"))
+                Figure(
+                    box=_permille(f.get("box"), w, h, f"figure {i}"),
+                    kind=str(f.get("kind") or "figure"),
+                    # a picture the app cut itself (strata-scan keeps a coloured print in colour, which `crop` makes grey): drawn as given
+                    image=str(f["image"])
+                    if isinstance(f.get("image"), str) and os.path.isfile(str(f["image"]))
+                    else None,
+                )
             )
         except PageError as e:
             raise RunError(f"bad layout: {e}") from e
