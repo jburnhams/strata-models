@@ -44,12 +44,11 @@ def test_pad_out_of_range_is_refused(pad):
 @pytest.mark.parametrize("ext", [".jpg", ".heic", ".avif", ".jxl", ".png", ".webp"])
 def test_the_runtime_reads_what_phones_and_cameras_write(tmp_path, ext):
     """HEIC from iPhones, AVIF, JPEG XL and the rest, as OpenCV's BGR array (red stays red), through strata-python's reader."""
-    from PIL import Image
-    from strata_python import images
+    from strata_python.testing import tiny_picture
 
-    images.extensions()  # teaches Pillow to write HEIC and JPEG XL too, for this test's picture
-    p = str(tmp_path / f"p{ext}")
-    Image.new("RGB", (64, 48), (220, 20, 20)).save(p)
+    p = tiny_picture(
+        tmp_path / f"p{ext}", (64, 48), (220, 20, 20)
+    )  # in a child: x265 lowers the priority of the process that encodes a HEIC (macOS)
     img = faces._read(p)
     assert img.shape == (48, 64, 3)
     b, _, r = (int(v) for v in img[24, 32])

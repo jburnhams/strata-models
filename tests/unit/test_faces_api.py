@@ -250,13 +250,12 @@ def test_tags(client):
 def test_any_picture_format_and_a_photo_taken_on_its_side(client, tmp_path):
     """A HEIC (an iPhone's) and a camera raw file get a kept copy and crops; a JPEG stored on its side reports its upright size, the
     pixels its faces' boxes are in."""
-    from strata_python import images
-    from strata_python.testing import tiny_dng
+    from strata_python.testing import tiny_dng, tiny_picture
 
-    images.extensions()  # teaches Pillow to write HEIC too, for this test's picture
     made = dict(bbox=[10, 10, 40, 40], det_score=0.9, embedding=person(4))
-    heic = tmp_path / "phone.heic"
-    Image.new("RGB", (300, 200), (90, 60, 30)).save(heic)
+    heic = tiny_picture(
+        tmp_path / "phone.heic", (300, 200), (90, 60, 30)
+    )  # in a child: x265 lowers the encoding process's priority (macOS)
     raw = tiny_dng(tmp_path / "camera.dng", (120, 80))
     turned = tmp_path / "turned.jpg"
     exif = Image.Exif()
