@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**face-tracks labelling: name groups of tracks, not each track; blank ones are ignored (branch `claude/project-thread-csasv3`)**
+The first generous pass on nine real clips (2026-11-26) gave 12 to 354 tracks a clip, 1,188 in all: too many to name one by one.
+- `scripts/evals/face_tracks_labels.py`: `regroup` (run by `propose`, or alone on saved answers) groups each clip's tracks by embedding (average linkage at cosine 0.4; tracks seen together never share a group), one contact-sheet row a group with each track's best face and id; labels.toml names groups, with per-track fixes. A group or track left blank becomes `ignore` boxes.
+- `evals/metrics.py`: an answered face on an `ignore` box that no label takes is not counted (MOT's "don't care" regions), so naming only the main people is enough.
+
 **speaker-embedding is served: ECAPA in a worker venv of its own (branch `claude/project-thread-vao1r7`)**
 strata-voice is getting an Upload screen for found recordings of its speaker, which hold other voices too; it keeps the sentences that sound like the speaker's studio takes, so it needs a voice embedding per sentence. The role was listed with runtime `speechbrain`, which nothing here ran.
 - `workers/speaker.py` (**new**): SpeechBrain's `spkrec-ecapa-voxceleb` as a venv-worker. params `items: [{path, clip?}]` (a file named twice is decoded once); answer `{dim, embeddings, seconds}`, each vector L2-normalised, null for a stretch under 0.5 s, the middle 30 s of a longer one measured. Batches of 16.

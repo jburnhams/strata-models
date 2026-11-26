@@ -87,3 +87,12 @@ def test_failed_jobs_and_unlabelled_items():
     for m in ("id_f1", "track_mixed", "track_split", "track_face_miss"):
         assert score(m, plain, out()) is None
     assert score("id_f1", item({}, [0.0]), out()) == 1  # nobody there and nobody answered
+
+
+def test_a_face_where_nobody_was_named_is_not_counted():
+    it = item({"ana": [[t, *A] for t in TIMES]}, TIMES)
+    it["reference"]["ignore"] = [[t, *B] for t in TIMES]
+    o = out(track(1, [(t, A) for t in TIMES]), track(2, [(t, B) for t in TIMES]))
+    assert score("id_f1", it, o) == 1
+    it["reference"]["ignore"] = []
+    assert score("id_f1", it, o) == pytest.approx(2 * 4 / 12)
