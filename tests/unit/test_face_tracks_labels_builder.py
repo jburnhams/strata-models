@@ -109,7 +109,9 @@ def test_propose_regroup_then_build(tmp_path):
         '[clip-01.tracks]\n2 = "ben, none@1.0"\n'
     )
     B.regroup(str(tmp_path))
-    assert (tmp_path / "labels.new.toml").exists()  # named labels are never overwritten
+    assert (tmp_path / "labels.new.toml").exists() and (
+        tmp_path / "clip-01.new.png"
+    ).exists()  # named labels keep their sheets
     ds = B.build(str(tmp_path), name="ft-test", every=0.5)
     it = ds.items[0]
     assert it["input"] == {"path": os.path.abspath("/v/a.mp4"), "cuts": [2.0]}
@@ -135,3 +137,17 @@ def test_build_with_nothing_labelled_refuses(tmp_path):
     )
     with pytest.raises(SystemExit, match="no labelled clips"):
         B.build(str(tmp_path))
+
+
+def test_regroup_overwrites_labels_that_name_nobody(tmp_path):
+    B.propose(str(tmp_path), ["/v/a.mp4"], client=FakeClient(tmp_path))
+    assert not B.has_names(str(tmp_path / "labels.toml"))  # the header's examples are comments, not names
+    B.regroup(str(tmp_path), sim=0.9)
+    assert not (tmp_path / "labels.new.toml").exists() and "sim = 0.9" in (tmp_path / "labels.toml").read_text()
+
+
+def test_a_clip_of_only_false_faces_is_kept(tmp_path):
+    B.propose(str(tmp_path), ["/v/a.mp4"], client=FakeClient(tmp_path))
+    (tmp_path / "labels.toml").write_text('[clip-01]\n[clip-01.groups]\ng1 = "none"\ng2 = "none"\n')
+    it = B.build(str(tmp_path), name="ft-test").items[0]
+    assert it["reference"]["people"] == {} and it["reference"]["ignore"] == []

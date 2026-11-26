@@ -159,8 +159,26 @@ def _keys(out_dir):
     return sorted(f[:-5] for f in os.listdir(out_dir) if re.fullmatch(r"clip-\d+\.json", f))
 
 
+def has_names(path):
+    """Whether a labels file holds any name (a group or track labelled, `none` included): a person's work, never to be overwritten."""
+    if not os.path.exists(path):
+        return False
+    with open(path, "rb") as f:
+        labels = tomllib.load(f)
+    return any(
+        str(v).strip()
+        for clip in labels.values()
+        if isinstance(clip, dict)
+        for part in ("groups", "tracks")
+        for v in (clip.get(part) or {}).values()
+    )
+
+
 def regroup(out_dir, sim=GROUP_SIM):
-    """Groups, contact sheets and labels.toml (labels.new.toml when labels.toml already holds a name) from the saved answers."""
+    """Groups, contact sheets and labels.toml from the saved answers. When labels.toml already holds a name, the new grouping goes to
+    labels.new.toml and clip-NN.new.png instead, so the named file keeps the sheets its group numbers refer to."""
+    keep = has_names(os.path.join(out_dir, "labels.toml"))
+    suffix = ".new" if keep else ""
     lines = [
         "# Name each group worth naming: the same name = the same person; none = not a face. Leave the rest empty: they are not held against",
         '# anyone. Fix a track in the wrong group under [clip-NN.tracks]: 17 = "ben", or 17 = "ana, ben@14.2" (ben from 14.2 s).',
@@ -171,12 +189,12 @@ def regroup(out_dir, sim=GROUP_SIM):
             saved = json.load(f)
         answer, clip = saved["answer"], saved.get("clip")
         groups = group_tracks(answer, sim)
-        contact_sheet(answer, groups, os.path.join(out_dir, f"{key}.png"))
+        contact_sheet(answer, groups, os.path.join(out_dir, f"{key}{suffix}.png"))
         by_id = {t["id"]: t for t in answer["tracks"]}
         span = f" {clip[0]:g}-{clip[1]:g} s" if clip else ""
         lines += [
             f"[{key}]",
-            f"# {os.path.basename(saved['path'])}{span}: {len(answer['tracks'])} tracks in {len(groups)} groups, sheet {key}.png",
+            f"# {os.path.basename(saved['path'])}{span}: {len(answer['tracks'])} tracks in {len(groups)} groups, sheet {key}{suffix}.png",
             f"sim = {sim:g}   # the grouping's similarity: build groups the tracks again with it, so leave it as it is",
             f"[{key}.groups]",
         ]
@@ -185,9 +203,7 @@ def regroup(out_dir, sim=GROUP_SIM):
             lines.append(f'g{n} = ""   # {len(g)} tracks, {secs:.0f} s: {", ".join(str(i) for i in g)}')
         lines += [f"[{key}.tracks]", ""]
         print(f"{key}: {len(answer['tracks'])} tracks in {len(groups)} groups")
-    labels = os.path.join(out_dir, "labels.toml")
-    if os.path.exists(labels) and re.search(r'= "[^"]+"', open(labels, encoding="utf8").read()):
-        labels = os.path.join(out_dir, "labels.new.toml")  # never overwrite a person's work
+    labels = os.path.join(out_dir, f"labels{suffix}.toml")  # never overwrite a person's work
     with open(labels, "w", encoding="utf8") as f:
         f.write("\n".join(lines))
     print(f"fill in {labels}")
@@ -263,7 +279,8 @@ def build(out_dir, name="face-tracks-home", every=0.5):
         with open(os.path.join(out_dir, f"{key}.json"), encoding="utf8") as f:
             saved = json.load(f)
         it = item_for(key, saved, labels[key], every)
-        if it["reference"]["people"]:
+        named = [v for part in ("groups", "tracks") for v in (labels[key].get(part) or {}).values() if str(v).strip()]
+        if it["reference"]["people"] or named:  # a clip whose faces are all `none` stays: its false faces count
             items.append(it)
     if not items:
         raise SystemExit("no labelled clips")
