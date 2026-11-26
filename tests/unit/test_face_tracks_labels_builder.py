@@ -16,8 +16,9 @@ spec.loader.exec_module(B)
 
 
 def test_clip_arguments():
-    assert B.parse_clip("/v/a.mp4") == ("/v/a.mp4", None)
-    assert B.parse_clip("/v/a.mp4@60-150.5") == ("/v/a.mp4", [60.0, 150.5])
+    V = os.path.abspath("/v/a.mp4")  # a drive letter and backslashes on Windows
+    assert B.parse_clip("/v/a.mp4") == (V, None)
+    assert B.parse_clip("/v/a.mp4@60-150.5") == (V, [60.0, 150.5])
 
 
 def test_labels_name_people_and_switches():
@@ -83,7 +84,7 @@ def test_propose_then_build(tmp_path):
     )
     ds = B.build(str(tmp_path), name="ft-test", every=0.5)
     it = ds.items[0]
-    assert it["input"] == {"path": "/v/a.mp4", "cuts": [2.0]}
+    assert it["input"] == {"path": os.path.abspath("/v/a.mp4"), "cuts": [2.0]}
     ref = it["reference"]
     assert ref["times"] == [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
     assert [o[0] for o in ref["people"]["ana"]] == ref["times"]  # track 1 to 1.9 and half a frame, then track 3
