@@ -427,7 +427,7 @@ def test_review_offers_the_tightest_group_first_then_ranks_by_confirmed_faces(fs
     assert (
         r["counts"]["0.50"] == 8
         and r["counts"]["0.95"] <= 8
-        and list(r["counts"])[0] == "0.50"
+        and next(iter(r["counts"])) == "0.50"
         and len(r["counts"]) == 10
     )
     every = fs.review(ann["id"], "buffalo_l", limit=10000, min_likeness=0.5)
