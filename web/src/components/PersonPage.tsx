@@ -9,7 +9,7 @@
 import { useState, type FormEvent } from 'react'
 import { useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { AsyncButton, BulkBar, Button, DataView, EmptyState, Field, Input, PageHeader, SelectableGrid, TableSkeleton, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable } from 'strata-react'
+import { AsyncButton, BulkBar, Button, DataView, EmptyState, Field, Input, NumberField, PageHeader, SelectableGrid, TableSkeleton, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable } from 'strata-react'
 import { facesApi, personName, type Face, type Person } from '../faces'
 import { FaceInPhoto } from './FaceInPhoto'
 
@@ -73,12 +73,20 @@ function Faces({ person, faces, open, setOpen }: Open & { person: Person; faces:
 }
 
 const ROUND = 48
+// From this many confirmed faces the person's own faces are a sure model, so every suggestion above a chosen likeness is shown at once
+// rather than in rounds. Over all suggestions, the name's main Immich cluster agreed 99.8 % at 65-70 % alike and 100 % from 70 % up.
+const BULK_FROM = 100
+const DEFAULT_MIN = 70
+const isPct = (raw: string) => /^\d{2}$/.test(raw) && Number(raw) >= 50 && Number(raw) <= 99
 const likeness = (d: number) => `${format.share(Math.max(0, 1 - d))} alike`
 
 function Round({ person, open, setOpen }: Open & { person: Person }) {
   const qc = useQueryClient()
   const who = personName(person)
-  const load = useLoad({ queryKey: ['faces', 'review', person.id], queryFn: () => facesApi.review(person.id, ROUND) })
+  const bulk = person.faces >= BULK_FROM
+  const [minRaw, setMin] = useSearchParam<string>('min', { default: String(DEFAULT_MIN), parse: isPct })
+  const min = Number(minRaw)
+  const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100) : facesApi.review(person.id, ROUND)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
   const undoable = useUndoable()
   const rows = load.status === 'ready' ? load.data.items.filter(f => !undoable.isRemoved(String(f.id))) : []
   const selection = useSelection(rows, f => String(f.id), () => true)
@@ -105,11 +113,25 @@ function Round({ person, open, setOpen }: Open & { person: Person }) {
     <section aria-labelledby="round" className="grid gap-4">
       <h2 id="round" className="type-heading">{`Is this ${who}? ${format.count(person.suggested, 'face')} suggested`}</h2>
       {r && <p className="type-body-sm max-w-prose text-muted-foreground">{`${basis} ${format.integer(r.near['0.3'] ?? 0)} are very close and ${format.integer(r.near['0.4'] ?? 0)} close. Untick any that are someone else.`}</p>}
-      <DataView state={load} isEmpty={() => rows.length === 0} skeleton={<TableSkeleton rows={2} columns={6} />} empty={<EmptyState title="Nothing left to confirm">{`Every face suggested for ${who} has been decided.`}</EmptyState>}>
+      {bulk && (
+        <div className="grid gap-2">
+          <Field label="Show every suggestion at least this alike" className="max-w-xs">
+            <NumberField value={min} min={50} max={99} step={1} unit="%" onChange={v => { if (v !== null) setMin(String(v)) }} />
+          </Field>
+          {r && (
+            <ul className="flex flex-wrap gap-2" aria-label="Suggestions at each likeness">
+              {Object.entries(r.counts).sort(([a], [b]) => Number(b) - Number(a)).map(([k, n]) => (
+                <li key={k}><Button size="sm" variant={Math.round(Number(k) * 100) === min ? 'default' : 'ghost'} onPress={() => setMin(String(Math.round(Number(k) * 100)))}>{`${format.share(Number(k))}+: ${format.integer(n)}`}</Button></li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <DataView state={load} isEmpty={() => rows.length === 0} skeleton={<TableSkeleton rows={2} columns={6} />} empty={<EmptyState title={bulk && person.suggested > 0 ? `None at ${format.share(min / 100)} or more` : 'Nothing left to confirm'}>{bulk && person.suggested > 0 ? 'Lower the likeness to see more.' : `Every face suggested for ${who} has been decided.`}</EmptyState>}>
         {() => (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="default" disabled={yes.length === 0} onPress={() => decide(false)}>{`Confirm ${format.integer(yes.length)}`}</Button>
+              <Button variant="default" disabled={yes.length === 0} onPress={() => decide(false)}>{bulk ? `Confirm all ${format.integer(yes.length)} at ${format.share(min / 100)}+` : `Confirm ${format.integer(yes.length)}`}</Button>
               {no.length > 0 && <Button onPress={() => decide(true)}>{`Confirm ${format.integer(yes.length)}, the other ${format.integer(no.length)} are not ${who}`}</Button>}
               {selection.count === 1 && <Button variant="ghost" onPress={() => setOpen(String(yes[0]))}>Show in its photo</Button>}
             </div>

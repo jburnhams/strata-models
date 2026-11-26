@@ -7,6 +7,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 **Faces: suggested faces in rounds, most certain first, re-scored as a person confirms (branch `claude/faces-review`)**
 One person had 5,583 suggestions: too many to look through. Measured first (read-only, live data): for the five people with most suggestions, the first round (top 50 by distance to the tightest group) sat 0.08-0.18 from it and every face Immich had clustered was in the person's main Immich cluster (46/46 to 50/50); a contact sheet of the largest showed one person throughout.
 - `faces/store.py` `review`, `GET /api/identities/{id}/review?limit=`: the next round with each face's `distance`; basis `group` (cold start) or `confirmed` (3+ confirmed); rejected lookalikes left out; counts within 0.3/0.4/0.5.
+- Once a person has 100 confirmed faces: a likeness picker (`NumberField`, `?min=` in the address, default 70 %) shows every suggestion at least that alike at once in the virtualised grid, with how many there are at each likeness (50-95 %), all confirmable in one action (`min_likeness` and `counts` on `/review`).
 - Web: a person's page asks "Is this X?" with a round of 48, every face chosen, its likeness under each tile (`format.share`); Confirm N, or Confirm N and the unticked are not them; Undo while it waits; the full list moved behind "Browse every suggestion".
 - Tests: `test_faces_store.py`, `test_faces_api.py`, `web/tests/integration/Faces.test.tsx`.
 

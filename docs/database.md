@@ -68,5 +68,7 @@ One face store for every app (design, survey and decisions: the face database pr
   afresh on every call against the person's own confirmed faces once there are 3 (centre of their densest bunch), before that against
   the largest tight group (average linkage at 0.35) of their 2000 most confident suggestions; a suggestion nearer a face rejected for
   them than to that centre is left out. So each round confirmed makes the next one surer, with nothing to re-run.
+  `min_likeness` (likeness = 1 - distance) returns every suggestion at least that alike at once (up to 10,000), and `counts` says how many
+  there are at each likeness from 50 to 95 %; the web app switches to that once a person has 100 confirmed faces (default 70 %).
 - **pgvector** lives in `public` and the service's connection searches only `stratamodels`, so the type, operator and operator class are
   schema-qualified (`strata_python.db.vectors`). SQLite (tests) keeps vectors as text and searches in Python.

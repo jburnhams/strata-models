@@ -424,6 +424,15 @@ def test_review_offers_the_tightest_group_first_then_ranks_by_confirmed_faces(fs
     assert {f["id"] for f in r["items"]} <= set(ones) and len(r["items"]) == 5
     assert r["items"][0]["distance"] <= r["items"][-1]["distance"] and r["items"][0]["status"] == "suggested"
     assert r["near"]["0.3"] == 8 and r["left_out"] == 0
+    assert (
+        r["counts"]["0.50"] == 8
+        and r["counts"]["0.95"] <= 8
+        and list(r["counts"])[0] == "0.50"
+        and len(r["counts"]) == 10
+    )
+    every = fs.review(ann["id"], "buffalo_l", limit=10000, min_likeness=0.5)
+    assert len(every["items"]) == 8 and all(1 - f["distance"] >= 0.5 for f in every["items"])
+    assert fs.review(ann["id"], "buffalo_l", limit=10000, min_likeness=0.9999)["items"] == []
     fs.assign(
         twos[:1], ann["id"], "strata-models", status="rejected"
     )  # one of the strays is not Ann: its lookalikes leave the round

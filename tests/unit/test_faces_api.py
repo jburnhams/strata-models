@@ -327,4 +327,6 @@ def test_review_round_over_http(client, scheduler, tmp_path):
     client.post("/api/faces/assign", json=dict(face_ids=ids, identity_id=who["id"], app="t", status="suggested"))
     r = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=2)).json()
     assert r["basis"] == "group" and len(r["items"]) == 2 and "distance" in r["items"][0]
+    allr = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=5000, min_likeness=0.5)).json()
+    assert len(allr["items"]) == 4 and allr["counts"]["0.50"] == 4
     assert client.get("/api/identities/999/review").status_code == 404

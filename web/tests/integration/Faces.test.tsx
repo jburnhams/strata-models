@@ -161,6 +161,37 @@ describe('Faces: rounds of suggested faces', () => {
   })
 })
 
+describe('Faces: every suggestion above a likeness, once a person has many confirmed faces', () => {
+  it('shows every suggestion at the chosen likeness with counts at each, and confirms them all at once', async () => {
+    faceMock.people[2].faces = 150
+    const { user, unmount } = setup(<App />, { route: '/faces/people/3' })
+    const grid = await screen.findByRole('grid', { name: 'Is this Cy?' })
+    expect(faceMock.calls).toContain('review 3 up to 10000 at 0.7')
+    expect(within(grid).getAllByRole('row')).toHaveLength(2) // 90% and 75% alike; the 60% one is below 70%
+    const counts = screen.getByRole('list', { name: 'Suggestions at each likeness' })
+    expect(within(counts).getByRole('button', { name: '90%+: 1' })).toBeInTheDocument()
+    await user.click(within(counts).getByRole('button', { name: '50%+: 3' }))
+    await waitFor(() => expect(faceMock.calls).toContain('review 3 up to 10000 at 0.5'))
+    expect(await screen.findByRole('button', { name: 'Confirm all 3 at 50%+' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm all 3 at 50%+' }))
+    expect(await screen.findByText(/Confirmed 3\sfaces as Cy\./)).toBeInTheDocument()
+    await commits(unmount, 'assign 61,62,63 to 3 confirmed by strata-models')
+  })
+  it('takes the likeness from the address, a typed one too, and says when none are that alike', async () => {
+    faceMock.people[2].faces = 150
+    const { user } = setup(<App />, { route: '/faces/people/3?min=95' })
+    expect(await screen.findByText('None at 95% or more')).toBeInTheDocument()
+    expect(screen.getByText('Lower the likeness to see more.')).toBeInTheDocument()
+    const field = screen.getByRole('textbox', { name: 'Show every suggestion at least this alike' })
+    await user.clear(field)
+    await user.type(field, '80')
+    await user.tab()
+    await waitFor(() => expect(faceMock.calls).toContain('review 3 up to 10000 at 0.8'))
+    await user.clear(field)
+    await user.tab() // an empty field keeps the last likeness
+  })
+})
+
 describe('Faces: suggested faces of a person', () => {
   it('shows the suggested faces and confirms the chosen ones, with Undo', async () => {
     const { user, unmount } = setup(<App />, { route: '/faces/people/3' })
