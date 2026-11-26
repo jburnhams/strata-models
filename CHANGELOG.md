@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-26
 
+**page-build: a figure's own picture (branch `given-pictures`)**
+strata-scan now sets every page of a book with no scans but its pictures and patterns, and keeps a coloured print (a cover, a hand-coloured frontispiece) in colour; `crop` cuts a figure from the scan in grey with its paper whitened.
+- `runtimes/pagebuild.py`: a group's figure with an `image` (a picture file the app cut itself) is drawn from it, and `crop` leaves it alone. A path that is not a file is ignored and the figure is cut as before.
+- `tests/unit/test_pagebuild.py`.
+
 **faces: possible labels (`face_hints`) and proposing people from them (branch `claude/face-hints`)**
 One global layer of decisions stays (owner, 2026-11-26); an app's possible labels sit beside it and only ever produce `suggested` faces.
 - `db/models.py`, migration `7c41d9e2a0b3` (**new** table `face_hints`: app, picture, optional face, app_ref, name, status possible|confirmed, batch).

@@ -819,3 +819,37 @@ def test_without_a_fallback_to_be_had_the_word_stays_in_its_face(tmp_path, ttf, 
     monkeypatch.setattr(fontfit, "fetch", fetch)
     assert pagebuild._fallback({"models_dir": str(tmp_path)}) is None
     assert pagebuild._glyphs(str(tmp_path / "no.ttf")) == frozenset()
+
+
+def test_a_figure_given_its_picture_is_drawn_from_it_and_not_cut_again(tmp_path):
+    scan = tmp_path / "scan.png"
+    Image.new("RGB", (600, 400), (200, 180, 150)).save(scan)
+    given = tmp_path / "red.png"
+    Image.new("RGB", (60, 40), (200, 20, 20)).save(given)
+    groups = dict(
+        blocks=[],
+        figures=[
+            dict(box=[100, 100, 300, 300], image=str(given)),
+            dict(box=[500, 500, 600, 600], image="/no/such.png"),
+        ],
+    )
+    page = pagebuild.page_of(dict(ocr=dict(width=600, height=400, lines=[]), groups=groups, dpi=150))
+    assert [f.image for f in page.figures] == [str(given), None]
+    r = pagebuild.run(
+        handle(),
+        dict(
+            ocr=dict(width=600, height=400, lines=[]),
+            groups=groups,
+            image=str(scan),
+            dpi=150,
+            crop=True,
+            out=str(tmp_path / "p.pdf"),
+        ),
+    )
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(r["pdf"])
+    red, green, _ = doc[0].render(scale=150 / 72).to_pil().convert("RGB").getpixel((120, 60))
+    doc.close()
+    assert red > 150
+    assert green < 100  # in colour: the given picture, not the scan cut in grey
