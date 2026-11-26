@@ -12,6 +12,7 @@ job counts as wrong for binary metrics and as all errors for ratios, never silen
 import collections
 import dataclasses
 import functools
+import itertools
 import json
 import math
 import re
@@ -445,6 +446,115 @@ def _cut_f1(item, output, error):
         return 1.0  # one shot, and nothing claimed: right
     hit = match_cuts(ref, got, tol)
     return 2 * hit / (len(ref) + len(got))
+
+
+# ---- face tracks (role face-tracks) --------------------------------------------------------------------------------------------------------
+# An item's reference is a clip labelled at regular moments (scripts/evals/face_tracks_labels.py): `times` (every moment labelled, so a face
+# answered then that no label matches is a false one) and `people`: {name: [[time, x0, y0, x1, y1], ...]}. A track is looked up at a labelled
+# moment by interpolating its boxes, so candidates that detect at different rates are compared at the same moments.
+TRACK_IOU = 0.5
+
+
+def track_box_at(boxes, t, fps):
+    """A track's box at time t (its boxes: [[time, x0, y0, x1, y1, ...]] in time order): between two of its boxes, the line between them;
+    within half a frame of its first or last, that box; else None (the track is not on screen then)."""
+    if not boxes:
+        return None
+    half = 0.5 / fps if fps else 0.1
+    if t < boxes[0][0] - half - 1e-9 or t > boxes[-1][0] + half + 1e-9:
+        return None
+    for a, b in itertools.pairwise(boxes):
+        if a[0] <= t <= b[0]:
+            w = 0.0 if b[0] == a[0] else (t - a[0]) / (b[0] - a[0])
+            return [a[k] + w * (b[k] - a[k]) for k in range(1, 5)]
+    return list((boxes[0] if t < boxes[0][0] else boxes[-1])[1:5])
+
+
+def track_matches(item, output):
+    """What a face-tracks answer matched against the item's labels: (pairs, labelled, answered), pairs being (person, track id, time) of each
+    labelled face matched one to one (IoU >= TRACK_IOU) with a track's box at that moment; labelled and answered count faces at the moments."""
+    from scipy.optimize import linear_sum_assignment
+
+    ref = item.get("reference") or {}
+    fps = float((output or {}).get("fps") or 0)
+    tracks = (output or {}).get("tracks") or []
+    by_time = {}
+    for name, obs in (ref.get("people") or {}).items():
+        for o in obs:
+            by_time.setdefault(round(float(o[0]), 3), []).append((name, o[1:5]))
+    pairs, labelled, answered = [], 0, 0
+    for t in [round(float(x), 3) for x in ref.get("times") or []]:
+        gold = by_time.get(t, [])
+        hyp = [(tr["id"], b) for tr in tracks if (b := track_box_at(tr.get("boxes") or [], t, fps)) is not None]
+        labelled, answered = labelled + len(gold), answered + len(hyp)
+        if not gold or not hyp:
+            continue
+        m = np.array([[iou(g[1], h[1]) for h in hyp] for g in gold])
+        rows, cols = linear_sum_assignment(-m)
+        pairs += [(gold[r][0], hyp[c][0], t) for r, c in zip(rows, cols, strict=True) if m[r, c] >= TRACK_IOU]
+    return pairs, labelled, answered
+
+
+def _id_f1(item, output, error):
+    """The identity F1 of multi-object tracking (Ristani et al. 2016): people and tracks paired one to one so the most labelled faces fall in
+    their person's track; a face in another track, or in none, is missed, and an answered face not in its pair is false."""
+    if (item.get("reference") or {}).get("people") is None:
+        return None
+    if error:
+        return 0.0
+    from scipy.optimize import linear_sum_assignment
+
+    pairs, labelled, answered = track_matches(item, output)
+    if not labelled and not answered:
+        return 1.0
+    people = sorted({p for p, _, _ in pairs})
+    tracks = sorted({t for _, t, _ in pairs})
+    idtp = 0
+    if pairs:
+        c = np.zeros((len(people), len(tracks)))
+        for p, t, _ in pairs:
+            c[people.index(p), tracks.index(t)] += 1
+        rows, cols = linear_sum_assignment(-c)
+        idtp = int(c[rows, cols].sum())
+    return 2 * idtp / (labelled + answered)
+
+
+def _track_mixed(item, output, error):
+    """Tracks that hold two people (at least two labelled faces of each), over the tracks that match anyone."""
+    if (item.get("reference") or {}).get("people") is None or error:
+        return None
+    pairs, _, _ = track_matches(item, output)
+    counts = {}
+    for p, t, _ in pairs:
+        counts.setdefault(t, {}).setdefault(p, 0)
+        counts[t][p] += 1
+    return (sum(1 for c in counts.values() if sum(1 for n in c.values() if n >= 2) >= 2), len(counts))
+
+
+def _track_split(item, output, error):
+    """Extra tracks per person per shot: a person seen in one shot by three tracks counts two, over the person-shots labelled. Shots come from
+    the item's `cuts` (input)."""
+    if (item.get("reference") or {}).get("people") is None or error:
+        return None
+    cuts = sorted(float(c) for c in (item.get("input") or {}).get("cuts") or [])
+    shot = lambda t: sum(1 for c in cuts if t >= c - 1e-6)
+    pairs, _, _ = track_matches(item, output)
+    seen = {}
+    for p, t, when in pairs:
+        seen.setdefault((p, shot(when)), set()).add(t)
+    labelled = {(name, shot(float(o[0]))) for name, obs in item["reference"]["people"].items() for o in obs}
+    return (sum(len(v) - 1 for v in seen.values()), len(labelled))
+
+
+def _face_recall_tracks(item, output, error):
+    """Labelled faces that some track holds at that moment, over the labelled faces: a miss rate, lower is better."""
+    if (item.get("reference") or {}).get("people") is None:
+        return None
+    n = sum(len(v) for v in item["reference"]["people"].values())
+    if error:
+        return (n, n)
+    pairs, labelled, _ = track_matches(item, output)
+    return (labelled - len(pairs), labelled)
 
 
 def _avg_ranks(x):
@@ -1250,6 +1360,38 @@ METRICS = {
             "F1 of the answered cuts against the reference per item (1 when both say one shot)",
             "",
             _cut_f1,
+        ),
+        Metric(
+            "id_f1",
+            "mean",
+            "higher",
+            "Face tracks: identity F1, the labelled faces in their person's track (people and tracks paired one to one) against all labelled and answered faces",
+            "",
+            _id_f1,
+        ),
+        Metric(
+            "track_mixed",
+            "ratio",
+            "lower",
+            "Face tracks that hold two labelled people (two faces or more of each)",
+            "%",
+            _track_mixed,
+        ),
+        Metric(
+            "track_split",
+            "ratio",
+            "lower",
+            "Extra face tracks per labelled person per shot (one person in three tracks counts two)",
+            "%",
+            _track_split,
+        ),
+        Metric(
+            "track_face_miss",
+            "ratio",
+            "lower",
+            "Labelled faces that no face track holds at that moment",
+            "%",
+            _face_recall_tracks,
         ),
         Metric(
             "block_f1",
