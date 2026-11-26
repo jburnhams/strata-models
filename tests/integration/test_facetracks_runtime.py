@@ -87,3 +87,38 @@ def test_one_moving_face_is_one_track_in_the_videos_pixels(video, tmp_path):
         and x1 - x0 == pytest.approx(120, abs=6)
     )
     assert len(tr["stills"]) == 3 and all(s["image"].endswith(".jpg") for s in tr["stills"])
+
+
+def test_frames_keep_their_own_times_across_a_gap(tmp_path):
+    """A recording that stops for 3 s (concat puts the second part at 1 + 3 s) (a variable-rate file, as phones write): the frames after the gap keep their real times."""
+    path = tmp_path / "gap.mkv"
+    graph = "color=black:s=320x180:r=25:d=1[a];color=gray:s=320x180:r=25:d=1,setpts=PTS+3/TB[b];[a][b]concat=n=2:v=1[v]"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "nullsrc",
+            "-filter_complex",
+            graph,
+            "-map",
+            "[v]",
+            "-fps_mode",
+            "vfr",
+            "-c:v",
+            "libx264",
+            str(path),
+        ],
+        check=True,
+    )
+    got = [t for t, _ in facetracks.decode(exe(), str(path), 5, (160, 90), None)]
+    assert (
+        got[:5] == pytest.approx([0, 0.2, 0.4, 0.6, 0.8])
+        and got[5] == pytest.approx(4.0, abs=0.05)
+        and got[-1] == pytest.approx(4.8, abs=0.05)
+    )

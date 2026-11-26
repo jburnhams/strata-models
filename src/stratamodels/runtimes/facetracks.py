@@ -38,17 +38,21 @@ Answer: {tracks: [{id, shot, start, end, faces, quality, embedding, boxes: [[tim
 pose, det_score, quality, sharpness, embedding, image?}]}], together: [[track, track]] (seen in the same frame), shots: [{start, end}], fps,
 frames (decoded), width, height (the video's pixels: boxes are in them), duration, tracker, seconds, model, out_dir?}."""
 
+import collections
 import datetime
 import importlib
 import itertools
 import json
 import math
 import os
+import queue
+import re
 import subprocess
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import IO, Any
 
 import numpy as np
 
@@ -378,21 +382,44 @@ def probe(exe: str, path: str) -> dict[str, Any]:
         raise RunError(f"{path}: no video stream ({(out.stderr or '').strip()[-300:]})") from e
 
 
+SHOWINFO = re.compile(r"Parsed_showinfo.*?\sn:\s*\d+\s.*?pts_time:\s*(-?[\d.]+)")
+
+
+def read_times(stream: IO[bytes], times: "queue.Queue[float | None]", rest: "collections.deque[str]") -> None:
+    """ffmpeg's stderr: each picked frame's time (showinfo's pts_time) onto `times`, in order, then None at the end; the other lines into
+    `rest` (the last few, for an error message)."""
+    for raw in stream:
+        line = raw.decode("utf8", "replace").rstrip()
+        m = SHOWINFO.search(line)
+        if m:
+            times.put(float(m[1]))
+        elif line and "Parsed_showinfo" not in line:
+            rest.append(line)
+    times.put(None)
+
+
 def decode(
     exe: str, path: str, fps: float, size: tuple[int, int], clip: tuple[float, float] | None
 ) -> Iterator[tuple[float, np.ndarray]]:
     """(time in the file, BGR frame of `size`) at `fps`, from one ffmpeg process that is stopped when the caller stops reading."""
     w, h = size
-    cmd = [exe, "-nostdin", "-hide_banner", "-v", "error"]
+    cmd = [
+        exe,
+        "-nostdin",
+        "-hide_banner",
+        "-nostats",
+        "-v",
+        "info",
+    ]  # info: showinfo's lines, which carry each frame's own time
     offset = 0.0
     if clip is not None:
         offset = clip[0]
         cmd += ["-ss", f"{clip[0]:.6f}", "-t", f"{clip[1] - clip[0]:.6f}"]
-    # yadif only on frames flagged interlaced (a tape's), so progressive video is left sharp. Then the first frame at or after each tick k/fps:
-    # ffmpeg's fps filter keeps the last frame before the next half tick instead, two frames late at 5 fps on 25 fps video, and its boxes with
-    # them. So the time answered for frame k (k/fps) is at most one of the video's frames early.
+    # yadif only on frames flagged interlaced (a tape's), so progressive video is left sharp. Then the first frame at or after each tick k/fps
+    # (ffmpeg's fps filter keeps the last frame before the next half tick instead: two frames late at 5 fps on 25 fps video). Each frame's time
+    # is its own, from showinfo: a variable-rate video or a gap in the recording skips ticks, and counting frames would shift every box after.
     pick = f"select='isnan(prev_selected_t)+gte(floor(t*{fps:g})-floor(prev_selected_t*{fps:g})\\,1)'"
-    chain = f"yadif=deint=interlaced,{pick},scale={w}:{h}:flags=area"
+    chain = f"yadif=deint=interlaced,{pick},showinfo,scale={w}:{h}:flags=area"
     cmd += [
         "-i",
         os.path.abspath(path),
@@ -411,18 +438,25 @@ def decode(
     ]
     size_b = w * h * 3
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    times: queue.Queue[float | None] = queue.Queue()
+    rest: collections.deque[str] = collections.deque(maxlen=20)
+    reader = threading.Thread(target=read_times, args=(proc.stderr, times, rest), daemon=True)
+    reader.start()
     try:
         if proc.stdout is None:  # pragma: no cover  (Popen with stdout=PIPE always has one)
             raise RunError("ffmpeg gave no output")
-        for k in itertools.count():
+        while True:
             buf = proc.stdout.read(size_b)
             if len(buf) < size_b:
                 break
-            yield offset + k / fps, np.frombuffer(buf, np.uint8).reshape(h, w, 3)  # pyright: ignore[reportUnknownMemberType]
+            t = times.get(timeout=600)  # showinfo logs a frame before it is written out
+            if t is None:  # pragma: no cover  (a frame with no showinfo line)
+                raise RunError(f"ffmpeg gave a frame without its time on {path}")
+            yield round(offset + t, 3), np.frombuffer(buf, np.uint8).reshape(h, w, 3)  # pyright: ignore[reportUnknownMemberType]
         proc.wait(timeout=TIMEOUT_S)
+        reader.join(timeout=30)
         if proc.returncode:
-            err = proc.stderr.read().decode("utf8", "replace") if proc.stderr else ""
-            raise RunError(f"ffmpeg failed on {path}: {err.strip()[-500:]}")
+            raise RunError(f"ffmpeg failed on {path}: {chr(10).join(rest)[-500:]}")
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -595,7 +629,9 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
                 id=renumber[track.id],
                 shot=track.shot,
                 start=track.faces[0].time,
-                end=round(track.last.time + frame_s, 3),
+                end=round(
+                    min([track.last.time + frame_s, *[c for c in tr.cuts if c > track.faces[0].time]]), 3
+                ),  # never past its shot's cut
                 faces=len(track.faces),
                 quality=max(f.quality for f in track.faces),
                 embedding=[round(float(v), 6) for v in emb] if emb is not None else None,

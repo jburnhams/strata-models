@@ -381,3 +381,27 @@ def test_load_and_unload_use_the_faces_pack(monkeypatch):
     )
     facetracks.unload(h)
     assert freed == [{"fa": "pack"}] and h == {}
+
+
+def test_a_track_ends_at_its_cut_even_between_ticks(monkeypatch, video):
+    handle, _ = fake_video(monkeypatch, [[(ANA, 100)]] * 10)
+    out = facetracks.run(handle, dict(path=video, cuts=[0.95], images=False))
+    assert [(t["start"], t["end"]) for t in out["tracks"]] == [(0.0, 0.95), (1.0, 2.0)]
+
+
+def test_frame_times_are_read_from_showinfo():
+    import collections
+    import io
+    import queue
+
+    err = io.BytesIO(
+        b"Input #0, mov,mp4...\n"
+        b"[Parsed_showinfo_2 @ 0x1] config in time_base: 1/12800\n"
+        b"[Parsed_showinfo_2 @ 0x1] n:   0 pts:      0 pts_time:0       duration: 512\n"
+        b"[Parsed_showinfo_2 @ 0x1] n:   1 pts:  12800 pts_time:1.04    duration: 512\n"
+        b"[vist#0:0/h264 @ 0x2] Error while decoding\n"
+    )
+    times, rest = queue.Queue(), collections.deque(maxlen=5)
+    facetracks.read_times(err, times, rest)
+    assert [times.get_nowait() for _ in range(3)] == [0.0, 1.04, None]
+    assert list(rest) == ["Input #0, mov,mp4...", "[vist#0:0/h264 @ 0x2] Error while decoding"]
