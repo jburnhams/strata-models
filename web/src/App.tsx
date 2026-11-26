@@ -1,8 +1,8 @@
 // strata-models: one question per area. Overview: is the GPU free, and who is using it? Models: which model serves each role, and is it loaded?
-// Jobs: what ran, for whom, how long, and why did it fail? Evals: which model, settings or prompt should serve a role, with what evidence? Usage: which apps use the GPU most? Cloud: what the API keys spend, and on what? Settings: where weights live and how much VRAM to keep free.
+// Jobs: what ran, for whom, how long, and why did it fail? Evals: which model, settings or prompt should serve a role, with what evidence? Faces: who is in every app's pictures, and what is left to decide? Usage: which apps use the GPU most? Cloud: what the API keys spend, and on what? Settings: where weights live and how much VRAM to keep free.
 import { Navigate, Route, Routes } from 'react-router'
 import { AppShell, useLoad } from 'strata-react'
-import { Activity, Boxes, Cloud, Cpu, FlaskConical, History, ImagePlus, Settings, Gauge } from 'lucide-react'
+import { Activity, Boxes, ScanFace, Cloud, Cpu, FlaskConical, History, ImagePlus, Settings, Gauge } from 'lucide-react'
 import { api } from './api'
 import OverviewPage from './components/OverviewPage'
 import ModelsPage from './components/ModelsPage'
@@ -13,6 +13,8 @@ import SettingsPage from './components/SettingsPage'
 import EvalsPage from './components/EvalsPage'
 import GeneratePage from './components/GeneratePage'
 import EvalPage from './components/EvalPage'
+import FacesPage from './components/FacesPage'
+import PersonPage from './components/PersonPage'
 
 const nav = [
   { to: '/', label: 'Overview', icon: Gauge, end: true },
@@ -20,6 +22,7 @@ const nav = [
   { to: '/models', label: 'Models', icon: Boxes },
   { to: '/jobs', label: 'Jobs', icon: History },
   { to: '/evals', label: 'Evals', icon: FlaskConical },
+  { to: '/faces', label: 'Faces', icon: ScanFace },
   { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/cloud', label: 'Cloud', icon: Cloud },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -36,6 +39,8 @@ export default function App() {
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/evals" element={<EvalsPage />} />
         <Route path="/evals/:name" element={<EvalPage />} />
+        <Route path="/faces" element={<FacesPage />} />
+        <Route path="/faces/people/:id" element={<PersonPage />} />
         <Route path="/usage" element={<UsagePage />} />
         <Route path="/cloud" element={<CloudPage />} />
         <Route path="/settings" element={<SettingsPage />} />

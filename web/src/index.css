@@ -1,4 +1,2 @@
 @import "tailwindcss";
-@import "strata-react/strata.css";   /* token contract, namespace reset, type steps, base layer */
-@import "./theme.generated.css";     /* palette.mjs output */
-@import "./theme.css";               /* status roles, with reasons */
+@import "strata-react/strata.css";   /* the standard Strata look (contract, palette, status roles, faces): this app has no look of its own */

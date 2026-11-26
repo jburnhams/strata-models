@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-11-26: Faces screens
+The web app has a Faces area (`/#/faces`) where a person makes the face store's decisions, built from strata-react's shared parts so any app
+can show the same things on its own screens: People (everyone named, a search, each person's faces as crops), a face opened lands zoomed on it
+in its photo with everyone beside it named (`BoxedPicture` + `BoxList` over the kept 1600 px copy), Unnamed groups one at a time (all faces
+chosen; name them, add them to someone, or say they are not faces), Possible duplicates (merge into the one with more faces, or keep apart) and
+Tags (which keep their pictures out of searches unless asked for). Every decision waits out an Undo window before it is sent, and is recorded
+in the app name `strata-models`. Taking a face off a person records "not this person", so it does not come back to them in a group. strata-react
+moved to 1.3.22, and the app now uses Strata's standard look (`strata.css`) instead of a palette of its own (the owner: this app is not special).
+
 ## 2026-11-25: one face store for every app
 The faces of bright-horizons, strata-360, strata-stills and later strata-reels move into one store here, decided with the owner (one global
 person per human, apps add their own fields; sensitive tags opt-in; merges suggested, never automatic; clustering and crops here; a 1600 px

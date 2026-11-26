@@ -3,12 +3,13 @@ import { cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { installLayoutShims } from 'strata-react/testing'
 import { resetMock, server } from './server'
+import { resetFaces } from './faces'
 
 installLayoutShims()
 
 // jsdom: relative `/api/...` URLs resolve against jsdom's origin, so msw sees them as they are. An endpoint without a handler fails the test.
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
-afterEach(() => { server.resetHandlers(); cleanup(); resetMock() })
+afterEach(() => { server.resetHandlers(); cleanup(); resetMock(); resetFaces() })
 afterAll(() => server.close())
 
 // Node 25+ defines its own `localStorage` global, which is undefined without --localstorage-file and hides jsdom's: put a working in-memory one back.
