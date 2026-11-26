@@ -60,6 +60,16 @@ export const faceHandlers = [
     faceMock.people = faceMock.people.map(p => (p.id === Number(params.id) ? { ...p, name: b.name } : p))
     return HttpResponse.json(faceMock.people.find(p => p.id === Number(params.id)))
   }),
+  http.get('/api/identities/:id/review', ({ params, request }) => {
+    const q = new URL(request.url).searchParams
+    const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness')
+    faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}`)
+    const scored = (faceMock.suggested[id] ?? []).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 }))
+    const counts = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map(x => [x.toFixed(2), scored.filter(f => 1 - f.distance >= x - 1e-9).length]))
+    const items = scored.filter(f => !min || 1 - f.distance >= Number(min) - 1e-9).slice(0, limit)
+    const confirmed = (faceMock.faces[id] ?? []).length
+    return HttpResponse.json({ basis: items.length ? (confirmed >= 3 ? 'confirmed' : 'group') : null, basis_faces: confirmed >= 3 ? confirmed : items.length, suggested: items.length, confirmed, near: { '0.3': items.filter(f => f.distance < 0.3).length, '0.4': items.filter(f => f.distance < 0.4).length, '0.5': items.length }, counts, left_out: 0, items })
+  }),
   http.get('/api/identities/:id/faces', ({ params, request }) => {
     const q = new URL(request.url).searchParams
     if (faceMock.fail === 'faces' && q.get('offset')) return HttpResponse.json({ detail: 'the face store is busy' }, { status: 500 })

@@ -318,3 +318,15 @@ def test_suggested_faces_paged_counted_and_left_out_of_groups_over_http(client, 
     without = client.post("/api/faces/cluster", json=dict(app="strata-models", suggested=False)).json()["clusters"]
     assert set(ids) <= {f for g in with_sug for f in g["faces"]}
     assert not set(ids) & {f for g in without for f in g["faces"]}
+
+
+def test_review_round_over_http(client, scheduler, tmp_path):
+    imgs = [index(client, scheduler, picture(tmp_path, f"r{i}.jpg"), f"r{i}") for i in range(4)]
+    who = client.post("/api/identities", json=dict(name="Ann")).json()
+    ids = [i["faces"][0]["id"] for i in imgs]
+    client.post("/api/faces/assign", json=dict(face_ids=ids, identity_id=who["id"], app="t", status="suggested"))
+    r = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=2)).json()
+    assert r["basis"] == "group" and len(r["items"]) == 2 and "distance" in r["items"][0]
+    allr = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=5000, min_likeness=0.5)).json()
+    assert len(allr["items"]) == 4 and allr["counts"]["0.50"] == 4
+    assert client.get("/api/identities/999/review").status_code == 404

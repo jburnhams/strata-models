@@ -8,6 +8,9 @@ export const APP = 'strata-models'
 export interface Face { id: number; image_id: number; box: [number, number, number, number]; det_score: number; found_by: string; identity_id: number | null; status: 'confirmed' | 'rejected' | 'suggested' | null }
 export interface FaceImage { id: number; app: string; ref: string; path: string | null; width: number | null; height: number | null; taken_at: number | null; medium: string | null; tags: string[]; faces: Face[] }
 export interface Person { id: number; name: string | null; fields: Record<string, unknown>; apps: Record<string, { app_ref: string | null; fields: Record<string, unknown> }>; merged_into: number | null; merged: number[]; faces: number; suggested: number }
+/** The next round of a person's suggested faces, most certain first: `distance` to their model, built from their confirmed faces
+ * (`basis` confirmed) or, before 3 are confirmed, from the tightest group of their suggestions (`basis` group). */
+export interface Review { basis: 'confirmed' | 'group' | null; basis_faces: number; suggested: number; confirmed: number; near: Record<string, number>; counts: Record<string, number>; left_out?: number; items: (Face & { distance: number })[] }
 export interface Group { faces: number[]; size: number }
 export interface Suggestion { a: number; b: number; distance: number; apps_a: string[]; apps_b: string[] }
 export interface Tag { tag: string; images: number; opt_in: boolean; note: string }
@@ -34,6 +37,8 @@ export const facesApi = {
       if (page.length < 5000) return out
     }
   },
+  /** The next round of a person's suggestions (`limit` most certain), or with `minLikeness` every one at least that alike. */
+  review: (id: number, limit = 48, minLikeness?: number) => call<Review>('GET', `/api/identities/${id}/review?limit=${limit}${minLikeness === undefined ? '' : `&min_likeness=${minLikeness}`}`),
   rename: (id: number, name: string) => call<Person>('PATCH', `/api/identities/${id}`, { name }),
   create: (name: string) => call<Person>('POST', '/api/identities', { name }),
   /** One decision on some faces: theirs (`confirmed`), not theirs (`rejected` with the person), or not a face at all (`rejected`, nobody). */

@@ -39,7 +39,11 @@ from stratamodels.faces import propose as plan_hints
 
 STATUSES = ("confirmed", "rejected", "suggested")
 HINT_STATUSES = ("possible", "confirmed")
-CHUNK = 5000  # ids per IN (...) when reading many pictures' faces
+CHUNK = 5000
+REVIEW_MIN_CONFIRMED = 3  # confirmed faces before a person's own faces, not an app's labels, rank their suggestions
+REVIEW_POOL = 2000  # most confident suggestions grouped for the first round
+REVIEW_MAX = 10000  # faces in one answer: a person's whole list above a likeness, at once
+REVIEW_CLUSTER = 0.35  # tight: the first round should be faces that are surely one person  # ids per IN (...) when reading many pictures' faces
 CLUSTER_THRESHOLD = 0.55  # cosine distance on ArcFace embeddings: conservative (strata-360's `who`; bright-horizons' unknown groups used 0.55)
 MAX_CLUSTER = 5000  # faces grouped at once: average linkage keeps an n x n distance matrix (5000: 100 MB of float32)
 SUGGEST_MAX_DISTANCE = 0.6  # identity centroids further apart than this are not worth a person's look
@@ -603,6 +607,95 @@ class FaceStore:
             )
             state = self._current(s, [f.id for f in faces])
             return [face_row(f, state.get(f.id)) for f in faces]
+
+    def review(
+        self,
+        identity_id,
+        model,
+        limit=48,
+        min_confirmed=REVIEW_MIN_CONFIRMED,
+        pool=REVIEW_POOL,
+        threshold=REVIEW_CLUSTER,
+        min_likeness=None,
+    ):
+        """The next round of a person's suggested faces to decide, most certain first, scored afresh on every call (so each round a person
+        confirms makes the next one surer). The model of the person: with `min_confirmed` confirmed faces, the centre of their densest bunch
+        (up to EXEMPLARS*10 best detected); before that, the largest group (average linkage at `threshold`) among their `pool` most confident
+        suggestions, every face of which an app already says may be them. A suggested face nearer a face rejected for this person than the
+        model is left out of the round (it looks like the one that was not them). Answers {basis, basis_faces, suggested, confirmed, near
+        (within 0.3 / 0.4 / 0.5), counts (how many are at least each likeness 0.50-0.95, likeness = 1 - distance), left_out, items: faces with
+        `distance`, closest first}. `min_likeness` keeps only the faces at least that alike (with a large `limit`: all of them at once)."""
+        from scipy.cluster.hierarchy import fcluster, linkage
+
+        centre = None
+        with self.session() as s:
+            root = self._root(s, identity_id)
+            if s.get(Identity, root) is None:
+                raise NotFound(f"no such person: {identity_id}")
+            state = self._current(s)
+            mine = {f: a for f, a in state.items() if a.identity_id == root}
+            sug = [f for f, a in mine.items() if a.status == "suggested"]
+            conf = [f for f, a in mine.items() if a.status == "confirmed"]
+            rej = [f for f, a in mine.items() if a.status == "rejected"]
+            out = dict(basis=None, basis_faces=0, suggested=len(sug), confirmed=len(conf), near={}, counts={}, items=[])
+            if not sug:
+                return out
+            emb = {}
+            for part in _chunks(sorted(sug + rej)):
+                for fid, vec in s.execute(
+                    sa.select(FaceEmbedding.face_id, FaceEmbedding.vector).where(
+                        FaceEmbedding.model == model, FaceEmbedding.face_id.in_(part)
+                    )
+                ):
+                    emb[fid] = plan_hints.unit(np.array(vec, dtype=np.float64))
+            if len(conf) >= min_confirmed:
+                C = [
+                    plan_hints.unit(np.array(v, dtype=np.float64))
+                    for (v,) in s.execute(
+                        sa.select(FaceEmbedding.vector)
+                        .join(Face, Face.id == FaceEmbedding.face_id)
+                        .where(FaceEmbedding.model == model, FaceEmbedding.face_id.in_(conf))
+                        .order_by(Face.det_score.desc())
+                        .limit(EXEMPLARS * 10)
+                    )
+                ]
+                if C:
+                    centre = plan_hints.centroid(np.array(C))
+                    out.update(basis="confirmed", basis_faces=len(C))
+        cand = [f for f in sug if f in emb]
+        if not cand:
+            return out
+        if centre is None:
+            best = sorted(cand, key=lambda f: -(mine[f].confidence or 0.0))[: max(2, int(pool))]
+            X = np.array([emb[f] for f in best])
+            if len(best) > 1:
+                lab = fcluster(linkage(X, "average", metric="cosine"), float(threshold), "distance")
+                top = max(sorted(set(lab.tolist())), key=lambda c: int((lab == c).sum()))
+                group = X[lab == top]
+            else:
+                group = X
+            centre = plan_hints.unit(group.mean(0))
+            out.update(basis="group", basis_faces=len(group))
+        A = np.array([emb[f] for f in cand])
+        d = 1.0 - A @ centre
+        if rej and any(f in emb for f in rej):
+            R = np.array([emb[f] for f in rej if f in emb])
+            nearest_rej = (1.0 - A @ R.T).min(1)
+            keep = nearest_rej >= d
+        else:
+            keep = np.ones(len(cand), dtype=bool)
+        out["near"] = {k: int(((d < float(k)) & keep).sum()) for k in ("0.3", "0.4", "0.5")}
+        out["counts"] = {f"{x / 100:.2f}": int(((1.0 - d >= x / 100 - 1e-9) & keep).sum()) for x in range(50, 100, 5)}
+        out["left_out"] = int((~keep).sum())
+        if min_likeness is not None:
+            keep = keep & (1.0 - d >= float(min_likeness) - 1e-9)
+        order = [int(i) for i in np.argsort(d) if keep[i]][: max(1, min(int(limit), REVIEW_MAX))]
+        with self.session() as s:
+            faces = {}
+            for part in _chunks([cand[i] for i in order]):
+                faces.update({f.id: f for f in s.scalars(sa.select(Face).where(Face.id.in_(part)))})
+        out["items"] = [dict(face_row(faces[cand[i]], mine[cand[i]]), distance=round(float(d[i]), 6)) for i in order]
+        return out
 
     # ---- decisions -------------------------------------------------------------------------------------------------------------------------
     def assign(self, face_ids, identity_id, app, status="confirmed", source="human", confidence=None, note=None):
