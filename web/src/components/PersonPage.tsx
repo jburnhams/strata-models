@@ -67,7 +67,8 @@ function Faces({ person, faces, names }: { person: Person; faces: Face[]; names:
 export default function PersonPage() {
   const id = Number(useParams().id)
   const person = useLoad({ queryKey: ['faces', 'person', id], queryFn: () => facesApi.person(id) })
-  const faces = useLoad({ queryKey: ['faces', 'faces-of', id], queryFn: () => facesApi.facesOf(id) })
+  const [all, setAll] = useState(false) // the best 500 at first; the service gives up to 5000
+  const faces = useLoad({ queryKey: ['faces', 'faces-of', id, all], queryFn: () => facesApi.facesOf(id, all ? 5000 : 500) })
   const people = useLoad({ queryKey: ['faces', 'people', ''], queryFn: () => facesApi.people() })
   const names = new Map((people.status === 'ready' ? people.data : []).map(p => [p.id, p]))
   const p = person.status === 'ready' ? person.data : undefined
@@ -79,7 +80,17 @@ export default function PersonPage() {
         {pp => <Rename key={pp.id} person={pp} />}
       </DataView>
       <DataView state={faces} isEmpty={f => f.length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="No faces confirmed yet">Name a group of faces on <TextLink to="/faces?tab=groups">Unnamed groups</TextLink>.</EmptyState>}>
-        {f => (p ? <Faces person={p} faces={f} names={names} /> : null)}
+        {f => (p ? (
+          <div className="grid gap-4">
+            {f.length < p.faces && (
+              <p className="type-body-sm text-muted-foreground">
+                {`Showing the best ${format.integer(f.length)} of ${format.count(p.faces, 'face')}. `}
+                {!all && <Button variant="ghost" size="sm" onPress={() => setAll(true)}>Show them all</Button>}
+              </p>
+            )}
+            <Faces person={p} faces={f} names={names} />
+          </div>
+        ) : null)}
       </DataView>
     </div>
   )

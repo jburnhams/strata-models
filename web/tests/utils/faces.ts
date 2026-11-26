@@ -61,6 +61,7 @@ export const faceHandlers = [
   }),
   http.get('/api/identities/:id/faces', ({ params, request }) => {
     const limit = Number(new URL(request.url).searchParams.get('limit') || 500)
+    faceMock.calls.push(`faces of ${params.id} up to ${limit}`)
     return HttpResponse.json({ items: (faceMock.faces[Number(params.id)] ?? []).slice(0, limit) })
   }),
   http.post('/api/identities/:id/merge', async ({ params, request }) => {
@@ -74,7 +75,7 @@ export const faceHandlers = [
     const b = (await request.json()) as { face_ids: number[]; identity_id: number | null; status: string; app: string }
     faceMock.calls.push(`assign ${b.face_ids.join(',')} to ${b.identity_id} ${b.status} by ${b.app}`)
     for (const k of Object.keys(faceMock.faces)) faceMock.faces[Number(k)] = faceMock.faces[Number(k)].filter(x => !(b.status === 'rejected' && b.face_ids.includes(x.id)))
-    faceMock.groups = faceMock.groups.filter(g => !g.faces.some(x => b.face_ids.includes(x)))
+    faceMock.groups = faceMock.groups.map(g => ({ faces: g.faces.filter(x => !b.face_ids.includes(x)), size: g.faces.filter(x => !b.face_ids.includes(x)).length })).filter(g => g.size > 0)
     return HttpResponse.json({ batch: 9 })
   }),
   http.post('/api/faces/cluster', async ({ request }) => {

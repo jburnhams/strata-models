@@ -72,6 +72,15 @@ describe('Faces: a person', () => {
     await user.click(screen.getByRole('button', { name: 'Not Ada (1)' }))
     await commits(unmount, 'assign 12 to 1 rejected by strata-models')
   })
+  it('says when only the best 500 faces are shown, and shows them all on asking', async () => {
+    faceMock.people[0].faces = 600
+    const { user } = setup(<App />, { route: '/faces/people/1' })
+    expect(await screen.findByText(/Showing the best 3 of 600\sfaces\./)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Show them all' }))
+    await waitFor(() => expect(faceMock.calls).toContain('faces of 1 up to 5000'))
+    expect(await screen.findByText(/Showing the best 3 of 600\sfaces\./)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show them all' })).not.toBeInTheDocument()
+  })
   it('renames them, and refuses an empty name', async () => {
     const { user } = setup(<App />, { route: '/faces/people/2' })
     expect(await screen.findByRole('heading', { name: 'Person 2', level: 1 })).toBeInTheDocument()
@@ -112,7 +121,8 @@ describe('Faces: unnamed groups', () => {
     await user.type(screen.getByRole('textbox', { name: 'A new person' }), 'Dee')
     await user.click(screen.getByRole('button', { name: 'Name 2' }))
     expect(await screen.findByText(/Named 2\sfaces Dee\./)).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: /Group 1 of 1: 2\sfaces/ })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Group 1 of 2: 1\sface$/ })).toBeInTheDocument() // the unticked face stays to be decided
+    expect(within(screen.getByRole('grid', { name: 'Faces in group 1' })).getByRole('row', { name: 'Face 33' })).toBeInTheDocument()
     await commits(unmount, 'assign 31,32 to 53 confirmed by strata-models')
     expect(faceMock.calls).toContain('create Dee')
     expect(faceMock.calls).toContain('cluster by strata-models')

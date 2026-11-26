@@ -42,7 +42,7 @@ function People() {
 }
 
 // ---- unnamed groups --------------------------------------------------------------------------------------------------------------------------
-function GroupReview({ group, index, total, people, onDecide }: { group: Group; index: number; total: number; people: Person[]; onDecide: (what: { message: string; failure: string; commit: () => Promise<unknown> }) => void }) {
+function GroupReview({ group, index, total, people, onDecide }: { group: Group; index: number; total: number; people: Person[]; onDecide: (what: { ids: number[]; message: string; failure: string; commit: () => Promise<unknown> }) => void }) {
   const rows = group.faces.map(id => ({ id }))
   const selection = useSelection(rows, r => String(r.id), () => true)
   const [name, setName] = useState('')
@@ -52,10 +52,10 @@ function GroupReview({ group, index, total, people, onDecide }: { group: Group; 
   const target = people.find(p => String(p.id) === into)
   const named = useAsyncAction(async () => {
     const who = name.trim()
-    onDecide({ message: `Named ${n} ${who}.`, failure: `${n} are back in the group: naming them ${who} did not go through.`, commit: async () => facesApi.assign(ids, (await facesApi.create(who)).id) })
+    onDecide({ ids, message: `Named ${n} ${who}.`, failure: `${n} are back in the group: naming them ${who} did not go through.`, commit: async () => facesApi.assign(ids, (await facesApi.create(who)).id) })
   }, { validate: () => ({ name: name.trim() ? undefined : 'Give the person a name.' }) })
-  const add = () => target && onDecide({ message: `Added ${n} to ${personName(target)}.`, failure: `${n} are back in the group: adding them to ${personName(target)} did not go through.`, commit: () => facesApi.assign(ids, target.id) })
-  const notFaces = () => onDecide({ message: `Marked ${n} as not faces.`, failure: `${n} are back in the group: the change did not go through.`, commit: () => facesApi.assign(ids, null, 'rejected') })
+  const add = () => target && onDecide({ ids, message: `Added ${n} to ${personName(target)}.`, failure: `${n} are back in the group: adding them to ${personName(target)} did not go through.`, commit: () => facesApi.assign(ids, target.id) })
+  const notFaces = () => onDecide({ ids, message: `Marked ${n} as not faces.`, failure: `${n} are back in the group: the change did not go through.`, commit: () => facesApi.assign(ids, null, 'rejected') })
   return (
     <section aria-labelledby="group" className="grid gap-4">
       <h2 id="group" className="type-heading">{`Group ${format.integer(index + 1)} of ${format.integer(total)}: ${format.count(group.size, 'face')}`}</h2>
@@ -85,21 +85,23 @@ function Groups() {
   const people = usePeople()
   const undoable = useUndoable()
   const [at, setAt] = useState(0)
+  const undecided = (all: Group[]) => all.map(g => ({ faces: g.faces.filter(f => !undoable.isRemoved(String(f))) })).filter(g => g.faces.length > 0).map(g => ({ ...g, size: g.faces.length }))
   return (
     <div className="grid gap-4">
-      <DataView state={load} isEmpty={g => g.filter(x => !undoable.isRemoved(String(x.faces[0]))).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="Every face has been decided">New pictures an app indexes bring new groups here.</EmptyState>}>
+      <DataView state={load} isEmpty={g => undecided(g).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="Every face has been decided">New pictures an app indexes bring new groups here.</EmptyState>}>
         {all => {
-          const left = all.filter(x => !undoable.isRemoved(String(x.faces[0])))
+          const left = undecided(all)
           const i = Math.min(at, left.length - 1)
           const g = left[i]
-          const decide = (d: { message: string; failure: string; commit: () => Promise<unknown> }) => undoable.schedule({ id: String(g.faces[0]), ...d, commit: async () => { await d.commit(); await qc.invalidateQueries({ queryKey: ['faces'] }) } })
+          // A decision takes the faces it names out of view, not the group: the faces left unticked stay to be decided.
+          const decide = (d: { ids: number[]; message: string; failure: string; commit: () => Promise<unknown> }) => undoable.schedule({ id: `group-${d.ids.join('-')}`, ids: d.ids.map(String), message: d.message, failure: d.failure, commit: async () => { await d.commit(); await qc.invalidateQueries({ queryKey: ['faces'] }) } })
           return (
             <>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" disabled={i === 0} onPress={() => setAt(i - 1)}>Previous group</Button>
                 <Button size="sm" disabled={i >= left.length - 1} onPress={() => setAt(i + 1)}>Next group</Button>
               </div>
-              <GroupReview key={g.faces[0]} group={g} index={i} total={left.length} people={people.status === 'ready' ? [...people.data].sort(byName) : []} onDecide={decide} />
+              <GroupReview key={g.faces.join('-')} group={g} index={i} total={left.length} people={people.status === 'ready' ? [...people.data].sort(byName) : []} onDecide={decide} />
             </>
           )
         }}
