@@ -39,3 +39,38 @@ def test_pad_grows_the_canvas_and_keeps_the_picture_in_the_middle():
 def test_pad_out_of_range_is_refused(pad):
     with pytest.raises(runtimes.RunError, match="pad must"):
         faces._view(_img(), dict(pad=pad))
+
+
+@pytest.mark.parametrize("ext", [".jpg", ".heic", ".avif", ".jxl", ".png", ".webp"])
+def test_the_runtime_reads_what_phones_and_cameras_write(tmp_path, ext):
+    """HEIC from iPhones, AVIF, JPEG XL and the rest, as OpenCV's BGR array (red stays red), through strata-python's reader."""
+    from strata_python.testing import tiny_picture
+
+    p = tiny_picture(
+        tmp_path / f"p{ext}", (64, 48), (220, 20, 20)
+    )  # in a child: x265 lowers the priority of the process that encodes a HEIC (macOS)
+    img = faces._read(p)
+    assert img.shape == (48, 64, 3)
+    b, _, r = (int(v) for v in img[24, 32])
+    assert r > 180 > b
+
+
+def test_the_runtime_reads_a_camera_raw_file_and_turns_photos_by_exif(tmp_path):
+    from PIL import Image
+    from strata_python.testing import tiny_dng
+
+    assert faces._read(tiny_dng(tmp_path / "a.dng", (64, 48), orientation=6)).shape == (64, 48, 3)  # held on its side
+    p = str(tmp_path / "turned.jpg")
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (80, 40)).save(p, exif=exif.tobytes())
+    assert faces._read(p).shape == (80, 40, 3)  # stored 80 x 40, shown 40 wide
+
+
+def test_a_file_that_is_not_a_picture_is_a_runerror(tmp_path):
+    p = tmp_path / "x.heic"
+    p.write_bytes(b"not a picture")
+    with pytest.raises(runtimes.RunError, match="not a picture this service can read"):
+        faces._read(str(p))
+    with pytest.raises(runtimes.RunError, match="no such image"):
+        faces._read(str(tmp_path / "gone.jpg"))

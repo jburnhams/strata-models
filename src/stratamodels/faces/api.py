@@ -128,13 +128,13 @@ def faces_dir():
 
 
 def picture_size(path):
-    """(width, height) of a picture Pillow can read, else (0, 0): imported faces' boxes are in the original's pixels, and a crop
-    from the kept copy scales them by the copy's width over this."""
-    from PIL import Image
+    """(width, height) of the picture as the faces runtime and the crops see it (upright: a phone photo taken on its side has its stored
+    sides swapped), in any format strata-python's images reads, else (0, 0). Imported faces' boxes are in these pixels, and a crop from
+    the kept copy scales them by the copy's width over this."""
+    from strata_python import images
 
     try:
-        with Image.open(path) as im:
-            return im.width, im.height
+        return images.size_upright(path)
     except (OSError, ValueError, SyntaxError):
         return 0, 0
 

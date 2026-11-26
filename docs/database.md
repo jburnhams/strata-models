@@ -35,6 +35,8 @@ One face store for every app (design, survey and decisions: the face database pr
 - **A picture** (`face_images`) is one per `app` + `ref` (the app's own id), with the path or URL of the original and `medium`, a 1600 px WebP
   copy kept under the data folder so a face can still be shown in its picture when the original is out of reach. Crops are cut on demand and
   cached (`faces/crops`), from the original when it is readable, else from the copy.
+  Any format strata-python's `images` reads is a picture: JPEG, PNG, WebP, AVIF, TIFF, HEIC/HEIF, JPEG XL and camera raw files
+  (developed by LibRaw), always turned by their EXIF orientation, so `width` and `height` and every box are in the upright picture's pixels.
 - **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
   set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`.
 - **Embeddings** (`face_embeddings`) are per face and model: indexing again with another model keeps the faces (matched by box overlap, IoU 0.5)

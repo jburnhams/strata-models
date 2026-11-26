@@ -1,5 +1,11 @@
 # Progress
 
+## 2026-11-26: any picture format in the face store
+The faces runtime read pictures with OpenCV and the face store (kept copy, crops, sizes) with Pillow, so an iPhone's HEIC or a camera's raw
+file could not be indexed. Both now read through strata-python's `images` (strata-python #88): HEIC/HEIF, AVIF, JPEG XL, camera raw (DNG, CR2,
+CR3, NEF, ARW and the rest, developed by LibRaw) beside what they read before. Reading the size for an imported face also took the stored size
+of a photo taken on its side, the wrong way round against boxes found on the upright picture; it is the upright size now.
+
 ## 2026-11-26: Faces screens
 The web app has a Faces area (`/#/faces`) where a person makes the face store's decisions, built from strata-react's shared parts so any app
 can show the same things on its own screens: People (everyone named, a search, each person's faces as crops), a face opened lands zoomed on it

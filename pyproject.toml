@@ -16,7 +16,7 @@ dependencies = [
     "pillow",          # evals: image similarity
     "sqlalchemy>=2",
     "psycopg[binary]",
-    "strata-python[db,pdf]>=0.2.21,<0.3",  # shared server code (oslib, web serving, the database: strata_python.db, test plugin and fakes, strata-check), from PyPI; 0.x: a minor release may break, so capped below the next
+    "strata-python[db,pdf,images]>=0.2.24,<0.3",  # shared server code (oslib, web serving, the database: strata_python.db, test plugin and fakes, strata-check), from PyPI; 0.x: a minor release may break, so capped below the next
     "tzdata; sys_platform == 'win32'",
     "huggingface-hub>=2.4.0",
     "anthropic>=2.8.0",

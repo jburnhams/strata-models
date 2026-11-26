@@ -46,9 +46,16 @@ def _read(path):
     if key in _recent:
         _recent.move_to_end(key)
         return _recent[key]
-    img = cv2.imread(path, cv2.IMREAD_COLOR)
-    if img is None:
-        raise RunError(f"not an image OpenCV can read: {path}")
+    # strata-python's reader, not cv2.imread: it opens HEIC, AVIF, JPEG XL and camera raw files as well as what OpenCV reads, turns a
+    # photo by its EXIF orientation (as cv2.imread did), and is what the face store cuts crops and keeps copies with, so a box found
+    # here lands on the same pixels there.
+    import numpy as np
+    from strata_python import images
+
+    try:
+        img = cv2.cvtColor(np.asarray(images.flatten(images.open_upright(path))), cv2.COLOR_RGB2BGR)
+    except (OSError, ValueError, SyntaxError) as e:  # Pillow's UnidentifiedImageError is an OSError
+        raise RunError(f"not a picture this service can read: {path} ({e})") from e
     _recent[key] = img
     while len(_recent) > RECENT:
         _recent.popitem(last=False)
