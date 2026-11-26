@@ -364,9 +364,21 @@ class FaceStore:
                     break
             return out
 
-    def cluster(self, model, *, tags=None, include=(), threshold=None, min_size=2, limit=MAX_CLUSTER, min_score=None):
+    def cluster(
+        self,
+        model,
+        *,
+        tags=None,
+        include=(),
+        threshold=None,
+        min_size=2,
+        limit=MAX_CLUSTER,
+        min_score=None,
+        suggested=True,
+    ):
         """Faces nobody has decided about (no confirmed person, not rejected), grouped by average linkage on cosine distance, largest group first.
-        The newest `limit` faces in scope are grouped."""
+        The newest `limit` faces in scope are grouped. `suggested` False leaves out faces waiting on a suggestion too (they are decided on
+        their person's page, not as unnamed)."""
         from scipy.cluster.hierarchy import fcluster, linkage
 
         t = CLUSTER_THRESHOLD if threshold is None else float(threshold)
@@ -382,7 +394,7 @@ class FaceStore:
             if min_score is not None:
                 q = q.where(Face.det_score >= float(min_score))
             state = self._current(s)
-            free = [f for f in s.scalars(q) if f not in state or state[f].status == "suggested"][
+            free = [f for f in s.scalars(q) if f not in state or (suggested and state[f].status == "suggested")][
                 :limit
             ]  # an undone decision frees the face
             rows = (
@@ -456,17 +468,18 @@ class FaceStore:
             apps=apps,
             merged_into=row.merged_into,
             merged=sorted(s.scalars(sa.select(Identity.id).where(Identity.merged_into == row.id))),
-            faces=counts.get(row.id, 0),
+            faces=counts.get(row.id, (0, 0))[0],
+            suggested=counts.get(row.id, (0, 0))[1],
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
 
     def _face_counts(self, s, identity_ids=None):
-        """identity id -> confirmed faces, counting the faces of identities merged into it."""
-        out = defaultdict(int)
+        """identity id -> [confirmed, suggested] faces, counting the faces of identities merged into it."""
+        out = defaultdict(lambda: [0, 0])
         for a in self._current(s).values():
-            if a.status == "confirmed" and a.identity_id is not None:
-                out[a.identity_id] += 1
+            if a.identity_id is not None and a.status in ("confirmed", "suggested"):
+                out[a.identity_id][0 if a.status == "confirmed" else 1] += 1
         return out
 
     def identity(self, identity_id, app=None):
@@ -571,8 +584,9 @@ class FaceStore:
             s.commit()
             return self._identity_dict(s, row, app)
 
-    def faces_of(self, identity_id, status="confirmed", limit=500):
-        """The faces assigned to a person (and to anyone merged into them) whose current state is `status`, best detected first."""
+    def faces_of(self, identity_id, status="confirmed", limit=500, offset=0):
+        """The faces assigned to a person (and to anyone merged into them) whose current state is `status`, best detected first; `offset`
+        skips that many (pages of a long list)."""
         with self.session() as s:
             root = self._root(s, identity_id)
             if s.get(Identity, root) is None:
@@ -583,6 +597,7 @@ class FaceStore:
                     sa.select(Face)
                     .where(Face.id.in_(ids))
                     .order_by(Face.det_score.desc(), Face.id)
+                    .offset(max(0, int(offset)))
                     .limit(max(1, min(int(limit), 5000)))
                 )
             )

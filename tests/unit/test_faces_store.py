@@ -393,3 +393,20 @@ def test_propose_with_no_hints_and_merge_suggestions_from_suggested_faces(fs):
     fs.assign([other["faces"][0]["id"]], cat["id"], "bright-horizons")
     (pair,) = fs.merge_suggestions("buffalo_l")
     assert {pair["basis_a"], pair["basis_b"]} == {"confirmed", "suggested"}
+
+
+def test_suggested_faces_are_counted_paged_and_kept_out_of_unnamed_groups_on_request(fs):
+    imgs = [index(fs, "immich", f"p{i}", [face(1, seed=i, score=0.9 - i / 100)]) for i in range(6)]
+    ids = [i["faces"][0]["id"] for i in imgs]
+    ann = fs.create_identity("Ann")
+    fs.assign(ids[:4], ann["id"], "takeout", status="suggested", source="hint")
+    fs.assign(ids[:1], ann["id"], "strata-models")
+    got = fs.identity(ann["id"])
+    assert (got["faces"], got["suggested"]) == (1, 3)
+    assert [p["suggested"] for p in fs.identities()] == [3]
+    page1 = [f["id"] for f in fs.faces_of(ann["id"], status="suggested", limit=2)]
+    page2 = [f["id"] for f in fs.faces_of(ann["id"], status="suggested", limit=2, offset=2)]
+    assert page1 == ids[1:3] and page2 == ids[3:4]
+    every = sorted(f for g in fs.cluster("buffalo_l") for f in g["faces"])
+    assert every == ids[1:]  # suggested faces still count as undecided by default
+    assert sorted(f for g in fs.cluster("buffalo_l", suggested=False) for f in g["faces"]) == ids[4:]

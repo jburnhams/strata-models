@@ -1,7 +1,8 @@
 // One question: "Who is in the pictures, and what is left to decide?" One face store serves every app (docs/database.md#faces); this screen
 // is where a person makes its decisions. People: everyone named, by how many faces are theirs. Unnamed groups: faces nobody has decided
 // about, grouped by likeness, one group at a time (name it, add it to someone, or say it is not faces). Possible duplicates: two people whose
-// faces sit close, to merge or keep apart; the service only suggests. Tags: which tags keep their pictures out of searches and groups unless
+// faces sit close, to merge or keep apart; the service only suggests. Faces an app suggested for someone are decided on that person's page,
+// so they are not counted as unnamed. Tags: which tags keep their pictures out of searches and groups unless
 // an app names them. Every decision commits after an Undo window (useUndoable), and every one can be undone later through the store.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -23,6 +24,7 @@ const crop = (faceId: number) => <Thumbnail src={facesApi.cropUrl(faceId)} alt="
 const peopleColumns: Column<Person>[] = [
   { key: 'name', header: 'Person', cell: p => <TextLink to={`/faces/people/${p.id}`}>{personName(p)}</TextLink>, sort: byName },
   { key: 'faces', header: 'Faces', numeric: true, cell: p => format.integer(p.faces), sort: (a, b) => a.faces - b.faces },
+  { key: 'suggested', header: 'Suggested', numeric: true, cell: p => (p.suggested ? format.integer(p.suggested) : format.missing), sort: (a, b) => a.suggested - b.suggested },
   { key: 'apps', header: 'Named in', cell: p => Object.keys(p.apps).sort().join(', ') || format.missing },
 ]
 
@@ -35,7 +37,7 @@ function People() {
     <div className="grid gap-4">
       <Field label="Find a person" className="max-w-sm"><Input type="search" value={text} onChange={e => setText(e.target.value)} /></Field>
       <DataView state={load} isEmpty={p => p.length === 0} skeleton={<TableSkeleton rows={6} columns={3} />} empty={<EmptyState title={q ? `Nobody called “${q}”` : 'Nobody is named yet'}>{q ? 'Try part of the name.' : <>Name a group of faces on <TextLink to="/faces?tab=groups">Unnamed groups</TextLink>.</>}</EmptyState>}>
-        {p => <DataTable caption="People" columns={peopleColumns} rows={[...p].sort((a, b) => b.faces - a.faces || byName(a, b))} rowKey={x => String(x.id)} sortParam="sort" />}
+        {p => <DataTable caption="People" columns={peopleColumns} rows={[...p].sort((a, b) => b.faces - a.faces || b.suggested - a.suggested || byName(a, b))} rowKey={x => String(x.id)} sortParam="sort" />}
       </DataView>
     </div>
   )
@@ -195,7 +197,8 @@ function Tags() {
 
 export default function FacesPage() {
   const people = usePeople()
-  const finding = people.status === 'ready' ? { text: `${format.count(people.data.length, 'person', 'people')} named, with ${format.count(people.data.reduce((n, p) => n + p.faces, 0), 'face')} confirmed.` } : undefined
+  const suggested = people.status === 'ready' ? people.data.reduce((n, p) => n + p.suggested, 0) : 0
+  const finding = people.status === 'ready' ? { text: `${format.count(people.data.length, 'person', 'people')} named, with ${format.count(people.data.reduce((n, p) => n + p.faces, 0), 'face')} confirmed${suggested ? ` and ${format.integer(suggested)} suggested to confirm` : ''}.` } : undefined
   return (
     <div className="grid gap-8">
       <PageHeader title="Faces" scope="Every app's pictures, in one store" finding={finding} />

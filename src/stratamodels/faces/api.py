@@ -9,7 +9,8 @@
   GET  /api/faces/images/{id}/picture    the kept medium copy (to show a face in its picture)
   GET  /api/faces/{id}                   one face; GET /api/faces/{id}/crop?px=160&pad=1.6 its crop (cached WebP)
   POST /api/faces/search                 {app, face_id | embedding | path, k?, tags?, include?, named?, max_distance?, model?} nearest faces
-  POST /api/faces/cluster                {app, tags?, include?, threshold?, min_size?, limit?, min_score?, model?} undecided faces, grouped
+  POST /api/faces/cluster                {app, tags?, include?, threshold?, min_size?, limit?, min_score?, model?, suggested?} undecided faces, grouped
+                                         (`suggested` false: not the faces waiting on a suggestion)
   POST /api/faces/assign                 {face_ids, identity_id, app, status?, source?, confidence?, note?} -> {batch}
   POST /api/faces/batches/{id}/undo        an assign batch, a hints batch or a propose run
   POST /api/faces/hints                  {app, hints: [{image_id, app_ref, face_id?, name?, status?}], note?} an app's possible labels -> {batch, added, skipped}
@@ -18,10 +19,10 @@
                                          min_score?, group_share?, group_min?} turn the app's hints into suggested faces (dry_run, the default,
                                          only counts); nothing is ever confirmed here
   GET  /api/faces/tags; PUT /api/faces/tags/{tag} {opt_in, note?}
-  GET  /api/identities?app=&q=&app_ref=&limit=   people (as `app` sees them); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
+  GET  /api/identities?app=&q=&app_ref=&limit=   people (as `app` sees them; `faces` confirmed, `suggested` waiting); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
   GET/PATCH /api/identities/{id}         one person (?app=); {name?, fields?} change the global ones
   PUT  /api/identities/{id}/apps/{app}   {fields, app_ref?} an app's own fields for a person
-  GET  /api/identities/{id}/faces?status=confirmed
+  GET  /api/identities/{id}/faces?status=confirmed&limit=&offset=   a person's faces in that state (`suggested`: waiting for a person), best first
   POST /api/identities/{id}/merge {into, app}; POST /api/identities/{id}/unmerge; POST /api/identities/not-same {a, b}
   GET  /api/identities/merge-suggestions?limit=&model=
 
@@ -83,6 +84,7 @@ class ClusterIn(BaseModel):
     limit: int = 5000
     min_score: float | None = None
     model: str | None = None
+    suggested: bool = True
 
 
 class AssignIn(BaseModel):
@@ -387,6 +389,7 @@ def mount(app, scheduler, store: FaceStore | None = None):
                 min_size=b.min_size,
                 limit=b.limit,
                 min_score=b.min_score,
+                suggested=b.suggested,
             ),
         )
 
@@ -484,8 +487,8 @@ def mount(app, scheduler, store: FaceStore | None = None):
             bad(e)
 
     @app.get("/api/identities/{identity_id:int}/faces")
-    def get_identity_faces(identity_id: int, status: str = "confirmed", limit: int = 500):
-        return dict(items=fs.faces_of(identity_id, status, limit))
+    def get_identity_faces(identity_id: int, status: str = "confirmed", limit: int = 500, offset: int = 0):
+        return dict(items=fs.faces_of(identity_id, status, limit, offset))
 
     @app.post("/api/identities/{identity_id:int}/merge")
     def post_merge(identity_id: int, b: MergeIn):

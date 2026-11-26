@@ -9,6 +9,12 @@ strata-scan now sets every page of a book with no scans but its pictures and pat
 - `runtimes/pagebuild.py`: a group's figure with an `image` (a picture file the app cut itself) is drawn from it, and `crop` leaves it alone. A path that is not a file is ignored and the figure is cut as before.
 - `tests/unit/test_pagebuild.py`.
 
+**Faces: confirm suggested faces on a person's page (branch `claude/faces-suggested`)**
+The propose step (#143) writes `suggested` faces, but the People screen only showed confirmed ones.
+- `faces/store.py`, `faces/api.py`: a person's `suggested` count beside `faces`; `GET /api/identities/{id}/faces` takes `offset`; `cluster` (and `POST /api/faces/cluster`) takes `suggested` (default true as before; false leaves out faces waiting on a suggestion).
+- Web: a person's page has a Suggested section (200 a page, SelectableGrid; Confirm selected, Not this person, Confirm all gathered from every page; Undo while each waits); the People list has a Suggested column and the header counts them; Unnamed groups no longer show faces waiting on a suggestion; the photo panel moved up so a suggested face opens in its photo too.
+- Tests: `test_faces_store.py`, `test_faces_api.py`, `web/tests/integration/Faces.test.tsx` (msw mock with suggested faces).
+
 **faces: possible labels (`face_hints`) and proposing people from them (branch `claude/face-hints`)**
 One global layer of decisions stays (owner, 2026-11-26); an app's possible labels sit beside it and only ever produce `suggested` faces.
 - `db/models.py`, migration `7c41d9e2a0b3` (**new** table `face_hints`: app, picture, optional face, app_ref, name, status possible|confirmed, batch).
