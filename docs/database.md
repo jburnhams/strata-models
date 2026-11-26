@@ -16,7 +16,7 @@ name; strata-python is public, so it has no built-in name). Without them the ser
 | Preferences | `preferences` | an app's own model and default params for a role: `PUT/DELETE /api/preferences/{app}/{role}`, `strata-models prefer` |
 | Requests | `jobs`, `results`, `files` | the scheduler: every run and lease (a run with the load options and `settings_hash` it started with), each run's output (dropped after a week), the paths a job read or wrote (never the bytes) |
 | Evals | `eval_datasets`, `eval_items`, `eval_experiments`, `eval_candidates`, `eval_results`, `eval_judgments` (people's, and model judges' with `judge` set), `eval_summaries` | spec TOMLs and dataset JSONLs imported when new or changed; `PUT /api/evals/{name}/spec`; runs and the Judge tab; `eval_summaries` worked out in the background after runs, judgments, spec edits and at start |
-| Faces | `face_images`, `face_image_tags`, `face_tags`, `faces`, `face_embeddings` (pgvector `public.vector(512)`, HNSW cosine index), `identities`, `identity_app_metadata`, `face_batches`, `face_assignments`, `identity_not_same` | every app's indexed pictures (`POST /api/faces/images`), the people in them and the decisions about them: see [Faces](#faces) |
+| Faces | `face_images`, `face_image_tags`, `face_tags`, `faces`, `face_embeddings` (pgvector `public.vector(512)`, HNSW cosine index), `identities`, `identity_app_metadata`, `face_batches`, `face_assignments`, `face_hints`, `identity_not_same` | every app's indexed pictures (`POST /api/faces/images`), the people in them and the decisions about them: see [Faces](#faces) |
 
 **Files are seeds.** `models.toml`, `evals/specs/*.toml` and the dataset `.jsonl` files are imported when they are new or changed. A row edited
 here (`edited`) is no longer overwritten by its file: the choice made here stands. `strata-models seed --follow role:KEY` (or
@@ -46,5 +46,20 @@ One face store for every app (design, survey and decisions: the face database pr
   `merge-suggestions` ranks pairs whose centroids are close, minus pairs marked `identity_not_same`.
 - **Decisions** (`face_assignments`) are append-only, grouped in `face_batches`; a face's newest decision whose batch is not undone wins, so any
   batch is undone in one step.
+- **One global layer of decisions** (owner, 2026-11-26): a confirmation counts for every app, with its app kept as the source; there is no
+  per-app confirmed layer.
+- **Possible labels** (`face_hints`) are what an app knows before anyone picks a face: "these people are in this picture" (a Google Photos
+  name tag: `face_id` empty) or "this face is this person" in the app's terms (bright-horizons' approved faces: `face_id` set). Each names the
+  app's key for the person (`app_ref`, the same key as `identity_app_metadata.app_ref`) and how sure the app is (`possible`, or `confirmed`
+  by a person in that app). Stored in `face_batches` of kind `hint`, so an import is undone in one step. Hints never decide a face.
+- **Proposing** (`POST /api/faces/propose`, `FaceStore.propose`, planned in `faces/propose.py`) turns an app's hints into `suggested`
+  decisions for a person to confirm: seeds are the faces that can only be one person (a face hint; the one face of a picture whose only
+  hinted person is them; faces already confirmed for the global person their app_ref maps to), faces the detector scored under 0.7
+  left out of everything; a person qualifies with 10+ seeds, 85 %+ of
+  them within 0.5 of their centroid; in each of their hinted pictures the clearly closest face (within 0.5, 0.05 ahead of the next face and
+  of any other hinted person) is suggested; with `groups`, an unnamed group mostly in one person's pictures is suggested whole. A person
+  with no global person yet gets a new one named from the hint, mapped by app_ref. A dry run (the default) only counts; a real run is one
+  `assign` batch (source `hint`), undone as one. Faces anyone already decided about are left alone, so a second run adds only what is new.
+  Merge suggestions compare a person who has no confirmed face yet by their suggested faces.
 - **pgvector** lives in `public` and the service's connection searches only `stratamodels`, so the type, operator and operator class are
   schema-qualified (`strata_python.db.vectors`). SQLite (tests) keeps vectors as text and searches in Python.

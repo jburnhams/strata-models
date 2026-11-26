@@ -448,7 +448,7 @@ class FaceBatch(Base):
 
     __tablename__ = "face_batches"
     id: Mapped[int] = mapped_column(primary_key=True, init=False)
-    kind: Mapped[str] = mapped_column(sa.String(32))  # assign | merge | import
+    kind: Mapped[str] = mapped_column(sa.String(32))  # assign | merge | import | hint | propose
     app: Mapped[str] = mapped_column(sa.String(64))
     at: Mapped[float]
     note: Mapped[str | None] = mapped_column(sa.String(500), default=None)
@@ -474,6 +474,28 @@ class FaceAssignment(Base):
         sa.ForeignKey("face_batches.id", ondelete="SET NULL"), index=True, default=None
     )
     confidence: Mapped[float | None] = mapped_column(default=None)
+
+
+class FaceHint(Base):
+    """A possible label an app has for a picture, before anyone says which face it is: "these people are in this photo" (a Google Photos
+    name tag; `face_id` empty) or "this face is this person" in the app's own terms (bright-horizons' approved faces; `face_id` set).
+    `app_ref` is the app's key for the person (as in identity_app_metadata), `name` what to call them. `status` is how sure the app is:
+    `possible`, or `confirmed` by a person in that app. Hints never decide a face: the propose step turns agreeing hints into `suggested`
+    face_assignments for a person to confirm. Grouped in face_batches (kind `hint`), so an import is undone in one step."""
+
+    __tablename__ = "face_hints"
+    __table_args__ = (sa.CheckConstraint("status in ('possible','confirmed')", name="status_valid"),)
+    id: Mapped[int] = mapped_column(primary_key=True, init=False)
+    app: Mapped[str] = mapped_column(sa.String(64), index=True)
+    image_id: Mapped[int] = mapped_column(sa.ForeignKey("face_images.id", ondelete="CASCADE"), index=True)
+    app_ref: Mapped[str] = mapped_column(sa.String(256))
+    at: Mapped[float]
+    face_id: Mapped[int | None] = mapped_column(sa.ForeignKey("faces.id", ondelete="CASCADE"), index=True, default=None)
+    name: Mapped[str | None] = mapped_column(sa.String(300), default=None)
+    status: Mapped[str] = mapped_column(sa.String(16), default="possible")
+    batch_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("face_batches.id", ondelete="SET NULL"), index=True, default=None
+    )
 
 
 class IdentityNotSame(Base):

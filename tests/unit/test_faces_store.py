@@ -280,3 +280,116 @@ def test_a_text_search_looks_past_the_limit(fs):
     assert [i["name"] for i in fs.identities(q="grace", limit=2)] == ["Grace"]
     assert len(fs.identities(q="person", limit=2)) == 2
     assert len(fs.identities(limit=2)) == 2
+
+
+def test_hints_are_stored_once_listed_and_undone_by_batch(fs):
+    a = index(fs, "immich", "a", [face(1)])
+    b = index(fs, "immich", "b", [face(1), face(2, x=100)])
+    r = fs.add_hints(
+        "takeout",
+        [
+            dict(image_id=a["id"], app_ref="Ann", name="Ann Example"),
+            dict(image_id=b["id"], app_ref="Ann"),
+            dict(image_id=b["id"], app_ref="Bob", face_id=b["faces"][1]["id"], status="confirmed"),
+            dict(image_id=b["id"], app_ref="Ann"),  # the same hint twice in one call
+        ],
+        note="first",
+    )
+    assert (r["added"], r["skipped"]) == (3, 1)
+    assert fs.add_hints("takeout", [dict(image_id=a["id"], app_ref="Ann")])["added"] == 0
+    got = fs.hints("takeout")
+    assert [(h["app_ref"], h["status"], h["name"]) for h in got] == [
+        ("Ann", "possible", "Ann Example"),
+        ("Ann", "possible", None),
+        ("Bob", "confirmed", None),
+    ]
+    assert [h["app_ref"] for h in fs.hints("takeout", image_id=b["id"])] == ["Ann", "Bob"]
+    assert len(fs.hints("takeout", app_ref="Bob")) == 1 and fs.hints("other") == []
+    fs.undo(r["batch"])
+    assert fs.hints("takeout") == []
+    assert fs.add_hints("takeout", [dict(image_id=a["id"], app_ref="Ann")])["added"] == 1
+    for bad, match in [
+        (dict(image_id=a["id"]), "image_id and app_ref"),
+        (dict(image_id=a["id"], app_ref="x", status="sure"), "status"),
+        (dict(image_id=a["id"], app_ref="x", face_id=b["faces"][0]["id"]), "is not in picture"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            fs.add_hints("takeout", [bad])
+    with pytest.raises(NotFound, match="no such picture"):
+        fs.add_hints("takeout", [dict(image_id=999, app_ref="x")])
+    with pytest.raises(ValueError, match="need an app"):
+        fs.add_hints("", [dict(image_id=a["id"], app_ref="x")])
+    with pytest.raises(ValueError, match="no hints"):
+        fs.add_hints("takeout", [])
+
+
+def test_propose_counts_then_writes_suggestions_for_a_new_or_mapped_person(fs):
+    solo = [index(fs, "immich", f"s{i}", [face(1, seed=i)]) for i in range(10)]
+    group = index(fs, "immich", "g", [face(2, seed=50), face(1, x=100, seed=51)])
+    hints = [dict(image_id=i["id"], app_ref="Ann", name="Ann E") for i in solo]
+    hints += [dict(image_id=group["id"], app_ref="Ann"), dict(image_id=group["id"], app_ref="Bob")]
+    fs.add_hints("takeout", hints)
+    dry = fs.propose("takeout", "buffalo_l")
+    assert (dry["dry_run"], dry["qualifying"], dry["suggested"], dry["batch"], dry["hinted_pictures"]) == (
+        True,
+        1,
+        11,
+        None,
+        11,
+    )
+    assert dry["people"][0] | {} == dict(
+        app_ref="Ann",
+        name="Ann E",
+        pictures=11,
+        seeds=10,
+        purity=1.0,
+        qualifies=True,
+        suggested=11,
+        by={"picture": 11},
+        identity_id=None,
+    )
+    assert fs.identities() == []  # a dry run writes nothing
+    done = fs.propose("takeout", "buffalo_l", dry_run=False)
+    assert (done["created"], done["suggested"]) == (1, 11) and done["batch"] is not None
+    (ann,) = fs.identities(app="takeout")
+    assert (ann["name"], ann["apps"]["takeout"]["app_ref"], ann["faces"]) == (
+        "Ann E",
+        "Ann",
+        0,
+    )  # suggestions are not confirmed faces
+    sug = fs.faces_of(ann["id"], status="suggested")
+    assert group["faces"][1]["id"] in [f["id"] for f in sug] and len(sug) == 11
+    assert fs.propose("takeout", "buffalo_l", dry_run=False)["suggested"] == 0  # nothing new: already suggested
+    fs.undo(done["batch"])
+    assert fs.faces_of(ann["id"], status="suggested") == []
+    again = fs.propose("takeout", "buffalo_l", dry_run=False, min_seeds=5)  # now Ann is mapped: no new person
+    assert (again["created"], again["people"][0]["identity_id"], again["params"]["min_seeds"]) == (0, ann["id"], 5)
+
+
+def test_propose_uses_the_mapped_persons_confirmed_faces_and_groups(fs):
+    imgs = [index(fs, "immich", f"g{i}", [face(1, seed=i), face(2, x=100, seed=100 + i)]) for i in range(4)]
+    ann = fs.create_identity("Ann", app="takeout", app_ref="Ann")
+    conf = [index(fs, "immich", f"c{i}", [face(1, seed=200 + i)]) for i in range(10)]
+    fs.assign([c["faces"][0]["id"] for c in conf], ann["id"], "immich")
+    fs.add_hints("takeout", [dict(image_id=i["id"], app_ref="Ann") for i in imgs])
+    r = fs.propose("takeout", "buffalo_l")
+    assert r["people"][0]["seeds"] == 10 and r["people"][0]["suggested"] == 4
+    extra = [index(fs, "immich", f"x{i}", [face(1, seed=300 + i)]) for i in range(2)]
+    r = fs.propose("takeout", "buffalo_l", groups=True, group_min=2, group_share=0.5)
+    assert r["groups"] >= 1 and r["people"][0]["by"].get("group", 0) == 2 and r["people"][0]["suggested"] == 6
+    w = fs.propose("takeout", "buffalo_l", groups=True, group_min=2, group_share=0.5, limit=5000, dry_run=False)
+    assert w["created"] == 0 and {f["id"] for f in fs.faces_of(ann["id"], status="suggested")} >= {
+        x["faces"][0]["id"] for x in extra
+    }
+
+
+def test_propose_with_no_hints_and_merge_suggestions_from_suggested_faces(fs):
+    assert fs.propose("nobody", "buffalo_l", dry_run=False)["batch"] is None
+    imgs = [index(fs, "immich", f"s{i}", [face(1, seed=i)]) for i in range(10)]
+    fs.add_hints("takeout", [dict(image_id=i["id"], app_ref="Ann") for i in imgs])
+    fs.propose("takeout", "buffalo_l", dry_run=False)
+    cat = fs.create_identity("Cat")
+    other = index(fs, "immich", "o", [face(1, seed=77)])
+    fs.assign([other["faces"][0]["id"]], cat["id"], "bright-horizons")
+    (pair,) = fs.merge_suggestions("buffalo_l")
+    assert {pair["basis_a"], pair["basis_b"]} == {"confirmed", "suggested"}

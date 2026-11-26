@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-11-26: possible labels and proposing people from them
+Google Photos (Takeout) puts names on photos, not on faces, and bright-horizons has its own named children. The owner wants these as
+possible labels that become proposed people once enough of them agree, waiting for a person to confirm; one global layer of
+confirmations (a confirmation counts everywhere, its app kept as the source). New table `face_hints`, `POST/GET /api/faces/hints`,
+`POST /api/faces/propose` (dry run by default) and `faces/propose.py` (docs/database.md#faces says how it decides).
+Measured first, read-only, on the live data: 36,837 Takeout photos carry names (235 names); 28,124
+matched an Immich picture in this store (8,931 byte-identical, 17,970 by EXIF time and file name or aspect, 1,223 by perceptual hash at
+pHash+dHash <= 12 of 128 bits; a sheet of 20 accepted pairs had one burst neighbour, same people). Of those pictures 12,920 carry one
+name and one face. For the 12 commonest names the seeds sit 88-92 % within 0.5 of their centroid, 73-90 % of each name's photos have a
+face that near, other people's labelled photos only 0-1 %, and the faces found fall 90-100 % in one Immich person cluster. A plain mean
+of seeds would average a name that is half someone else's faces into a third person, so the centroid is the centre of the seeds' densest
+bunch. bright-horizons' people: only one child is really in the library (the same cluster as the Takeout name); faces scored under 0.7
+by the detector gave nearly all false hits on photos from before the children were born (0.75 % of faces, 0.05 % with `min_score` 0.7).
+Dry run of the plan on a copy of the live data (no writes; Takeout hints on the 25,185 matched pictures, bright-horizons as if its
+pictures were indexed): with the default `min_score` 0.7, 62 of 229 Takeout names qualify and 24,914 faces would be suggested, 99.5 % of
+those Immich had clustered in each name's main Immich cluster; at `min_score` 0 the commonest child's name fell to 83 % purity (baby and
+blurred faces) and 61 qualified. bright-horizons: 59 of 79 people qualify on their approved faces; merge suggestions would pair the one child
+in both with their Takeout name (centroids 0.155 apart), then three toddler pairs at 0.54-0.59 for a person to look at.
+
 ## 2026-11-26: any picture format in the face store
 The faces runtime read pictures with OpenCV and the face store (kept copy, crops, sizes) with Pillow, so an iPhone's HEIC or a camera's raw
 file could not be indexed. Both now read through strata-python's `images` (strata-python #88): HEIC/HEIF, AVIF, JPEG XL, camera raw (DNG, CR2,
