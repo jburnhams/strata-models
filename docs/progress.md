@@ -7,7 +7,7 @@ in its photo with everyone beside it named (`BoxedPicture` + `BoxList` over the 
 chosen; name them, add them to someone, or say they are not faces), Possible duplicates (merge into the one with more faces, or keep apart) and
 Tags (which keep their pictures out of searches unless asked for). Every decision waits out an Undo window before it is sent, and is recorded
 in the app name `strata-models`. Taking a face off a person records "not this person", so it does not come back to them in a group. strata-react
-moved to 1.3.22 and the app to `strata.bare.css`, since it has its own palette (the full `strata.css` now carries the default look).
+moved to 1.3.22, and the app now uses Strata's standard look (`strata.css`) instead of a palette of its own (the owner: this app is not special).
 
 ## 2026-11-25: one face store for every app
 The faces of bright-horizons, strata-360, strata-stills and later strata-reels move into one store here, decided with the owner (one global
