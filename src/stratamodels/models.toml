@@ -459,7 +459,7 @@ vram_gb = 0.0
 licence = "LGPL/GPL (ffmpeg)"
 source = "https://ffmpeg.org/ffmpeg-filters.html#select_002c-aselect"
 used_by = ["strata-reels"]
-options = { threshold = 0.2, min_shot_s = 0.6, width = 160, deinterlace = true }   # 0.2: eval shots-vhs, 2026-11-24 (0.3 missed 3 more of 50 real cuts, 0.15 made 8 false ones)
+options = { threshold = 0.2, min_shot_s = 0.2, width = 160, deinterlace = true }   # eval shots-vhs, 2026-11-26: 0.2 and 0.2 s found all 50 real cuts with none false (0.6 s: 49, missing a quarter-second shot); 0.3 and 0.6 s, as first served, 46 and 7 false
 
 # Rivals to the baseline, in eval shots-spliced: one worker (workers/shots.py) in the venv `shots` (scripts/setup_worker_venv.sh shots), so
 # torch, OpenCV and PySceneDetect stay out of this service's dependencies. Same answer shape as ffmpeg-scene-score (cuts, shots, black).

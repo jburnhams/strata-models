@@ -2,6 +2,12 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-26
+
+**shot-boundaries: shots down to 0.2 s (branch `shots-min-shot`)**
+Eval `shots-vhs` rerun on omarchy after #129: `ffmpeg-scene-score` with `min_shot_s` 0.2 found all 50 cuts of the real tape with none false (cut_f1 1.000), 0.6 found 49 (0.991): the one left is a camcorder restart six frames after another. Jonathan: switch to it. One tape, nothing significant after Holm's correction; torn restarts made no extra cut there.
+- `src/stratamodels/models.toml`: `min_shot_s` 0.6 to 0.2.
+
 ## 2026-11-25
 
 **Normal and low work is queued in bulk; a single job is high priority; nothing is held for a batch (branch `claude/project-thread-ul9xch`)**
