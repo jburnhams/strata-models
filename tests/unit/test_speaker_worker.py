@@ -1,5 +1,5 @@
-"""The speaker-embedding venv-worker (stratamodels/workers/speaker.py) without SpeechBrain or torch: a fake encoder over numpy, ffmpeg real on a
-tiny generated file (it is on every CI runner). The real model: tests/gpu (needs the speaker venv)."""
+"""The speaker-embedding venv-worker (stratamodels/workers/speaker.py) without SpeechBrain, torch or ffmpeg: a fake encoder over numpy, and
+ffmpeg stood in for by a reader of the tiny generated WAVs (unit tests launch no external processes; the unit runners have no ffmpeg). The real model: tests/gpu (needs the speaker venv)."""
 
 import os
 import subprocess
@@ -27,6 +27,20 @@ def _wav(path, seconds, rate=8000, freq=220.0):
     return str(path)
 
 
+def _ffmpeg(cmd, capture_output):
+    """Answers decode's ffmpeg call as ffmpeg would for these WAVs: the samples as s16le, mono, resampled to 16 kHz; anything else refused."""
+    path, rate = cmd[cmd.index("-i") + 1], int(cmd[cmd.index("-ar") + 1])
+    try:
+        with wave.open(path, "rb") as w:
+            pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16)
+            source = w.getframerate()
+    except (wave.Error, EOFError):
+        return subprocess.CompletedProcess(cmd, 1, b"", b"Invalid data found when processing input")
+    n = len(pcm) * rate // source
+    out = np.interp(np.arange(n) * source / rate, np.arange(len(pcm)), pcm).astype(np.int16)
+    return subprocess.CompletedProcess(cmd, 0, out.tobytes(), b"")
+
+
 @pytest.fixture
 def encoder(monkeypatch):
     """A fake `embed`: each stretch's vector is (its length in samples, its mean level), normalised, so tests can tell stretches apart."""
@@ -38,6 +52,8 @@ def encoder(monkeypatch):
         return v / np.linalg.norm(v, axis=1, keepdims=True)
 
     monkeypatch.setattr(S, "embed", embed)
+    real = S.decode
+    monkeypatch.setattr(S, "decode", lambda path: real(path, run=_ffmpeg))
     return seen
 
 
