@@ -297,3 +297,24 @@ def test_hints_and_propose_over_http(client, scheduler, tmp_path):
     (ann,) = client.get("/api/identities", params=dict(app="takeout", app_ref="ann")).json()["items"]
     assert len(client.get(f"/api/identities/{ann['id']}/faces", params=dict(status="suggested")).json()["items"]) == 10
     assert client.post(f"/api/faces/batches/{done['batch']}/undo").status_code == 200
+
+
+def test_suggested_faces_paged_counted_and_left_out_of_groups_over_http(client, scheduler, tmp_path):
+    imgs = [index(client, scheduler, picture(tmp_path, f"q{i}.jpg"), f"q{i}") for i in range(3)]
+    ids = [i["faces"][0]["id"] for i in imgs]
+    who = client.post("/api/identities", json=dict(name="Ann")).json()
+    assert (
+        client.post(
+            "/api/faces/assign", json=dict(face_ids=ids, identity_id=who["id"], app="t", status="suggested")
+        ).status_code
+        == 200
+    )
+    assert client.get(f"/api/identities/{who['id']}").json()["suggested"] == 3
+    page = client.get(f"/api/identities/{who['id']}/faces", params=dict(status="suggested", limit=2, offset=2)).json()[
+        "items"
+    ]
+    assert len(page) == 1
+    with_sug = client.post("/api/faces/cluster", json=dict(app="strata-models")).json()["clusters"]
+    without = client.post("/api/faces/cluster", json=dict(app="strata-models", suggested=False)).json()["clusters"]
+    assert set(ids) <= {f for g in with_sug for f in g["faces"]}
+    assert not set(ids) & {f for g in without for f in g["faces"]}

@@ -61,5 +61,8 @@ One face store for every app (design, survey and decisions: the face database pr
   with no global person yet gets a new one named from the hint, mapped by app_ref. A dry run (the default) only counts; a real run is one
   `assign` batch (source `hint`), undone as one. Faces anyone already decided about are left alone, so a second run adds only what is new.
   Merge suggestions compare a person who has no confirmed face yet by their suggested faces.
+  A person confirms suggestions on the person's page in the web app (Suggested: a page of 200 at a time, confirm the chosen or all, or
+  "not this person", which records a rejection); `GET /api/identities` counts `suggested` beside `faces` (confirmed), and the Unnamed
+  groups screen asks `cluster` with `suggested: false`, so a face waiting on a suggestion is not shown as unnamed.
 - **pgvector** lives in `public` and the service's connection searches only `stratamodels`, so the type, operator and operator class are
   schema-qualified (`strata_python.db.vectors`). SQLite (tests) keeps vectors as text and searches in Python.

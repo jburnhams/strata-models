@@ -9,12 +9,13 @@ const commits = async (unmount: () => void, call: string) => { unmount(); await 
 describe('Faces: people', () => {
   it('lists everyone named, most faces first, and finds a person by name', async () => {
     const { user } = setup(<App />, { route: '/faces' })
-    expect(await screen.findByText(/3\speople named, with 6\sfaces confirmed\./)).toBeInTheDocument()
+    expect(await screen.findByText(/3\speople named, with 6\sfaces confirmed and 3 suggested to confirm\./)).toBeInTheDocument()
     const table = await screen.findByRole('grid', { name: 'People' })
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows.map(r => within(r).getByRole('link').textContent)).toEqual(['Ada', 'Cy', 'Person 2'])
     expect(within(rows[0]).getByText('bright-horizons')).toBeInTheDocument()
-    expect(within(rows[2]).getByText('–')).toBeInTheDocument()
+    expect(within(rows[1]).getByRole('gridcell', { name: '3' })).toBeInTheDocument() // Cy's suggested faces
+    expect(within(rows[2]).getAllByText('–')).toHaveLength(2) // nothing suggested, named in no app
     await user.type(screen.getByRole('searchbox', { name: 'Find a person' }), 'cy')
     await waitFor(() => expect(within(screen.getByRole('grid', { name: 'People' })).getAllByRole('row')).toHaveLength(2))
     await user.clear(screen.getByRole('searchbox', { name: 'Find a person' }))
@@ -109,6 +110,78 @@ describe('Faces: a person', () => {
   })
 })
 
+describe('Faces: suggested faces of a person', () => {
+  it('shows the suggested faces and confirms the chosen ones, with Undo', async () => {
+    const { user, unmount } = setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByText(/2\sfaces confirmed, 3 suggested, named in strata\-360\./)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Suggested: 3\sfaces/ })).toBeInTheDocument()
+    const grid = await screen.findByRole('grid', { name: 'Faces suggested for Cy' })
+    expect(faceMock.calls).toContain('suggested of 3 from 0 up to 200')
+    await user.click(within(within(grid).getByRole('row', { name: 'Face 61' })).getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Show in its photo' }))
+    expect(await screen.findByRole('heading', { name: 'In its photo' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm selected (1)' }))
+    expect(await screen.findByText(/Confirmed 1\sface as Cy\./)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'In its photo' })).not.toBeInTheDocument() // the open face went with it
+    expect(within(grid).queryByRole('row', { name: 'Face 61' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(await within(grid).findByRole('row', { name: 'Face 61' })).toBeInTheDocument()
+    await user.click(within(within(grid).getByRole('row', { name: 'Face 62' })).getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Confirm selected (1)' }))
+    await commits(unmount, 'assign 62 to 3 confirmed by strata-models')
+  })
+  it('says a chosen face is not this person, recorded as a rejection', async () => {
+    const { user, unmount } = setup(<App />, { route: '/faces/people/3' })
+    const grid = await screen.findByRole('grid', { name: 'Faces suggested for Cy' })
+    await user.click(within(within(grid).getByRole('row', { name: 'Face 63' })).getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Not this person (1)' }))
+    expect(await screen.findByText(/Took 1\sface off Cy's suggestions\./)).toBeInTheDocument()
+    await commits(unmount, 'assign 63 to 3 rejected by strata-models')
+  })
+  it('confirms every suggested face at once, gathered from every page', async () => {
+    const { user, unmount } = setup(<App />, { route: '/faces/people/3' })
+    await screen.findByRole('grid', { name: 'Faces suggested for Cy' })
+    await user.click(screen.getByRole('button', { name: 'Confirm all 3' }))
+    expect(await screen.findByText(/Confirmed 3\sfaces as Cy\./)).toBeInTheDocument()
+    expect(await screen.findByText('Nothing left to confirm on this page')).toBeInTheDocument()
+    expect(faceMock.calls).toContain('suggested of 3 from 0 up to 5000')
+    await commits(unmount, 'assign 61,62,63 to 3 confirmed by strata-models')
+  })
+  it('pages through a long list of suggestions', async () => {
+    faceMock.people[2].suggested = 450
+    const { user } = setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByText('Page 1 of 3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Page 2 of 3')).toBeInTheDocument()
+    await waitFor(() => expect(faceMock.calls).toContain('suggested of 3 from 200 up to 200'))
+    expect(await screen.findByText('Nothing left to confirm on this page')).toBeInTheDocument()
+    expect(screen.getByText('Go back a page, or come back once the list has refreshed.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Page 3 of 3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(await screen.findByText('Page 2 of 3')).toBeInTheDocument()
+  })
+  it('points at the suggestions when nothing is confirmed yet, and hides the section when there are none', async () => {
+    faceMock.faces[3] = []
+    const { unmount } = setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByText('Confirm the suggested faces below.')).toBeInTheDocument()
+    unmount()
+    setup(<App />, { route: '/faces/people/1' })
+    await screen.findByRole('grid', { name: 'Faces of Ada' })
+    expect(screen.queryByRole('heading', { name: /Suggested/ })).not.toBeInTheDocument()
+  })
+  it("says the service's reason when the suggestions cannot be gathered", async () => {
+    const { user } = setup(<App />, { route: '/faces/people/3' })
+    await screen.findByRole('grid', { name: 'Faces suggested for Cy' })
+    faceMock.suggested[3] = Array.from({ length: 5000 }, (_, i) => ({ ...faceMock.suggested[3][0], id: 1000 + i }))
+    faceMock.fail = 'faces'
+    await user.click(screen.getByRole('button', { name: 'Confirm all 3' }))
+    expect(await screen.findAllByText(/the face store is busy/)).not.toHaveLength(0)
+  })
+})
+
 describe('Faces: unnamed groups', () => {
   it('names a group as a new person, all its faces chosen to start with', async () => {
     const { user, unmount } = setup(<App />, { route: '/faces?tab=groups' })
@@ -125,7 +198,7 @@ describe('Faces: unnamed groups', () => {
     expect(within(screen.getByRole('grid', { name: 'Faces in group 1' })).getByRole('row', { name: 'Face 33' })).toBeInTheDocument()
     await commits(unmount, 'assign 31,32 to 53 confirmed by strata-models')
     expect(faceMock.calls).toContain('create Dee')
-    expect(faceMock.calls).toContain('cluster by strata-models')
+    expect(faceMock.calls).toContain('cluster by strata-models without suggested')
   })
   it('adds a group to someone named already, steps between groups, and marks one as not faces', async () => {
     const { user, unmount } = setup(<App />, { route: '/faces?tab=groups' })
