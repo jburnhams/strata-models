@@ -111,7 +111,8 @@ describe('VideoCompare (the Outputs grid until strata-react ships CompareVideoGr
     expect(vids().some(v => of(v).playing)).toBe(false)
     await user.click(within(cmp).getByRole('button', { name: /forward one frame/i }))
     expect(vids().map(v => of(v).t)).toEqual([0.02, 0.02, 0.02])
-    await user.selectOptions(within(cmp).getByRole('combobox', { name: 'Playback speed' }), '0.25')
+    await user.click(within(cmp).getByRole('button', { name: /Playback speed/ }))
+    await user.click(await screen.findByRole('option', { name: /^0\.25/ }))
     expect(vids().every(v => of(v).rate === 0.25)).toBe(true)
     ;(document.activeElement as HTMLElement).blur() // keys typed into the speed menu are the menu's
     await user.keyboard('v')

@@ -12,6 +12,17 @@ strata-voice is getting an Upload screen for found recordings of its speaker, wh
 - `tests/unit/test_speaker_worker.py` (**new**, a fake encoder, and ffmpeg stood in for by a reader of generated WAVs: the unit runners have no ffmpeg and unit tests launch no processes; review, Codex); `tests/gpu/test_real_runtimes.py`: the real model on the test audio. Not yet run on the GPU machine.
 - `README.md`: the role in "Roles served now".
 
+**face-tracks: faces in a video followed from frame to frame (branch `claude/project-thread-csasv3`)**
+A new role for strata-360 and strata-reels: one track per person per shot instead of a face per frame, so a person is named once per track and two tracks seen together are two people. Proposal: Claude Doc "Face tracks in video".
+- `runtimes/facetracks.py` (runtime `face-tracks`, model `buffalo_l-tracks`): ffmpeg decodes the first frame at or after each tick of `fps` (yadif on interlaced frames only), buffalo_l finds and embeds the faces, a tracker joins them (`iou`, `iou-emb` the default, or `byte` with ByteTrack's second pass on unsure faces), ending tracks at `cuts` and after `max_gap_s`. Each face gets a quality (detection score x size x sharpness x frontal); a track's embedding is the quality-weighted mean; its best `stills` (at least `still_gap_s` apart) are saved as JPEG frames. Answers `together`, the pairs of tracks seen in the same frame.
+- Baseline settings (5 fps, iou-emb, 3 stills) are first guesses: eval `face-tracks-home` is to choose them on labelled clips.
+- Eval `face-tracks-home` (`evals/specs/face-tracks-home.toml`): fps 2, 5 and 10 and the three trackers, on real clips labelled with `scripts/evals/face_tracks_labels.py` (propose: a generous run, contact sheets and a labels file to fill in; build: the named tracks sampled every 0.5 s). Metrics `id_f1` (identity F1), `track_mixed`, `track_split`, `track_face_miss` in `evals/metrics.py`.
+- Client `face_tracks`; tests in `tests/unit` and `tests/integration` (`test_facetracks_runtime.py`) and `tests/gpu`; added to pyright's strict list.
+
+**shot-boundaries: shots down to 0.2 s (branch `shots-min-shot`)**
+Eval `shots-vhs` rerun on omarchy after #129: `ffmpeg-scene-score` with `min_shot_s` 0.2 found all 50 cuts of the real tape with none false (cut_f1 1.000), 0.6 found 49 (0.991): the one left is a camcorder restart six frames after another. Jonathan: switch to it. One tape, nothing significant after Holm's correction; torn restarts made no extra cut there.
+- `src/stratamodels/models.toml`: `min_shot_s` 0.6 to 0.2.
+
 ## 2026-11-25
 
 **Normal and low work is queued in bulk; a single job is high priority; nothing is held for a batch (branch `claude/project-thread-ul9xch`)**

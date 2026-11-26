@@ -56,6 +56,48 @@ def test_faces_on_the_gpu():
 
 
 @pytest.mark.skipif(
+    not IMAGE or runtimes.available()["face-tracks"], reason="needs STRATAMODELS_TEST_IMAGE, insightface and ffmpeg"
+)
+def test_face_tracks_on_the_gpu(tmp_path):
+    """The test photo as a 6 s video that pans across it with a cut at 3 s: every face it holds is one track a shot, seen with the others."""
+    import subprocess
+
+    video = tmp_path / "pan.mp4"
+    pan = "scale=1920:-2,crop=1280:ih:'t*40':0,setsar=1"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-loop",
+            "1",
+            "-framerate",
+            "25",
+            "-t",
+            "6",
+            "-i",
+            IMAGE,
+            "-vf",
+            pan,
+            "-pix_fmt",
+            "yuv420p",
+            str(video),
+        ],
+        check=True,
+    )
+    out, _ = measure(
+        Registry.load().resolve("face-tracks"), dict(path=str(video), cuts=[3.0], out_dir=str(tmp_path / "stills"))
+    )
+    assert out["tracks"] and {t["shot"] for t in out["tracks"]} <= {0, 1}
+    for t in out["tracks"]:
+        assert len(t["embedding"]) == 512 and t["stills"] and all(os.path.isfile(s["image"]) for s in t["stills"])
+    per_shot = [[t for t in out["tracks"] if t["shot"] == k] for k in (0, 1)]
+    print(f"tracks a shot: {[len(p) for p in per_shot]}, {out['frames']} frames in {out['seconds']} s")
+    assert abs(len(per_shot[0]) - len(per_shot[1])) <= 1  # the same faces either side of the cut, each one track
+
+
+@pytest.mark.skipif(
     not AUDIO or not os.path.isdir(os.path.join(MODELS, "venvs", "whisper")),
     reason="needs STRATAMODELS_TEST_AUDIO and the whisper worker venv (scripts/setup_worker_venv.sh whisper)",
 )

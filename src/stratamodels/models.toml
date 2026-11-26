@@ -99,6 +99,10 @@ model = "tesseract-eng"                      # first pick (2026-11-13, for strat
 description = "Where a video cuts from one shot to the next, and its black stretches (home video and digitised VHS, for strata-reels)"
 model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, for strata-reels): eval shots-spliced measures learned detectors against it
 
+[roles.face-tracks]
+description = "Faces in a video followed from frame to frame: one track per person per shot, with its span, boxes, embedding and best stills"
+model = "buffalo_l-tracks"                   # the baseline (2026-11-26, for strata-360 and strata-reels): eval face-tracks-home chooses fps, tracker and still quality
+
 [roles.page-build]
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
 model = "pagebuild-opus-layout"              # Tesseract's lines regrouped into blocks by Claude Opus (eval page-layout, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, about 3 cents a page); `pagebuild` draws only, for the evals
@@ -112,6 +116,18 @@ licence = "insightface models: non-commercial research only (fine for private us
 source = "https://github.com/deepinsight/insightface/tree/master/model_zoo"
 used_by = ["bright-horizons", "strata-360", "strata-stills"]
 options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"] }
+
+# The faces pack again, behind a tracker (runtimes/facetracks.py): ffmpeg decodes, buffalo_l finds and embeds, faces are joined into tracks.
+# Its own load of buffalo_l (about 1 GB), so a long video does not hold the `faces` role's pack away from the apps' photos.
+[models.buffalo_l-tracks]
+runtime = "face-tracks"
+name = "buffalo_l"
+roles = ["face-tracks"]
+vram_gb = 1.0
+licence = "insightface models: non-commercial research only (fine for private use); ffmpeg LGPL/GPL"
+source = "https://github.com/deepinsight/insightface/tree/master/model_zoo"
+used_by = []
+options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"], fps = 5, tracker = "iou-emb", stills = 3 }   # first guesses, not yet measured: eval face-tracks-home
 
 [models.whisper-large-v3]
 runtime = "venv-worker"
@@ -460,7 +476,7 @@ vram_gb = 0.0
 licence = "LGPL/GPL (ffmpeg)"
 source = "https://ffmpeg.org/ffmpeg-filters.html#select_002c-aselect"
 used_by = ["strata-reels"]
-options = { threshold = 0.2, min_shot_s = 0.6, width = 160, deinterlace = true }   # 0.2: eval shots-vhs, 2026-11-24 (0.3 missed 3 more of 50 real cuts, 0.15 made 8 false ones)
+options = { threshold = 0.2, min_shot_s = 0.2, width = 160, deinterlace = true }   # eval shots-vhs, 2026-11-26: 0.2 and 0.2 s found all 50 real cuts with none false (0.6 s: 49, missing a quarter-second shot); 0.3 and 0.6 s, as first served, 46 and 7 false
 
 # Rivals to the baseline, in eval shots-spliced: one worker (workers/shots.py) in the venv `shots` (scripts/setup_worker_venv.sh shots), so
 # torch, OpenCV and PySceneDetect stay out of this service's dependencies. Same answer shape as ffmpeg-scene-score (cuts, shots, black).
