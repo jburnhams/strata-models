@@ -19,6 +19,7 @@ RUNTIMES = {
     "recorded": "stratamodels.runtimes.recorded",
     "tesseract": "stratamodels.runtimes.tesseract",
     "ffmpeg-scenes": "stratamodels.runtimes.scenes",
+    "face-tracks": "stratamodels.runtimes.facetracks",
     "page-build": "stratamodels.runtimes.pagebuild",
     "fontfit": "stratamodels.runtimes.fontfit",
     "ocr-fix": "stratamodels.runtimes.ocrfix",
@@ -37,6 +38,7 @@ NEEDS = {
     "recorded": (),
     "tesseract": (),
     "ffmpeg-scenes": (),
+    "face-tracks": ("insightface", "onnxruntime", "cv2", "scipy"),
     "page-build": ("reportlab", "pypdfium2"),
     "fontfit": (),
     "ocr-fix": (),
@@ -92,4 +94,5 @@ def available():
 
     if not scenes.binary():
         out["ffmpeg-scenes"] = out["ffmpeg-scenes"] + ["the ffmpeg command"]
+        out["face-tracks"] = out["face-tracks"] + ["the ffmpeg command"]
     return out

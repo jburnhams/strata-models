@@ -183,6 +183,15 @@ def shots(path, app, priority="normal", model=None, **params):
     return run("shot-boundaries", params, app, priority=priority, model=model)
 
 
+def face_tracks(path, app, priority="normal", model=None, **params):
+    """Faces in a video followed from frame to frame (role `face-tracks`): params clip ([start, end] seconds), cuts (seconds, from `shots`),
+    fps, tracker (iou | iou-emb | byte), stills, still_gap_s, images, out_dir, max_side. Returns {tracks: [{id, shot, start, end, faces,
+    quality, embedding, boxes: [[time, x0, y0, x1, y1, det_score]], stills: [{time, bbox, kps, pose, det_score, quality, embedding, image}]}],
+    together: [[track, track]], shots, fps, frames, width, height, duration, ...}; times are seconds in the file, boxes the video's pixels."""
+    params["path"] = os.path.abspath(path)
+    return run("face-tracks", params, app, priority=priority, model=model)
+
+
 def summarise(
     inputs,
     app,
