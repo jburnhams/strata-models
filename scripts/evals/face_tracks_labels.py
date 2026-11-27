@@ -123,6 +123,16 @@ def suggest(client, face_ids, embedding, k=SUGGEST_K, max_distance=SUGGEST_DISTA
     return who
 
 
+def _frame_scale(image, answer):
+    """(width, height, k) of a still's saved frame: face-tracks decodes at most max_side across and writes that frame, but answers boxes in the
+    video's pixels, so a stored box is the answer's times k (the frame's width over the video's). The store crops from this file, in its pixels."""
+    from PIL import Image
+
+    with Image.open(image) as im:
+        w, h = im.size
+    return w, h, w / float(answer["width"])
+
+
 def store(out_dir, client=None, skip=()):
     """Every worthwhile still of every clip's tracks into the face store, one picture each, and a known person suggested for each track's
     stills where the faces nearest it agree (`suggest`); returns how many stills."""
@@ -139,10 +149,11 @@ def store(out_dir, client=None, skip=()):
             for st in tr.get("stills") or []:
                 if not st.get("image") or not st.get("embedding"):
                     continue
+                w, h, k = _frame_scale(st["image"], answer)
                 face = dict(
-                    bbox=st["bbox"],
+                    bbox=[round(v * k, 2) for v in st["bbox"]],
                     det_score=st.get("det_score"),
-                    kps=st.get("kps"),
+                    kps=[[round(x * k, 2), round(y * k, 2)] for x, y in st["kps"]] if st.get("kps") else None,
                     pose=st.get("pose"),
                     embedding=st["embedding"],
                     found_by="face-tracks",
@@ -157,8 +168,8 @@ def store(out_dir, client=None, skip=()):
                         tags=[STORE, f"{STORE}:{prefix}"],
                         faces=[face],
                         model=STORE_MODEL,
-                        width=answer["width"],
-                        height=answer["height"],
+                        width=w,
+                        height=h,
                     ),
                 )
                 n += 1
