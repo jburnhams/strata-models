@@ -12,5 +12,5 @@ SPECS = sorted((pathlib.Path(__file__).resolve().parents[2] / "evals" / "specs")
 
 @pytest.mark.parametrize("path", SPECS, ids=lambda p: p.stem)
 def test_spec_parses(path):
-    spec = C.parse_spec(tomllib.loads(path.read_text()), source=str(path))
+    spec = C.parse_spec(tomllib.loads(path.read_text(encoding="utf-8")), source=str(path))
     assert spec.name == path.stem and spec.candidates
