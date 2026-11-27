@@ -11,13 +11,17 @@ folder can be moved with STRATAMODELS_HOME). The first bind copies that file's v
                   to budget for, at their own risk). Default: 10.0.
   idle_unload_min minutes after its last job that a loaded model is unloaded, whatever it runs on, giving back its GPU memory and RAM (the next
                   job loads it again, 3 to 10 s for most). Default: 30. 0 keeps models until the room is needed.
+  faces_min_score the face store's bar on the detector's score: faces under it are kept but never searched, grouped, suggested or proposed.
+                  Default: 0.7 (below it toddlers' and blurred faces matched the wrong person: docs/progress.md, faces propose).
+  faces_min_px    the same bar on size: the shorter side of a face's box, in its picture's pixels. Default: 40 (ArcFace aligns faces to
+                  112 px; smaller ones are mostly crowd and background). 0 turns either bar off.
   claude_budget_usd, gemini_budget_usd   what a cloud API key may spend per period (spend.py); a call whose worst case does not fit what is
                   left is refused. Default: 0 (nothing runs until a budget is set).
   claude_rollover, gemini_rollover       YYYY-MM-DD: a day the budget starts again, repeated monthly on that day of the month. Unset: the
                   budget is one pot that only goes down. (NVIDIA NIM is free and only rate-limited: no budget.)
 
 Environment variables override the file: STRATAMODELS_DATA, STRATAMODELS_MODELS, STRATAMODELS_VRAM_RESERVE_GB, STRATAMODELS_GPU_JOBS,
-STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB, STRATAMODELS_IDLE_UNLOAD_MIN. The database is chosen by strata_python.db:
+STRATAMODELS_CPU_JOBS, STRATAMODELS_WHOLE_CARD_GB, STRATAMODELS_IDLE_UNLOAD_MIN, STRATAMODELS_FACES_MIN_SCORE, STRATAMODELS_FACES_MIN_PX. The database is chosen by strata_python.db:
 STRATA_DB_URL, else STRATAMODELS_DATABASE_URL, else schema `stratamodels` of the shared database named in STRATA_DB_DATABASE over the local
 socket (a real Postgres only with STRATA_DB_LIVE=1, set in the service unit)."""
 
@@ -33,6 +37,8 @@ DEFAULTS = dict(
     cpu_jobs="4",
     whole_card_gb="10.0",
     idle_unload_min="30",
+    faces_min_score="0.7",
+    faces_min_px="40",
     claude_budget_usd="0",
     claude_rollover="",
     gemini_budget_usd="0",
@@ -46,6 +52,8 @@ ENV = dict(
     cpu_jobs="STRATAMODELS_CPU_JOBS",
     whole_card_gb="STRATAMODELS_WHOLE_CARD_GB",
     idle_unload_min="STRATAMODELS_IDLE_UNLOAD_MIN",
+    faces_min_score="STRATAMODELS_FACES_MIN_SCORE",
+    faces_min_px="STRATAMODELS_FACES_MIN_PX",
     claude_budget_usd="STRATAMODELS_CLAUDE_BUDGET_USD",
     claude_rollover="STRATAMODELS_CLAUDE_ROLLOVER",
     gemini_budget_usd="STRATAMODELS_GEMINI_BUDGET_USD",
@@ -157,6 +165,10 @@ def save(changes):
             _gb(k, v)  # refuse a bad number before it is written
         if k == "idle_unload_min" and v is not None:
             _minutes(k, v)
+        if k == "faces_min_score" and v is not None:
+            v = _score(k, v)
+        if k == "faces_min_px" and v is not None:
+            v = _px(k, v)
         if k in ("gpu_jobs", "cpu_jobs") and v is not None:
             v = _slots(k, v)
         if k.endswith("_budget_usd") and v is not None:
@@ -261,6 +273,42 @@ def idle_unload_min():
         return float(DEFAULTS["idle_unload_min"])
 
 
+def _score(key, v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a detector score from 0 to 1, not {v!r}")
+    if not 0 <= f <= 1:
+        raise ValueError(f"{key} must be between 0 and 1")
+    return f
+
+
+def _px(key, v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number of pixels, not {v!r}")
+    if not 0 <= f <= 1000:
+        raise ValueError(f"{key} must be between 0 and 1000")
+    return f
+
+
+def faces_min_score():
+    """The face store's bar on the detector's score (0: none)."""
+    try:
+        return _score("faces_min_score", _raw("faces_min_score"))
+    except ValueError:
+        return float(DEFAULTS["faces_min_score"])
+
+
+def faces_min_px():
+    """The face store's bar on a face's shorter side, in its picture's pixels (0: none)."""
+    try:
+        return _px("faces_min_px", _raw("faces_min_px"))
+    except ValueError:
+        return float(DEFAULTS["faces_min_px"])
+
+
 def _slots(key, v):
     try:
         n = int(str(v).strip())
@@ -323,5 +371,7 @@ def all_settings():
         cpu_jobs=jobs("cpu_jobs"),
         whole_card_gb=whole_card_gb(),
         idle_unload_min=idle_unload_min(),
+        faces_min_score=faces_min_score(),
+        faces_min_px=faces_min_px(),
         **{k: v for p in BUDGETED for k, v in zip((f"{p}_budget_usd", f"{p}_rollover"), budget(p))},
     )
