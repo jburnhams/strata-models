@@ -80,15 +80,17 @@ def _embed_one(handle, text, post):
     """(embedding, tokens, truncated?) of one text. One longer than the model's context is cut to 60 % at a time until it fits: a single long
     document must not fail the whole pool it sits in (what is cut is the end, where a chunk's least distinctive words are)."""
     cut = False
-    for _ in range(8):
+    while True:
         try:
             data, tok = _post_batch(handle, [text], post)
             return data[0]["embedding"], tok, cut
         except RunError as e:
             if not _too_long(e) or len(text) < 50:
                 raise
-            text, cut = text[: int(len(text) * 0.6)], True
-    raise RunError("a text is too long for the model's context even cut to a fraction")
+            text, cut = (
+                text[: int(len(text) * 0.6)],
+                True,
+            )  # ends once the server accepts it, or at the 50-character guard above
 
 
 def embed(handle, texts, post=None):
@@ -98,7 +100,7 @@ def embed(handle, texts, post=None):
     cache = handle.setdefault("cache", {})
     texts = [t[:MAX_BODY_CHARS] or " " for t in texts]
     todo = list(dict.fromkeys(t for t in texts if t not in cache))
-    tokens = cuts = 0
+    tokens = 0
     for i in range(0, len(todo), BATCH):
         chunk = todo[i : i + BATCH]
         try:
@@ -113,10 +115,13 @@ def embed(handle, texts, post=None):
                 got.append((emb, cut))
                 tok += k
         for t, (emb, cut) in zip(chunk, got, strict=True):
-            cache[t] = _normalise(emb, handle.get("dim"))
-            cuts += cut
+            cache[t] = (
+                _normalise(emb, handle.get("dim")),
+                cut,
+            )  # the vector and whether it is of a cut text, so a cached one still counts
         tokens += tok
-    out = [cache[t] for t in texts]
+    out = [cache[t][0] for t in texts]
+    cuts = sum(cache[t][1] for t in texts)
     if len(cache) > CACHE_MAX:  # keep the newest half
         for k in list(cache)[: len(cache) // 2]:
             del cache[k]

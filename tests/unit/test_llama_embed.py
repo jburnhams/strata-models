@@ -161,6 +161,10 @@ def test_a_text_longer_than_the_context_is_cut_not_fatal(setup):  # noqa: F811
 
     r = llamaembed.run(h, dict(query="a", docs=["b", "c" + "a" * 150, "d"]), probe=lambda: {}, post=post)
     assert len(r["scores"]) == 3 and r["cut"] == 1 and all(len(t) <= 60 for c in calls[-2:] for t in c)
+    again = llamaembed.run(h, dict(query="d", docs=["b", "c" + "a" * 150]), probe=lambda: {}, post=post)
+    assert again["cut"] == 1  # the cut text came from the cache and still counts
+    huge = llamaembed.run(h, dict(query="a", docs=["c" + "a" * 90_000]), probe=lambda: {}, post=post)
+    assert huge["cut"] == 1  # shrinks as far as it takes, not a fixed number of tries
     llamaembed.unload(h)
 
 
