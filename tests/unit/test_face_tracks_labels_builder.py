@@ -151,9 +151,10 @@ def test_propose_store_then_build(tmp_path):
         first["width"],
         first["height"],
     ) == (
-        640,
-        360,
-    )
+        320,
+        180,
+    )  # the saved frame's size, not the video's: the store crops from that file
+    assert first["faces"][0]["bbox"] == [5.0, 5.0, 30.0, 30.0]  # the answer's box (video pixels) scaled to the frame
     assert first["faces"][0]["embedding"] == ANA and first["faces"][0]["found_by"] == "face-tracks"
     yes = lambda p: dict(identity_id=p, status="confirmed")
     store.decided = {
@@ -202,7 +203,8 @@ def test_a_track_most_like_one_known_person_has_them_suggested(tmp_path):
     B.propose(str(tmp_path), ["/v/a.mp4"], client=FakeClient(tmp_path))
     saved = json.loads((tmp_path / "clip-01.json").read_text())
     saved["answer"]["tracks"] = saved["answer"]["tracks"][:1]
-    saved["answer"]["tracks"][0]["stills"] = [_still(0.5, 10.0, "s.jpg"), _still(1.5, 10.0, "s.jpg")]
+    img = saved["answer"]["tracks"][0]["stills"][0]["image"]
+    saved["answer"]["tracks"][0]["stills"] = [_still(0.5, 10.0, img), _still(1.5, 10.0, img)]
     (tmp_path / "clip-01.json").write_text(json.dumps(saved))
     store = FakeStore(known=[7, 7, 7, 8])
     B.store(str(tmp_path), client=store)
@@ -217,7 +219,7 @@ def test_a_track_most_like_one_known_person_has_them_suggested(tmp_path):
 def test_store_leaves_out_skipped_clips(tmp_path):
     B.propose(str(tmp_path), ["/v/a.mp4"], client=FakeClient(tmp_path))
     saved = json.loads((tmp_path / "clip-01.json").read_text())
-    saved["answer"]["tracks"][0]["stills"] = [_still(0.5, 10.0, "s.jpg")]
+    saved["answer"]["tracks"][0]["stills"] = [_still(0.5, 10.0, saved["answer"]["tracks"][0]["stills"][0]["image"])]
     (tmp_path / "clip-01.json").write_text(json.dumps(saved))
     store = FakeStore()
     assert B.store(str(tmp_path), client=store, skip={"clip-01"}) == 0 and B.store(str(tmp_path), client=store) == 1
