@@ -4,6 +4,8 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Fix: the `mail-retrieval` spec named a metric that does not exist (`peak_vram_mb`; it is `peak_vram_gb`), so the service refused to load it**
+New `tests/unit/test_shipped_specs.py` parses every spec in `evals/specs/`, so a typo like this fails the gate instead of the page.
 **face-tracks labels: stills stored with boxes in their own frame's pixels (branch `claude/project-thread-csasv3`)**
 The first import (2026-11-27 01:30) showed non-faces on the Faces screens: face-tracks writes frames decoded at most 1600 px across but answers boxes in the video's pixels, and the store cuts crops from the file it is given in that file's pixels, so every still of a video wider than 1600 px was cut from the wrong place. `store` now scales each box and its landmarks by the frame's width over the video's and gives the frame's own size. Re-import: `unstore` then `store`.
 

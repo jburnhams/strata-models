@@ -2,7 +2,7 @@ name = "mail-retrieval"
 question = "Which text-embedding model, and which instruction/dimension setting, finds the right email chunk or chat window for a question asked in everyday words?"
 role = "text-embed"
 dataset = "mail-retrieval-600"
-metrics = ["mrr", "hit_at_1", "hit_at_5", "latency_s", "peak_vram_mb", "failed"]
+metrics = ["mrr", "hit_at_1", "hit_at_5", "latency_s", "peak_vram_gb", "failed"]
 
 # Each item: a question and a pool of 100 chunks (email and chat windows mixed) with the answer's index; the model scores the pool and the metric
 # reads the rank of the right chunk. tags.source = "email" | "chat" breaks the report down. The dataset is private (builder: the owner's own
