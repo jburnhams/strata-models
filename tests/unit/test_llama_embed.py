@@ -153,14 +153,14 @@ def test_a_text_longer_than_the_context_is_cut_not_fatal(setup):  # noqa: F811
 
     def post(url, body, timeout=0):
         calls.append(body["input"])
-        if any(len(t) > 20 for t in body["input"]):
+        if any(len(t) > 60 for t in body["input"]):
             raise RunError(
                 'llama-server refused the request (400): {"error":{"message":"request (2084 tokens) exceeds the available context size (2048 tokens)"}}'
             )
         return fake_post(url, body)
 
     r = llamaembed.run(h, dict(query="a", docs=["b", "c" + "x" * 150 + "a", "d"]), probe=lambda: {}, post=post)
-    assert len(r["scores"]) == 3 and r["cut"] == 1 and all(len(t) <= 20 for c in calls[-2:] for t in c)
+    assert len(r["scores"]) == 3 and r["cut"] == 1 and all(len(t) <= 60 for c in calls[-2:] for t in c)
     llamaembed.unload(h)
 
 
