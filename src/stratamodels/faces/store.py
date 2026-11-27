@@ -15,7 +15,7 @@ Every call opens its own session (as store.Store does), so the API's threads nev
 import dataclasses
 import time
 from collections import defaultdict
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 import sqlalchemy as sa
@@ -47,8 +47,6 @@ REVIEW_CLUSTER = 0.35  # tight: the first round should be faces that are surely 
 CLUSTER_THRESHOLD = 0.55  # cosine distance on ArcFace embeddings: conservative (strata-360's `who`; bright-horizons' unknown groups used 0.55)
 MAX_CLUSTER = 5000  # faces grouped at once: average linkage keeps an n x n distance matrix (5000: 100 MB of float32)
 SUGGEST_MAX_DISTANCE = 0.6  # identity centroids further apart than this are not worth a person's look
-MIN_FACE_PX = 24  # a face whose box is narrower or shorter than this (picture pixels) is not stored: ArcFace sees 112 px, and under ~24 px its embedding is noise
-MIN_DET_SCORE = 0.5  # nor one the detector is less sure of than this (insightface's own default threshold); a face given without a score is kept
 EXEMPLARS = 30  # confirmed faces per identity used for its centroid in merge suggestions (the best detected)
 
 
@@ -74,18 +72,6 @@ def iou(a, b):
     inter = max(0.0, x1 - x0) * max(0.0, y1 - y0)
     union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
     return inter / union if union > 0 else 0.0
-
-
-def worth_keeping(d):
-    """Whether a detected or imported face is worth storing: big enough for its embedding to mean something, and probably a face. The one rule
-    for every app, so no caller has to filter; faces it leaves out are simply not in the answer."""
-    box = d.get("box") or d.get("bbox")
-    if not box or len(box) < 4:
-        return False
-    x0, y0, x1, y1 = (float(v) for v in box[:4])
-    if min(x1 - x0, y1 - y0) < MIN_FACE_PX:
-        return False
-    return d.get("det_score") is None or float(d["det_score"]) >= MIN_DET_SCORE
 
 
 def face_row(f, state=None):
@@ -273,7 +259,7 @@ class FaceStore:
                 else set()
             )
             kept = set()
-            for d in (d for d in faces if worth_keeping(d)):
+            for d in faces:
                 box = [float(v) for v in (d.get("box") or d.get("bbox"))[:4]]
                 match = max(old, key=lambda f: iou(box, (f.x0, f.y0, f.x1, f.y1)), default=None)
                 if (
@@ -320,39 +306,6 @@ class FaceStore:
                     s.delete(f)
             s.commit()
             return self._image_dict(s, img)
-
-    def delete_images(self, app, ref=None, tag=None) -> dict[str, Any]:
-        """Delete `app`'s picture `ref`, or all of its pictures tagged `tag`, with their faces, embeddings, hints and every decision about those
-        faces (an app removing a photo, or a set of pictures it no longer wants). People stay, even one left with no face. Returns the medium
-        copies (relative paths) no remaining picture uses, for the caller to remove, and how many pictures went."""
-        if not app or (ref is None) == (tag is None):
-            raise ValueError("give app and one of ref or tag")
-        with self.session() as s:
-            q = sa.select(FaceImage.id).where(FaceImage.app == str(app))
-            if ref is not None:
-                q = q.where(FaceImage.ref == str(ref))
-            else:
-                q = q.where(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag == str(tag))))
-            ids = list(s.scalars(q))
-            if not ids:
-                return dict(deleted=0, mediums=[])
-            mediums = set()
-            for chunk in (ids[i : i + CHUNK] for i in range(0, len(ids), CHUNK)):
-                faces = sa.select(Face.id).where(Face.image_id.in_(chunk))
-                mediums |= {m for m in s.scalars(sa.select(FaceImage.medium).where(FaceImage.id.in_(chunk))) if m}
-                for model in (FaceAssignment, FaceEmbedding):
-                    s.execute(sa.delete(model).where(model.face_id.in_(faces)))
-                s.execute(sa.delete(FaceHint).where(FaceHint.image_id.in_(chunk)))
-                s.execute(sa.delete(Face).where(Face.image_id.in_(chunk)))
-                s.execute(sa.delete(FaceImageTag).where(FaceImageTag.image_id.in_(chunk)))
-                s.execute(sa.delete(FaceImage).where(FaceImage.id.in_(chunk)))
-            still = (
-                set(s.scalars(sa.select(FaceImage.medium).where(FaceImage.medium.in_(list(mediums)))))
-                if mediums
-                else set()
-            )
-            s.commit()
-            return dict(deleted=len(ids), mediums=sorted(mediums - still))
 
     def face(self, face_id):
         with self.session() as s:

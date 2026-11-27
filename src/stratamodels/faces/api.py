@@ -1,7 +1,5 @@
 """The face store's HTTP API, mounted by server/app.py (the client is strata_python.clients.faces).
 
-  DELETE /api/faces/images?app=&ref=     one picture of an app (or ?app=&tag=: all of the app's pictures with that tag) with its faces,
-                                         embeddings, hints and decisions; people stay -> {deleted}
   POST /api/faces/images                 {app, ref, path?, url?, tags?, taken_at?, priority?, det_thresh?, force?, faces?, model?, width?, height?} index one picture:
                                          run the `faces` role on `path` (or take `faces` an app already has, made with `model`), keep a 1600 px
                                          WebP copy, store faces and embeddings. Indexing the same ref with the same model and settings again
@@ -32,7 +30,6 @@
 
 The `model` of a search or clustering defaults to the `faces` role's model: embeddings of different models are never compared."""
 
-import contextlib
 import hashlib
 import os
 import time
@@ -288,17 +285,6 @@ def mount(app, scheduler, store: FaceStore | None = None):
             return dict(items=[one] if one else [], next=None)
         items = fs.images(app_name, tag, include or (), before, limit)
         return dict(items=items, next=items[-1]["id"] if len(items) >= max(1, min(limit, 500)) else None)
-
-    @app.delete("/api/faces/images")
-    def delete_images(app_name: str = Query(..., alias="app"), ref: str | None = None, tag: str | None = None):
-        try:
-            r = fs.delete_images(app_name, ref=ref, tag=tag)
-        except ValueError as e:
-            bad(e)
-        for m in r["mediums"]:  # copies nothing points at any more
-            with contextlib.suppress(OSError):
-                os.remove(os.path.join(settings.data_dir(), m))
-        return dict(deleted=r["deleted"])
 
     @app.get("/api/faces/images/{image_id:int}")
     def get_image(image_id: int):
