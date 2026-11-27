@@ -516,14 +516,25 @@ class FaceStore:
         time instead of a track: average linkage on the tracks' embeddings (`group_apart`), never putting two tracks in one group when
         `apart` says they were seen together (two faces in one frame are two people). Each group gets the known person its mean embedding
         is nearest, when the `suggest` (k, max distance, share) nearest confirmed faces in scope mostly agree; it is only a suggestion, and
-        nothing is stored. Largest group first. Nothing here reads the tracks back: an app keeps them, and asks again after a change."""
+        nothing is stored. Largest group first. Nothing here reads the tracks back: an app keeps them, and asks again after a change.
+        A track that names its stored stills (`faces`) and has none over the store's bar is not grouped but answered in `hidden`, so an app
+        never has to judge tiny or doubtful faces itself. Returns {groups, hidden}."""
+        tracks = list(tracks)
+        named = [int(f) for t in tracks for f in (t.get("faces") or [])]
+        if named:
+            with self.session() as s:
+                ok = set(s.scalars(sa.select(Face.id).where(Face.id.in_(named), self.usable())))
+            hidden = [str(t["key"]) for t in tracks if t.get("faces") and not ok & {int(f) for f in t["faces"]}]
+            tracks = [t for t in tracks if str(t["key"]) not in set(hidden)]
+        else:
+            hidden = []
         keys = [str(t["key"]) for t in tracks]
         if len(set(keys)) != len(keys):
             raise ValueError("every track needs a key of its own")
         if len(keys) > MAX_CLUSTER:
             raise ValueError(f"at most {MAX_CLUSTER} tracks are grouped at once, not {len(keys)}")
         if not keys:
-            return []
+            return dict(groups=[], hidden=hidden)
         E = np.array([t["embedding"] for t in tracks], dtype=np.float32)
         if E.ndim != 2:
             raise ValueError("every track needs an embedding of the same length")
@@ -541,7 +552,7 @@ class FaceStore:
             )
             out.append(dict(tracks=[keys[i] for i in members], size=len(members), suggested=self._vote(hits, share)))
         out.sort(key=lambda g: (-g["size"], index[g["tracks"][0]]))
-        return out
+        return dict(groups=out, hidden=hidden)
 
     def _vote(self, hits, share):
         """The person most of `hits` (confirmed faces) are, with their name and share, or None when no one holds `share` of them (and two)."""

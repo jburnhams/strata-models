@@ -68,7 +68,8 @@ One face store for every app (design, survey and decisions: the face database pr
 - **Grouping a video's tracks** (`POST /api/faces/group-tracks`, `FaceStore.group_tracks`): an app sends a video's face tracks (from the
   `face-tracks` role: a key and the track's embedding each, and the pairs seen in the same frame as `apart`) and gets them grouped into
   people to name a group at a time: average linkage at the clustering threshold, never two tracks seen together in one group, each group
-  with the known person most of the 10 confirmed faces nearest it (within 0.5, 60 %) are, as a suggestion. Stateless: the app keeps its
+  with the known person most of the 10 confirmed faces nearest it (within 0.5, 60 %) are, as a suggestion. A track that names its
+  stored stills (`faces`) and has none over the bar is answered in `hidden`, not grouped. Stateless: the app keeps its
   tracks and stores their stills as pictures when it wants them named (strata-reels does both).
 - **Proposing** (`POST /api/faces/propose`, `FaceStore.propose`, planned in `faces/propose.py`) turns an app's hints into `suggested`
   decisions for a person to confirm: seeds are the faces that can only be one person (a face hint; the one face of a picture whose only

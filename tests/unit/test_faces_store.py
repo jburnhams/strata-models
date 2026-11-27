@@ -560,20 +560,22 @@ def test_group_tracks_suggests_a_known_person_only_when_most_nearest_faces_agree
     ann = fs.create_identity(name="Ann")["id"]
     fs.assign(ids[:4], ann, "stills")
     tracks = [track("t1", 1, 11), track("t2", 1, 12), track("t3", 3, 13), track("t4", 1, 14)]
-    groups = fs.group_tracks("buffalo_l", tracks, apart=[("t1", "t4"), ("t1", "nope")])
+    groups = fs.group_tracks("buffalo_l", tracks, apart=[("t1", "t4"), ("t1", "nope")])["groups"]
     assert sorted(len(g["tracks"]) for g in groups) == [1, 1, 2] and ["t3"] in [g["tracks"] for g in groups]
     assert not any({"t1", "t4"} <= set(g["tracks"]) for g in groups)
     big = groups[0]
     assert big["suggested"] == dict(identity_id=ann, name="Ann", share=1.0)
     assert next(g for g in groups if g["tracks"] == ["t3"])["suggested"] is None  # nobody near person 3
     fs.set_tag("stills", True)
-    assert fs.group_tracks("buffalo_l", tracks)[0]["suggested"] is None  # Ann's faces are opt-in now
-    assert fs.group_tracks("buffalo_l", tracks, include=["stills"])[0]["suggested"]["identity_id"] == ann
+    assert fs.group_tracks("buffalo_l", tracks)["groups"][0]["suggested"] is None  # Ann's faces are opt-in now
+    assert fs.group_tracks("buffalo_l", tracks, include=["stills"])["groups"][0]["suggested"]["identity_id"] == ann
     bob = fs.create_identity(name="Bob")["id"]
     fs.merge(ann, bob, "stills")
-    assert (
-        fs.group_tracks("buffalo_l", tracks, include=["stills"])[0]["suggested"]["identity_id"] == bob
-    )  # read through the merge
-    assert fs.group_tracks("buffalo_l", []) == []
+    merged = fs.group_tracks("buffalo_l", tracks, include=["stills"])["groups"][0]
+    assert merged["suggested"]["identity_id"] == bob  # read through the merge
+    assert fs.group_tracks("buffalo_l", []) == dict(groups=[], hidden=[])
+    tiny = index(fs, "reels", "still", [face(1, score=0.3)])["faces"][0]["id"]  # under the store's bar
+    got = fs.group_tracks("buffalo_l", [dict(track("t5", 1), faces=[tiny]), dict(track("t6", 1), faces=[ids[0]])])
+    assert (got["hidden"], [g["tracks"] for g in got["groups"]]) == (["t5"], [["t6"]])
     with pytest.raises(ValueError, match="key of its own"):
         fs.group_tracks("buffalo_l", [track("a", 1), track("a", 2)])

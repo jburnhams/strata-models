@@ -372,5 +372,6 @@ def test_group_tracks_answers_groups_and_refuses_a_bad_request(client):
     assert body["model"] == "fakeface"
     assert sorted(len(g["tracks"]) for g in body["groups"]) == [1, 1, 1]  # a and b look alike, but were seen together
     assert all(g["suggested"] is None for g in body["groups"])
+    assert body["hidden"] == []
     r = client.post("/api/faces/group-tracks", json=dict(app="strata-reels", tracks=[tracks[0], tracks[0]]))
     assert r.status_code == 400 and "key of its own" in r.json()["detail"]
