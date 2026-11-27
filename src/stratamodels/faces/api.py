@@ -14,6 +14,9 @@
   POST /api/faces/search                 {app, face_id | embedding | path, k?, tags?, include?, named?, max_distance?, model?} nearest faces
   POST /api/faces/cluster                {app, tags?, include?, threshold?, min_size?, limit?, min_score?, model?, suggested?} undecided faces, grouped
                                          (`suggested` false: not the faces waiting on a suggestion)
+  POST /api/faces/group-tracks           {app, tracks: [{key, embedding}], apart?: [[key, key]], threshold?, model?, tags?, include?} a video's face
+                                         tracks grouped into people (never two seen together in one group), each group with a known person
+                                         suggested when the confirmed faces nearest it agree: {model, groups: [{tracks, size, suggested}]}
   POST /api/faces/assign                 {face_ids, identity_id, app, status?, source?, confidence?, note?} -> {batch}
   POST /api/faces/batches/{id}/undo        an assign batch, a hints batch or a propose run
   POST /api/faces/hints                  {app, hints: [{image_id, app_ref, face_id?, name?, status?}], note?} an app's possible labels -> {batch, added, skipped}
@@ -93,6 +96,21 @@ class ClusterIn(BaseModel):
     min_score: float | None = None
     model: str | None = None
     suggested: bool = True
+
+
+class TrackIn(BaseModel):
+    key: str
+    embedding: list[float]
+
+
+class GroupTracksIn(BaseModel):
+    app: str
+    tracks: list[TrackIn]
+    apart: list[tuple[str, str]] = Field(default_factory=list)
+    threshold: float | None = None
+    model: str | None = None
+    tags: list[str] | None = None
+    include: list[str] = Field(default_factory=list)
 
 
 class AssignIn(BaseModel):
@@ -430,6 +448,22 @@ def mount(app, scheduler, store: FaceStore | None = None):
                 suggested=b.suggested,
             ),
         )
+
+    @app.post("/api/faces/group-tracks")
+    def post_group_tracks(b: GroupTracksIn):
+        model = b.model or role_model(None, b.app)[0]
+        try:
+            groups = fs.group_tracks(
+                model,
+                [t.model_dump() for t in b.tracks],
+                apart=b.apart,
+                threshold=b.threshold,
+                tags=b.tags,
+                include=b.include,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return dict(model=model, groups=groups)
 
     @app.post("/api/faces/assign")
     def post_assign(b: AssignIn):

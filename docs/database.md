@@ -65,6 +65,11 @@ One face store for every app (design, survey and decisions: the face database pr
   name tag: `face_id` empty) or "this face is this person" in the app's terms (bright-horizons' approved faces: `face_id` set). Each names the
   app's key for the person (`app_ref`, the same key as `identity_app_metadata.app_ref`) and how sure the app is (`possible`, or `confirmed`
   by a person in that app). Stored in `face_batches` of kind `hint`, so an import is undone in one step. Hints never decide a face.
+- **Grouping a video's tracks** (`POST /api/faces/group-tracks`, `FaceStore.group_tracks`): an app sends a video's face tracks (from the
+  `face-tracks` role: a key and the track's embedding each, and the pairs seen in the same frame as `apart`) and gets them grouped into
+  people to name a group at a time: average linkage at the clustering threshold, never two tracks seen together in one group, each group
+  with the known person most of the 10 confirmed faces nearest it (within 0.5, 60 %) are, as a suggestion. Stateless: the app keeps its
+  tracks and stores their stills as pictures when it wants them named (strata-reels does both).
 - **Proposing** (`POST /api/faces/propose`, `FaceStore.propose`, planned in `faces/propose.py`) turns an app's hints into `suggested`
   decisions for a person to confirm: seeds are the faces that can only be one person (a face hint; the one face of a picture whose only
   hinted person is them; faces already confirmed for the global person their app_ref maps to), faces the detector scored under 0.7

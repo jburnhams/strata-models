@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Faces: group a video's tracks into people; scene-describe-v3 names them (branch `claude/project-thread-l890x5`)**
+Asked for strata-reels' people stage: a tape's face tracks are named a group at a time, then the scene describer says who does what. The grouping is here, not in reels, since every choice in it (threshold, how tracks seen together are kept apart) is face recognition and is the evals' to tune.
+- `faces/store.py`: `FaceStore.group_tracks` groups tracks an app sends (key and embedding each) by average linkage at `CLUSTER_THRESHOLD`, and `group_apart` keeps two tracks seen in one frame (`apart`) out of one group: the whole set is grouped as `cluster` does, and only a group holding such a pair is grouped again step by step with the pair forbidden, so its tracks still join whoever they are nearest. Each group gets a suggested person when 60 % (and at least two) of the 10 confirmed faces nearest its mean embedding, within 0.5, are one person (the face-tracks labelling script's rule), read through merges. Nothing is stored.
+- `faces/api.py`: **new** route `POST /api/faces/group-tracks` (400 for two tracks with one key or more than 5000 tracks).
+- `runtimes/presets/scene-describe-v3.md`, `.schema.json`: **new**, v2 plus the people the family named (`context.people`: each name with the frames their face is in and where), whom it calls by name and nobody else, and a `who` list (person and what they do). v2 stays for what was asked with it.
+- `models.toml`, `README.md`: the `scene-describe` role names v3 beside v2.
+- `docs/database.md`: grouping tracks, under Faces.
+- Tests: `tests/unit/test_faces_store.py` (two tracks seen together never in one group; a suggestion only when the nearest confirmed faces agree, hidden by an opt-in tag unless included, read through a merge), `tests/unit/test_faces_api.py` (the route and its 400).
+
 **Face tracks eval: identity F1 per shot (branch `claude/id-f1-per-shot`)**
 The first face-tracks-home run (2026-11-27) scored every candidate 0.28-0.39: `id_f1` paired each person with one track for the whole clip, but face-tracks ends every track at a cut by design, so a person in five shots could count only one of their five tracks. `id_f1` now pairs people and tracks one to one within each shot (the item's `cuts`, as `track_split` reads them); the whole-clip score stays as `id_f1_clip`, added to the spec beside it.
 - Tests: `tests/unit/test_face_track_metrics.py` (two shots, one track per person per shot: 1.0 per shot, 0.5 over the clip; a switch exactly at a cut is clean per shot but still `track_mixed`).

@@ -5,7 +5,7 @@ synthetic: a few directions in 512 dimensions, one per made-up person, with a li
 import numpy as np
 import pytest
 
-from stratamodels.faces.store import FaceStore, NotFound
+from stratamodels.faces.store import FaceStore, NotFound, group_apart
 from stratamodels.store import memory_store
 
 DIM = 512
@@ -533,3 +533,47 @@ def test_one_source_people_and_review_round(fs):
     assert r["suggested"] == 2 and sorted(i["id"] for i in r["items"]) == sorted(f["id"] for f in clip["faces"])
     assert r["basis"] == "confirmed"  # the person's model still comes from all their confirmed faces
     assert fs.review(two, "buffalo_l", tag="video")["items"] == []
+
+
+def track(key, k, seed=0, noise=0.01):
+    return dict(key=key, embedding=person(k, noise, seed))
+
+
+def test_group_apart_never_joins_tracks_seen_together():
+    E = np.array([person(1, 0.01, 1), person(1, 0.01, 2), person(1, 0.01, 3), person(5, 0.01, 4)])
+    assert group_apart(E, [], 0.55) == [[0, 1, 2], [3]]
+    assert group_apart(E, [(0, 2)], 0.55) in (
+        [[0, 1], [2], [3]],
+        [[0], [1, 2], [3]],
+    )  # one of them on its own, never 0 with 2
+    assert group_apart(E[:1], [], 0.55) == [[0]]
+    assert group_apart(E, [], 0.0) == [[0], [1], [2], [3]]
+
+
+def test_group_tracks_suggests_a_known_person_only_when_most_nearest_faces_agree(fs):
+    ids = [
+        f["id"]
+        for f in index(fs, "stills", "p1", [face(1, x=i * 50, seed=i) for i in range(4)] + [face(2, x=400, seed=9)])[
+            "faces"
+        ]
+    ]
+    ann = fs.create_identity(name="Ann")["id"]
+    fs.assign(ids[:4], ann, "stills")
+    tracks = [track("t1", 1, 11), track("t2", 1, 12), track("t3", 3, 13), track("t4", 1, 14)]
+    groups = fs.group_tracks("buffalo_l", tracks, apart=[("t1", "t4"), ("t1", "nope")])
+    assert sorted(len(g["tracks"]) for g in groups) == [1, 1, 2] and ["t3"] in [g["tracks"] for g in groups]
+    assert not any({"t1", "t4"} <= set(g["tracks"]) for g in groups)
+    big = groups[0]
+    assert big["suggested"] == dict(identity_id=ann, name="Ann", share=1.0)
+    assert next(g for g in groups if g["tracks"] == ["t3"])["suggested"] is None  # nobody near person 3
+    fs.set_tag("stills", True)
+    assert fs.group_tracks("buffalo_l", tracks)[0]["suggested"] is None  # Ann's faces are opt-in now
+    assert fs.group_tracks("buffalo_l", tracks, include=["stills"])[0]["suggested"]["identity_id"] == ann
+    bob = fs.create_identity(name="Bob")["id"]
+    fs.merge(ann, bob, "stills")
+    assert (
+        fs.group_tracks("buffalo_l", tracks, include=["stills"])[0]["suggested"]["identity_id"] == bob
+    )  # read through the merge
+    assert fs.group_tracks("buffalo_l", []) == []
+    with pytest.raises(ValueError, match="key of its own"):
+        fs.group_tracks("buffalo_l", [track("a", 1), track("a", 2)])

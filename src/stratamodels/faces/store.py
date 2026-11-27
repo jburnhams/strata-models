@@ -47,6 +47,11 @@ REVIEW_CLUSTER = 0.35  # tight: the first round should be faces that are surely 
 CLUSTER_THRESHOLD = 0.55  # cosine distance on ArcFace embeddings: conservative (strata-360's `who`; bright-horizons' unknown groups used 0.55)
 MAX_CLUSTER = 5000  # faces grouped at once: average linkage keeps an n x n distance matrix (5000: 100 MB of float32)
 SUGGEST_MAX_DISTANCE = 0.6  # identity centroids further apart than this are not worth a person's look
+TRACK_SUGGEST = (
+    10,
+    0.5,
+    0.6,
+)  # a group's nearest confirmed faces, how near, and the share one person must hold to be suggested (the face-tracks eval's labelling, 2026-11-27)
 EXEMPLARS = 30  # confirmed faces per identity used for its centroid in merge suggestions (the best detected)
 
 
@@ -505,6 +510,55 @@ class FaceStore:
         out = [dict(faces=sorted(g), size=len(g)) for g in groups.values() if len(g) >= min_size]
         out.sort(key=lambda g: (-g["size"], g["faces"][0]))
         return out
+
+    def group_tracks(self, model, tracks, *, apart=(), threshold=None, tags=None, include=(), suggest=TRACK_SUGGEST):
+        """A video's face tracks (strata_python face-tracks answers: [{key, embedding}]) grouped into people, for an app to name a group at a
+        time instead of a track: average linkage on the tracks' embeddings (`group_apart`), never putting two tracks in one group when
+        `apart` says they were seen together (two faces in one frame are two people). Each group gets the known person its mean embedding
+        is nearest, when the `suggest` (k, max distance, share) nearest confirmed faces in scope mostly agree; it is only a suggestion, and
+        nothing is stored. Largest group first. Nothing here reads the tracks back: an app keeps them, and asks again after a change."""
+        keys = [str(t["key"]) for t in tracks]
+        if len(set(keys)) != len(keys):
+            raise ValueError("every track needs a key of its own")
+        if len(keys) > MAX_CLUSTER:
+            raise ValueError(f"at most {MAX_CLUSTER} tracks are grouped at once, not {len(keys)}")
+        if not keys:
+            return []
+        E = np.array([t["embedding"] for t in tracks], dtype=np.float32)
+        if E.ndim != 2:
+            raise ValueError("every track needs an embedding of the same length")
+        E /= np.maximum(np.linalg.norm(E, axis=1, keepdims=True), 1e-9)
+        index = {k: i for i, k in enumerate(keys)}
+        pairs = [(index[str(a)], index[str(b)]) for a, b in apart if str(a) in index and str(b) in index]
+        t = CLUSTER_THRESHOLD if threshold is None else float(threshold)
+        k, max_distance, share = suggest
+        out = []
+        for members in group_apart(E, pairs, t):
+            mean = E[members].mean(axis=0)
+            mean /= max(float(np.linalg.norm(mean)), 1e-9)
+            hits = self.search(
+                [float(x) for x in mean], model, k=k, tags=tags, include=include, named=True, max_distance=max_distance
+            )
+            out.append(dict(tracks=[keys[i] for i in members], size=len(members), suggested=self._vote(hits, share)))
+        out.sort(key=lambda g: (-g["size"], index[g["tracks"][0]]))
+        return out
+
+    def _vote(self, hits, share):
+        """The person most of `hits` (confirmed faces) are, with their name and share, or None when no one holds `share` of them (and two)."""
+        with self.session() as s:
+            votes = defaultdict(int)
+            for h in hits:
+                votes[self._root(s, h["face"]["identity_id"])] += 1
+            if not votes:
+                return None
+            who, n = max(votes.items(), key=lambda kv: (kv[1], -kv[0]))
+            if n < max(2, share * len(hits)):
+                return None
+            return dict(
+                identity_id=who,
+                name=self._identity_dict(s, s.get(Identity, who))["name"],
+                share=round(n / len(hits), 3),
+            )
 
     # ---- people ----------------------------------------------------------------------------------------------------------------------------
     def _root(self, s, identity_id):
@@ -1172,3 +1226,61 @@ class FaceStore:
 def _chunks(ids, n=CHUNK):
     for i in range(0, len(ids), n):
         yield ids[i : i + n]
+
+
+def group_apart(E, apart, threshold):
+    """Rows of `E` (unit vectors) grouped by average linkage on cosine distance, cut at `threshold`, with no group holding both rows of a
+    pair in `apart`. The whole set is grouped as `cluster` does (scipy); a group that holds such a pair (rare: two people who look alike
+    seen together) is grouped again on its own, merging the nearest two parts that may be one person until none is within the threshold,
+    so its tracks still join whoever they are nearest. Groups as lists of row numbers, each sorted, in order of their first row."""
+    n = len(E)
+    if n == 1:
+        return [[0]]
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    D = np.clip(1.0 - E @ E.T, 0.0, 2.0)
+    labels = fcluster(linkage(D[np.triu_indices(n, 1)], "average"), threshold, "distance")
+    groups = defaultdict(list)
+    for row, c in enumerate(labels):
+        groups[int(c)].append(row)
+    partner = defaultdict(set)
+    for a, b in apart:
+        if a != b:
+            partner[a].add(b)
+            partner[b].add(a)
+    out = []
+    for rows in groups.values():
+        inside = set(rows)
+        if any(partner[r] & inside for r in rows):
+            out += _apart(D[np.ix_(rows, rows)], rows, partner, threshold)
+        else:
+            out.append(sorted(rows))
+    return sorted(out, key=lambda g: g[0])
+
+
+def _apart(D, rows, partner, threshold):
+    """Average linkage with cannot-link pairs, step by step (Lance-Williams), on one group's rows: small, so n^3 is nothing."""
+    parts = [[r] for r in rows]
+    d = D.astype(np.float64).copy()
+    np.fill_diagonal(d, np.inf)
+    where = {r: i for i, r in enumerate(rows)}
+    no = np.zeros(d.shape, dtype=bool)
+    for r in rows:
+        for p in partner[r]:
+            if p in where:
+                no[where[r], where[p]] = True
+    alive = np.ones(len(rows), dtype=bool)
+    while True:
+        m = np.where(no | ~alive[:, None] | ~alive[None, :], np.inf, d)
+        i, j = divmod(int(np.argmin(m)), len(rows))
+        if not m[i, j] <= threshold:
+            break
+        ni, nj = len(parts[i]), len(parts[j])
+        d[i, :] = d[:, i] = (ni * d[i, :] + nj * d[j, :]) / (ni + nj)
+        d[i, i] = np.inf
+        no[i, :] |= no[j, :]
+        no[:, i] = no[i, :]
+        parts[i] += parts[j]
+        parts[j] = []
+        alive[j] = False
+    return [sorted(p) for p in parts if p]
