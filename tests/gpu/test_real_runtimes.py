@@ -728,3 +728,28 @@ def test_shot_detectors_find_the_cuts_to_the_frame(key, tmp_path):
     out, _ = measure(Registry.load().models[key], dict(path=str(path)))
     assert [c["time"] for c in out["cuts"]] == [2.0, 3.0, 5.0] and out["black"] == [{"start": 2.0, "end": 3.0}]
     assert out["model"] == key and out["device"] == ("cuda" if key == "transnetv2" else "cpu")
+
+
+EMBED_MODELS = ["qwen3-embedding-0.6b", "qwen3-embedding-4b", "bge-m3", "embeddinggemma-300m", "nomic-embed-v1_5"]
+
+
+@pytest.mark.skipif(
+    bool(runtimes.available()["llama-server"]), reason="needs the llama-server binary (llama.cpp) and huggingface_hub"
+)
+@pytest.mark.parametrize("key", EMBED_MODELS)
+def test_text_embed_on_the_gpu(key):
+    """Role text-embed: vectors come back unit length, and a question ranks the passage that answers it above the ones that do not (the repeat is answered from the cache)."""
+    model = Registry.load().models[key]
+    assert "text-embed" in model.roles
+    docs = [
+        "Your parcel has left the depot and will arrive on Thursday between 9 and 1.",
+        "Reminder: the quarterly gas meter reading is due before the end of the month.",
+        "Booking confirmed: two nights at the lakeside cabin, check-in from 3 pm on Friday.",
+    ]
+    out, again = measure(model, dict(query="When can I check in to the cabin?", docs=docs))
+    scores = out["scores"]
+    assert len(scores) == 3 and max(range(3), key=scores.__getitem__) == 2 and out["dim"] > 0
+    assert again["scores"] == scores  # deterministic, and the second run is the cached one
+    vecs, _ = measure(model, dict(texts=docs))
+    v = np.asarray(vecs["vectors"], dtype=np.float32)
+    assert v.shape == (3, out["dim"]) and np.allclose(np.linalg.norm(v, axis=1), 1.0, atol=1e-3)
