@@ -15,8 +15,8 @@
     "test:coverage:gate": "vitest run --coverage --config vitest.gate.config.ts"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.108.2",
-    "lucide-react": "^1.77.0",
+    "@tanstack/react-query": "^5.108.4",
+    "lucide-react": "^1.79.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^8.5.2",
