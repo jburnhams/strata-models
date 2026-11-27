@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Text embeddings: a document longer than the model's context is cut, not fatal (`llama-embed`)**
+In the first `mail-retrieval` run, 57 of 600 pools (9.5 %) failed for every Qwen3 and EmbeddingGemma candidate because one document in the pool was over the 2048-token context, and a failed pool counts as wrong. The runtime now embeds such a text alone and cuts it to 60 % at a time until it fits; the answer's `cut` says how many were cut. Other server errors still fail the job.
+
 **Faces: the likeness picker from more than 40 confirmed faces (was 100) (branch `claude/faces-picker-40`)**
 The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
 - `web/src/components/PersonPage.tsx`: `BULK_ABOVE = 40` (picker when confirmed > 40); `web/tests/integration/Faces.test.tsx`: 40 keeps rounds, 41 shows the picker; docs/database.md.
