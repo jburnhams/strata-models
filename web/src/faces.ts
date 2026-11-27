@@ -38,7 +38,7 @@ export const facesApi = {
     }
   },
   /** The next round of a person's suggestions (`limit` most certain), or with `minLikeness` every one at least that alike. */
-  review: (id: number, limit = 48, minLikeness?: number) => call<Review>('GET', `/api/identities/${id}/review?limit=${limit}${minLikeness === undefined ? '' : `&min_likeness=${minLikeness}`}`),
+  review: (id: number, limit = 48, minLikeness?: number, source = '') => call<Review>('GET', `/api/identities/${id}/review?limit=${limit}${minLikeness === undefined ? '' : `&min_likeness=${minLikeness}`}${source ? `&tag=${encodeURIComponent(source)}` : ''}`),
   rename: (id: number, name: string) => call<Person>('PATCH', `/api/identities/${id}`, { name }),
   create: (name: string) => call<Person>('POST', '/api/identities', { name }),
   /** One decision on some faces: theirs (`confirmed`), not theirs (`rejected` with the person), or not a face at all (`rejected`, nobody). */
@@ -46,7 +46,8 @@ export const facesApi = {
   face: (id: number) => call<Face>('GET', `/api/faces/${id}`),
   image: (id: number) => call<FaceImage>('GET', `/api/faces/images/${id}`),
   /** Faces nobody has decided about, grouped; faces waiting on a suggestion are decided on their person's page, so they are left out. */
-  groups: () => call<{ clusters: Group[] }>('POST', '/api/faces/cluster', { app: APP, suggested: false }).then(r => r.clusters),
+  /** `source` (a tag: every picture carries its app's name as one) keeps the groups to that source's pictures. */
+  groups: (source = '') => call<{ clusters: Group[] }>('POST', '/api/faces/cluster', { app: APP, suggested: false, ...(source ? { tags: [source] } : {}) }).then(r => r.clusters),
   suggestions: () => call<{ items: Suggestion[] }>('GET', '/api/identities/merge-suggestions').then(r => r.items),
   merge: (id: number, into: number) => call<Person>('POST', `/api/identities/${id}/merge`, { into, app: APP }),
   notSame: (a: number, b: number) => call<unknown>('POST', '/api/identities/not-same', { a, b }),

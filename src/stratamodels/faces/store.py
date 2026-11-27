@@ -700,6 +700,7 @@ class FaceStore:
         pool=REVIEW_POOL,
         threshold=REVIEW_CLUSTER,
         min_likeness=None,
+        tags=None,
     ):
         """The next round of a person's suggested faces to decide, most certain first, scored afresh on every call (so each round a person
         confirms makes the next one surer). The model of the person: with `min_confirmed` confirmed faces, the centre of their densest bunch
@@ -707,7 +708,8 @@ class FaceStore:
         suggestions, every face of which an app already says may be them. A suggested face nearer a face rejected for this person than the
         model is left out of the round (it looks like the one that was not them). Answers {basis, basis_faces, suggested, confirmed, near
         (within 0.3 / 0.4 / 0.5), counts (how many are at least each likeness 0.50-0.95, likeness = 1 - distance), left_out, items: faces with
-        `distance`, closest first}. `min_likeness` keeps only the faces at least that alike (with a large `limit`: all of them at once)."""
+        `distance`, closest first}. `min_likeness` keeps only the faces at least that alike (with a large `limit`: all of them at once). `tags` offers only the suggestions
+        in pictures with one of them (a person naming one source's faces, say a video's); the model of the person still uses every confirmed face."""
         from scipy.cluster.hierarchy import fcluster, linkage
 
         centre = None
@@ -722,8 +724,9 @@ class FaceStore:
                 sug
             ):  # a suggestion under the store's bar is not offered (it stays, and comes back if the bar is lowered)
                 ok = set()
+                scope = Face.image_id.in_(sa.select(FaceImage.id).where(self._scope(s, tags))) if tags else sa.true()
                 for part in _chunks(sorted(sug)):
-                    ok.update(s.scalars(sa.select(Face.id).where(Face.id.in_(part), self.usable())))
+                    ok.update(s.scalars(sa.select(Face.id).where(Face.id.in_(part), self.usable(), scope)))
                 sug = [f for f in sug if f in ok]
             conf = [f for f, a in mine.items() if a.status == "confirmed"]
             rej = [f for f, a in mine.items() if a.status == "rejected"]

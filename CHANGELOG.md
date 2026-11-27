@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Faces: one source at a time (branch `claude/project-thread-csasv3`)**
+Jonathan (2026-11-27): a way on Faces to see only the video stills to name.
+- `faces/store.py` `review(tags=)`, `GET /api/identities/{id}/review?tag=`: only the suggestions in pictures with one of the tags (the person's model still uses every confirmed face).
+- Web: a "Pictures from" picker (`components/SourcePicker.tsx`, `?source=` in the URL) on Unnamed groups (clustering with `tags`) and on a person's rounds of suggestions. It lists every tag with its picture count; an app's name is a tag on all its pictures, so `face-tracks-eval` is the video stills and `face-tracks-eval:SET/clip-NN` one clip.
+- Tests: store and API with `tag`; web integration for both screens.
+
 **Faces: the likeness picker from more than 40 confirmed faces (was 100) (branch `claude/faces-picker-40`)**
 The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
 - `web/src/components/PersonPage.tsx`: `BULK_ABOVE = 40` (picker when confirmed > 40); `web/tests/integration/Faces.test.tsx`: 40 keeps rounds, 41 shows the picker; docs/database.md.

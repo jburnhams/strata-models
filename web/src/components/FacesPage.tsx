@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, BulkBar, Button, DataTable, DataView, EmptyState, Field, Input, NativeSelect, PageHeader, SelectableGrid, Status, Switch, TableSkeleton, Tabs, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable, type Column } from 'strata-react'
 import { facesApi, personName, type Group, type Person, type Suggestion, type Tag } from '../faces'
+import { SourcePicker, useSource } from './SourcePicker'
 
 const tabs = [
   { value: 'people', label: 'People' },
@@ -83,14 +84,17 @@ function GroupReview({ group, index, total, people, onDecide }: { group: Group; 
 
 function Groups() {
   const qc = useQueryClient()
-  const load = useLoad({ queryKey: ['faces', 'groups'], queryFn: facesApi.groups, staleTime: 5 * 60_000 })
+  const [source, setSource] = useSource()
+  const load = useLoad({ queryKey: ['faces', 'groups', source], queryFn: () => facesApi.groups(source), staleTime: 5 * 60_000 })
   const people = usePeople()
   const undoable = useUndoable()
   const [at, setAt] = useState(0)
+  useEffect(() => setAt(0), [source])
   const undecided = (all: Group[]) => all.map(g => ({ faces: g.faces.filter(f => !undoable.isRemoved(String(f))) })).filter(g => g.faces.length > 0).map(g => ({ ...g, size: g.faces.length }))
   return (
     <div className="grid gap-4">
-      <DataView state={load} isEmpty={g => undecided(g).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="Every face has been decided">New pictures an app indexes bring new groups here.</EmptyState>}>
+      <SourcePicker source={source} setSource={setSource} />
+      <DataView state={load} isEmpty={g => undecided(g).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="Every face has been decided">{source ? `Nothing left to decide in ${source}.` : 'New pictures an app indexes bring new groups here.'}</EmptyState>}>
         {all => {
           const left = undecided(all)
           const i = Math.min(at, left.length - 1)

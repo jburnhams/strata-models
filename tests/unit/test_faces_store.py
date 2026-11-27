@@ -512,3 +512,24 @@ def test_delete_images_names_only_the_kept_copies_no_other_picture_uses(fs):
     assert sorted(fs.delete_images(app="a", dry_run=True)["media"]) == ["faces/medium/own.webp"]
     assert fs.delete_images(app="b")["media"] == []  # "one" still uses it
     assert fs.delete_images(ids=ids)["media"] == ["faces/medium/own.webp", "faces/medium/shared.webp"]
+
+
+def test_review_offers_only_one_sources_suggestions_when_asked(fs):
+    photos = [index(fs, "immich", f"p{i}", [face(1, seed=i)])["faces"][0]["id"] for i in range(4)]
+    clips = [
+        index(fs, "face-tracks-eval", f"c{i}", [face(1, seed=20 + i)], tags=["face-tracks-eval:set/clip-01"])["faces"][
+            0
+        ]["id"]
+        for i in range(3)
+    ]
+    ann = fs.create_identity("Ann")
+    fs.assign(photos + clips, ann["id"], "t", status="suggested")
+    assert len(fs.review(ann["id"], "buffalo_l", limit=50)["items"]) == 7
+    r = fs.review(
+        ann["id"], "buffalo_l", limit=50, tags=["face-tracks-eval"]
+    )  # an app's name is a tag on all its pictures
+    assert {f["id"] for f in r["items"]} == set(clips) and r["suggested"] == 3
+    assert {
+        f["id"] for f in fs.review(ann["id"], "buffalo_l", limit=50, tags=["face-tracks-eval:set/clip-01"])["items"]
+    } == set(clips)
+    assert fs.review(ann["id"], "buffalo_l", tags=["nowhere"])["items"] == []

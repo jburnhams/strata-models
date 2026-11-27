@@ -329,6 +329,10 @@ def test_review_round_over_http(client, scheduler, tmp_path):
     assert r["basis"] == "group" and len(r["items"]) == 2 and "distance" in r["items"][0]
     allr = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=5000, min_likeness=0.5)).json()
     assert len(allr["items"]) == 4 and allr["counts"]["0.50"] == 4
+    assert (
+        client.get(f"/api/identities/{who['id']}/review", params=dict(tag="bright-horizons")).json()["suggested"] == 4
+    )
+    assert client.get(f"/api/identities/{who['id']}/review", params=dict(tag="elsewhere")).json()["items"] == []
     assert client.get("/api/identities/999/review").status_code == 404
 
 

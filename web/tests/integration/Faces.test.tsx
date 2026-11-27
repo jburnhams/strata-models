@@ -279,6 +279,24 @@ describe('Faces: suggested faces of a person', () => {
   })
 })
 
+describe('Faces: one source at a time', () => {
+  it('keeps the unnamed groups to the pictures of the source chosen, in the link too', async () => {
+    const { user } = setup(<App />, { route: '/faces?tab=groups' })
+    expect(await screen.findByRole('heading', { name: /Group 1 of 2/ })).toBeInTheDocument()
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Pictures from' }), 'bright-horizons')
+    expect(await screen.findByRole('heading', { name: /Group 1 of 1/ })).toBeInTheDocument()
+    expect(faceMock.calls).toContain('cluster by strata-models without suggested from bright-horizons')
+  })
+  it("offers a person's suggestions from one source only", async () => {
+    const { user } = setup(<App />, { route: '/faces/people/3?source=face-tracks-eval' })
+    await screen.findByRole('grid', { name: 'Is this Cy?' })
+    expect(faceMock.calls).toContain('review 3 up to 48 from face-tracks-eval')
+    expect(screen.getByRole('combobox', { name: 'Pictures from' })).toHaveValue('face-tracks-eval') // a source not listed yet is still offered
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Pictures from' }), '')
+    await waitFor(() => expect(faceMock.calls).toContain('review 3 up to 48'))
+  })
+})
+
 describe('Faces: unnamed groups', () => {
   it('names a group as a new person, all its faces chosen to start with', async () => {
     const { user, unmount } = setup(<App />, { route: '/faces?tab=groups' })

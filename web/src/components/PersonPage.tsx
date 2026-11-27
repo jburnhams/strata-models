@@ -11,6 +11,7 @@ import { useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, BulkBar, Button, DataView, EmptyState, Field, Input, NumberField, PageHeader, SelectableGrid, TableSkeleton, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable } from 'strata-react'
 import { facesApi, personName, type Face, type Person } from '../faces'
+import { SourcePicker, useSource } from './SourcePicker'
 import { FaceInPhoto } from './FaceInPhoto'
 
 const isId = (raw: string) => /^\d+$/.test(raw)
@@ -86,7 +87,8 @@ function Round({ person, open, setOpen }: Open & { person: Person }) {
   const bulk = person.faces > BULK_ABOVE
   const [minRaw, setMin] = useSearchParam<string>('min', { default: String(DEFAULT_MIN), parse: isPct })
   const min = Number(minRaw)
-  const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100) : facesApi.review(person.id, ROUND)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
+  const [source, setSource] = useSource()
+  const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0, source], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100, source) : facesApi.review(person.id, ROUND, undefined, source)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
   const undoable = useUndoable()
   const rows = load.status === 'ready' ? load.data.items.filter(f => !undoable.isRemoved(String(f.id))) : []
   const selection = useSelection(rows, f => String(f.id), () => true)
@@ -112,6 +114,7 @@ function Round({ person, open, setOpen }: Open & { person: Person }) {
   return (
     <section aria-labelledby="round" className="grid gap-4">
       <h2 id="round" className="type-heading">{`Is this ${who}? ${format.count(person.suggested, 'face')} suggested`}</h2>
+      <SourcePicker source={source} setSource={setSource} />
       {r && <p className="type-body-sm max-w-prose text-muted-foreground">{`${basis} ${format.integer(r.near['0.3'] ?? 0)} are very close and ${format.integer(r.near['0.4'] ?? 0)} close. Untick any that are someone else.`}</p>}
       {bulk && (
         <div className="grid gap-2">

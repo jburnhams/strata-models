@@ -62,8 +62,8 @@ export const faceHandlers = [
   }),
   http.get('/api/identities/:id/review', ({ params, request }) => {
     const q = new URL(request.url).searchParams
-    const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness')
-    faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}`)
+    const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness'), tag = q.get('tag')
+    faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}${tag ? ` from ${tag}` : ''}`)
     const scored = (faceMock.suggested[id] ?? []).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 }))
     const counts = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map(x => [x.toFixed(2), scored.filter(f => 1 - f.distance >= x - 1e-9).length]))
     const items = scored.filter(f => !min || 1 - f.distance >= Number(min) - 1e-9).slice(0, limit)
@@ -95,9 +95,9 @@ export const faceHandlers = [
     return HttpResponse.json({ batch: 9 })
   }),
   http.post('/api/faces/cluster', async ({ request }) => {
-    const b = (await request.json()) as { app: string; suggested?: boolean }
-    faceMock.calls.push(`cluster by ${b.app}${b.suggested === false ? ' without suggested' : ''}`)
-    return HttpResponse.json({ model: 'buffalo_l', clusters: faceMock.groups })
+    const b = (await request.json()) as { app: string; suggested?: boolean; tags?: string[] }
+    faceMock.calls.push(`cluster by ${b.app}${b.suggested === false ? ' without suggested' : ''}${b.tags ? ` from ${b.tags.join(',')}` : ''}`)
+    return HttpResponse.json({ model: 'buffalo_l', clusters: b.tags ? faceMock.groups.slice(0, 1) : faceMock.groups })
   }),
   http.get('/api/faces/tags', () => HttpResponse.json({ items: faceMock.tags })),
   http.put('/api/faces/tags/:tag', async ({ params, request }) => {
