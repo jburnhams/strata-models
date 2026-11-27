@@ -159,7 +159,7 @@ def test_a_text_longer_than_the_context_is_cut_not_fatal(setup):  # noqa: F811
             )
         return fake_post(url, body)
 
-    r = llamaembed.run(h, dict(query="a", docs=["b", "c" + "x" * 150 + "a", "d"]), probe=lambda: {}, post=post)
+    r = llamaembed.run(h, dict(query="a", docs=["b", "c" + "a" * 150, "d"]), probe=lambda: {}, post=post)
     assert len(r["scores"]) == 3 and r["cut"] == 1 and all(len(t) <= 60 for c in calls[-2:] for t in c)
     llamaembed.unload(h)
 
