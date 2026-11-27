@@ -378,3 +378,35 @@ describe('Faces: tags', () => {
     expect(await screen.findByText('No tags yet')).toBeInTheDocument()
   })
 })
+
+describe('Faces: one source at a time', () => {
+  it('narrows the people to those with faces from a source, and a person opened keeps it', async () => {
+    const { user } = setup(<App />, { route: '/faces' })
+    await screen.findByRole('grid', { name: 'People' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Source' }), 'face-tracks-eval')
+    const table = await screen.findByRole('grid', { name: 'People with faces from face-tracks-eval' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map(r => within(r).getByRole('link').textContent)).toEqual(['Cy'])
+    expect(within(rows[0]).getByRole('link')).toHaveAttribute('href', '/faces/people/3?source=face-tracks-eval')
+    expect(faceMock.calls).toContain('people from face-tracks-eval')
+    expect(screen.getByRole('option', { name: /^face-tracks-eval \(9\spictures\)$/ })).toBeInTheDocument()
+  })
+  it("shows a person's round of suggestions from that source only", async () => {
+    const { user } = setup(<App />, { route: '/faces/people/3?source=face-tracks-eval' })
+    expect(await screen.findByRole('heading', { name: /Is this Cy\? 1\sface suggested from face-tracks-eval/ })).toBeInTheDocument()
+    expect(faceMock.calls).toContain('review 3 up to 48 from face-tracks-eval')
+    expect(screen.getByRole('link', { name: 'Every person' })).toHaveAttribute('href', '/faces?source=face-tracks-eval')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Source' }), '')
+    expect(await screen.findByRole('heading', { name: /Is this Cy\? 3\sfaces suggested$/ })).toBeInTheDocument()
+  })
+  it('groups only the faces from that source, and says when every one is decided', async () => {
+    const { user } = setup(<App />, { route: '/faces?tab=groups' })
+    expect(await screen.findByRole('heading', { name: /Group 1 of 2/ })).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Source' }), 'face-tracks-eval')
+    expect(await screen.findByRole('heading', { name: /Group 1 of 1/ })).toBeInTheDocument()
+    expect(faceMock.calls).toContain('cluster by strata-models without suggested from face-tracks-eval')
+    faceMock.groups = []
+    setup(<App />, { route: '/faces?tab=groups&source=nursery' })
+    expect(await screen.findByText('Every face from nursery has been decided')).toBeInTheDocument()
+  })
+})

@@ -321,7 +321,10 @@ def test_suggested_faces_paged_counted_and_left_out_of_groups_over_http(client, 
 
 
 def test_review_round_over_http(client, scheduler, tmp_path):
-    imgs = [index(client, scheduler, picture(tmp_path, f"r{i}.jpg"), f"r{i}") for i in range(4)]
+    imgs = [
+        index(client, scheduler, picture(tmp_path, f"r{i}.jpg"), f"r{i}", tags=["video"] if i == 3 else [])
+        for i in range(4)
+    ]
     who = client.post("/api/identities", json=dict(name="Ann")).json()
     ids = [i["faces"][0]["id"] for i in imgs]
     client.post("/api/faces/assign", json=dict(face_ids=ids, identity_id=who["id"], app="t", status="suggested"))
@@ -330,6 +333,10 @@ def test_review_round_over_http(client, scheduler, tmp_path):
     allr = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=5000, min_likeness=0.5)).json()
     assert len(allr["items"]) == 4 and allr["counts"]["0.50"] == 4
     assert client.get("/api/identities/999/review").status_code == 404
+    one = client.get(f"/api/identities/{who['id']}/review", params=dict(tag="video")).json()
+    assert [i["id"] for i in one["items"]] == [ids[3]] and one["suggested"] == 1  # one source's suggestions
+    people = client.get("/api/identities", params=dict(tag="video")).json()["items"]
+    assert [(p["id"], p["suggested"]) for p in people] == [(who["id"], 1)]
 
 
 def test_delete_pictures_one_or_by_tag_with_their_kept_copies(client, scheduler, tmp_path):

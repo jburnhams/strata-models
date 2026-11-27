@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Faces: one source at a time (branch `claude/faces-source-filter`)**
+Jonathan: a way on Faces to see only the video ones to name. A **Source** picker (every tag of the store: an app's name or a tag it gave, with its picture count; held in the address as `?source=`) on People, Unnamed groups and a person's round of suggestions.
+- `GET /api/identities?tag=`: only people with faces in pictures carrying the tag, counting those faces; `GET /api/identities/{id}/review?tag=`: only that source's suggestions (the person's model is still all their confirmed faces); Unnamed groups pass it as `cluster`'s `tags`.
+- A person opened from a filtered list keeps the source, and "Every person" goes back to it.
+- Tests: `test_faces_store.py`, `test_faces_api.py`, `web/tests/integration/Faces.test.tsx`.
+
 **Faces: the likeness picker from more than 40 confirmed faces (was 100) (branch `claude/faces-picker-40`)**
 The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
 - `web/src/components/PersonPage.tsx`: `BULK_ABOVE = 40` (picker when confirmed > 40); `web/tests/integration/Faces.test.tsx`: 40 keeps rounds, 41 shows the picker; docs/database.md.

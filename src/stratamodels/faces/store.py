@@ -561,10 +561,28 @@ class FaceStore:
             updated_at=row.updated_at,
         )
 
-    def _face_counts(self, s, identity_ids=None):
-        """identity id -> [confirmed, suggested] faces, counting the faces of identities merged into it."""
+    def _tagged(self, s, face_ids, tag):
+        """The faces among `face_ids` whose picture carries `tag` (a source: an app's name, or a tag it gave)."""
+        out = set()
+        for part in _chunks(sorted(face_ids)):
+            out.update(
+                s.scalars(
+                    sa.select(Face.id)
+                    .join(FaceImageTag, FaceImageTag.image_id == Face.image_id)
+                    .where(Face.id.in_(part), FaceImageTag.tag == str(tag))
+                )
+            )
+        return out
+
+    def _face_counts(self, s, identity_ids=None, tag=None):
+        """identity id -> [confirmed, suggested] faces, counting the faces of identities merged into it; with `tag`, only faces of pictures
+        carrying it."""
         out = defaultdict(lambda: [0, 0])
-        for a in self._current(s).values():
+        state = self._current(s)
+        if tag:
+            keep = self._tagged(s, [f for f, a in state.items() if a.identity_id is not None], tag)
+            state = {f: a for f, a in state.items() if f in keep}
+        for a in state.values():
             if a.identity_id is not None and a.status in ("confirmed", "suggested"):
                 out[a.identity_id][0 if a.status == "confirmed" else 1] += 1
         return out
@@ -576,7 +594,8 @@ class FaceStore:
                 raise NotFound(f"no such person: {identity_id}")
             return self._identity_dict(s, row, app)
 
-    def identities(self, app=None, q=None, app_ref=None, limit=200):
+    def identities(self, app=None, q=None, app_ref=None, limit=200, tag=None):
+        """People, as `app` sees them. With `tag` (a source), only people with a face in pictures carrying it, their counts of those faces."""
         with self.session() as s:
             limit = max(1, min(int(limit), 2000))
             stmt = sa.select(Identity).where(Identity.merged_into.is_(None)).order_by(Identity.id)
@@ -591,8 +610,10 @@ class FaceStore:
                 not q
             ):  # a text search reads every person and limits after matching, so a match past the first `limit` is found
                 stmt = stmt.limit(limit)
+            counts = self._face_counts(s, tag=tag)
+            if tag:  # a source's people: every one with a face there, however far down the list
+                stmt = stmt.where(Identity.id.in_([i for i, c in counts.items() if c[0] or c[1]]))
             rows = list(s.scalars(stmt))
-            counts = self._face_counts(s)
             out = [self._identity_dict(s, r, app, counts) for r in rows]
             if q:
                 needle = str(q).lower()
@@ -700,6 +721,7 @@ class FaceStore:
         pool=REVIEW_POOL,
         threshold=REVIEW_CLUSTER,
         min_likeness=None,
+        tag=None,
     ):
         """The next round of a person's suggested faces to decide, most certain first, scored afresh on every call (so each round a person
         confirms makes the next one surer). The model of the person: with `min_confirmed` confirmed faces, the centre of their densest bunch
@@ -707,7 +729,8 @@ class FaceStore:
         suggestions, every face of which an app already says may be them. A suggested face nearer a face rejected for this person than the
         model is left out of the round (it looks like the one that was not them). Answers {basis, basis_faces, suggested, confirmed, near
         (within 0.3 / 0.4 / 0.5), counts (how many are at least each likeness 0.50-0.95, likeness = 1 - distance), left_out, items: faces with
-        `distance`, closest first}. `min_likeness` keeps only the faces at least that alike (with a large `limit`: all of them at once)."""
+        `distance`, closest first}. `min_likeness` keeps only the faces at least that alike (with a large `limit`: all of them at once); `tag`
+        only the suggestions from pictures carrying it (one source, such as a video eval's stills)."""
         from scipy.cluster.hierarchy import fcluster, linkage
 
         centre = None
@@ -718,6 +741,11 @@ class FaceStore:
             state = self._current(s)
             mine = {f: a for f, a in state.items() if a.identity_id == root}
             sug = [f for f, a in mine.items() if a.status == "suggested"]
+            if (
+                tag and sug
+            ):  # one source's suggestions only (the model of the person is still built from all their faces)
+                keep = self._tagged(s, sug, tag)
+                sug = [f for f in sug if f in keep]
             if (
                 sug
             ):  # a suggestion under the store's bar is not offered (it stays, and comes back if the bar is lowered)

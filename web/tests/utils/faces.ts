@@ -22,7 +22,7 @@ const initial = () => ({
   } as Record<number, FaceImage>,
   groups: [{ faces: [31, 32, 33], size: 3 }, { faces: [41, 42], size: 2 }] as Group[],
   suggestions: [{ a: 1, b: 3, distance: 0.3, apps_a: ['bright-horizons'], apps_b: ['strata-360'] }] as Suggestion[],
-  tags: [{ tag: 'bright-horizons', images: 40, opt_in: false, note: '' }, { tag: 'nursery', images: 5, opt_in: true, note: 'children' }] as Tag[],
+  tags: [{ tag: 'bright-horizons', images: 40, opt_in: false, note: '' }, { tag: 'nursery', images: 5, opt_in: true, note: 'children' }, { tag: 'face-tracks-eval', images: 9, opt_in: false, note: '' }] as Tag[],
   calls: [] as string[],
   fail: null as string | null, // the path of a write that answers 500
 })
@@ -35,8 +35,12 @@ const notFound = (what: string) => HttpResponse.json({ detail: `no such ${what}`
 
 export const faceHandlers = [
   http.get('/api/identities', ({ request }) => {
-    const q = (new URL(request.url).searchParams.get('q') || '').toLowerCase()
-    return HttpResponse.json({ items: faceMock.people.filter(p => !q || (p.name || '').toLowerCase().includes(q)) })
+    const sp = new URL(request.url).searchParams
+    const q = (sp.get('q') || '').toLowerCase(), tag = sp.get('tag')
+    if (tag) faceMock.calls.push(`people from ${tag}`)
+    // one source: only Cy has faces there, one of their suggestions
+    const seen = tag ? faceMock.people.filter(p => p.id === 3).map(p => ({ ...p, faces: 0, suggested: 1 })) : faceMock.people
+    return HttpResponse.json({ items: seen.filter(p => !q || (p.name || '').toLowerCase().includes(q)) })
   }),
   http.post('/api/identities', async ({ request }) => {
     const b = (await request.json()) as { name: string }
@@ -62,9 +66,9 @@ export const faceHandlers = [
   }),
   http.get('/api/identities/:id/review', ({ params, request }) => {
     const q = new URL(request.url).searchParams
-    const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness')
-    faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}`)
-    const scored = (faceMock.suggested[id] ?? []).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 }))
+    const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness'), tag = q.get('tag')
+    faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}${tag ? ` from ${tag}` : ''}`)
+    const scored = (faceMock.suggested[id] ?? []).slice(0, tag ? 1 : undefined).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 }))
     const counts = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map(x => [x.toFixed(2), scored.filter(f => 1 - f.distance >= x - 1e-9).length]))
     const items = scored.filter(f => !min || 1 - f.distance >= Number(min) - 1e-9).slice(0, limit)
     const confirmed = (faceMock.faces[id] ?? []).length
@@ -95,9 +99,9 @@ export const faceHandlers = [
     return HttpResponse.json({ batch: 9 })
   }),
   http.post('/api/faces/cluster', async ({ request }) => {
-    const b = (await request.json()) as { app: string; suggested?: boolean }
-    faceMock.calls.push(`cluster by ${b.app}${b.suggested === false ? ' without suggested' : ''}`)
-    return HttpResponse.json({ model: 'buffalo_l', clusters: faceMock.groups })
+    const b = (await request.json()) as { app: string; suggested?: boolean; tags?: string[] }
+    faceMock.calls.push(`cluster by ${b.app}${b.suggested === false ? ' without suggested' : ''}${b.tags ? ` from ${b.tags.join(',')}` : ''}`)
+    return HttpResponse.json({ model: 'buffalo_l', clusters: b.tags ? faceMock.groups.slice(1) : faceMock.groups })
   }),
   http.get('/api/faces/tags', () => HttpResponse.json({ items: faceMock.tags })),
   http.put('/api/faces/tags/:tag', async ({ params, request }) => {
