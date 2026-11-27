@@ -22,7 +22,8 @@ with its embedding and, unless `images` is false, its whole frame saved as a JPE
 
 The tracker, quality and still choice are evals' to settle (`evals/specs/face-tracks-*.toml`): fps, tracker and the quality score.
 
-options (models.toml): the faces pack's (det_size, modules) and any param's default: fps (5), tracker (iou-emb), max_side (1600), stills (3).
+options (models.toml): the faces pack's (det_size, modules) and any param's default (served: fps 10, tracker byte, eval face-tracks-home
+2026-11-27; when not given here: fps (5), tracker (iou-emb)), max_side (1600), stills (3).
 
 params:
   path          the video
