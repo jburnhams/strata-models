@@ -10,11 +10,12 @@ as possible.
    folder name, which prefixes every picture's ref so two proposal sets never share one), one picture a still holding that track's face,
    with the box and buffalo_l embedding face-tracks found. Each track's embedding is searched among the confirmed faces: when most of its
    nearest belong to one person, that person is suggested for its stills (their page's review), and the rest turn up in Unnamed groups.
-   Clips named in `--skip` stay out, and the store itself never keeps a face too small or unsure to be worth a look (docs/database.md#faces). Storing again changes nothing already decided.
+   Clips named in `--skip` stay out; faces too small or unsure to be worth a look are the store's to leave out of groups, search and
+   suggestions (its faces_min_px and faces_min_score settings, docs/database.md#faces), so they are stored like any other. Storing again changes nothing already decided.
 
        .venv/bin/python scripts/evals/face_tracks_labels.py store OUT [--skip clip-03]
 
-   `unstore OUT` takes them out again (DELETE /api/faces/images by their clip's tag), with every decision about them.
+   `unstore OUT` takes them out again (POST /api/faces/images/delete by their clip's tag), with every decision about them.
 
 3. The person names them on the Faces screens like any face: confirmed for a person is that person; rejected with nobody is not a face.
    Anything else (undecided, only suggested, "not this person") is not labelled, and it is not held against anyone: an answered face where
@@ -37,7 +38,6 @@ import json
 import os
 import re
 import sys
-import urllib.parse
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -161,7 +161,7 @@ def store(out_dir, client=None, skip=()):
                         height=answer["height"],
                     ),
                 )
-                n += bool((img or {}).get("faces"))  # the store leaves out a face too small or unsure to keep
+                n += 1
                 undecided += [f["id"] for f in (img or {}).get("faces") or [] if f.get("status") is None]
             suggested += bool(suggest(client, undecided, tr.get("embedding")))
         print(f"{key}: stored")
@@ -177,8 +177,8 @@ def unstore(out_dir, client=None):
         import strata_models_client as client
     n = 0
     for key in _keys(out_dir):
-        tag = urllib.parse.quote(f"{STORE}:{label_set(out_dir)}/{key}")
-        n += client._call("DELETE", f"/api/faces/images?app={STORE}&tag={tag}")["deleted"]
+        tag = f"{STORE}:{label_set(out_dir)}/{key}"
+        n += client._call("POST", "/api/faces/images/delete", dict(app=STORE, tag=tag, dry_run=False))["deleted"]
     print(f"{n} stills taken out of the face store")
     return n
 

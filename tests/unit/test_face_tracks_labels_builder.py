@@ -77,14 +77,12 @@ class FakeStore:
     def _call(self, method, path, body=None):
         if path == "/api/faces/images":
             self.images.append(body)
-            x0, y0, x1, y1 = body["faces"][0]["bbox"]
-            kept = min(x1 - x0, y1 - y0) >= 24 and body["faces"][0]["det_score"] >= 0.5  # as the store's worth_keeping
-            return dict(faces=[dict(id=len(self.images) - 1, status=None)] if kept else [])
+            return dict(faces=[dict(id=len(self.images) - 1, status=None)])
         if path == "/api/faces/search":
             assert body["named"] is True and body["model"] == "buffalo_l"
             return dict(hits=[dict(face=dict(identity_id=i), distance=0.3) for i in self.known])
-        if method == "DELETE":
-            self.deleted.append(path)
+        if path == "/api/faces/images/delete":
+            self.deleted.append(body)
             return dict(deleted=1)
         if path == "/api/faces/assign":
             self.assigned.append(body)
@@ -140,7 +138,9 @@ def test_propose_store_then_build(tmp_path):
     (tmp_path / "clip-01.json").write_text(json.dumps(saved))
 
     store = FakeStore()
-    assert B.store(str(tmp_path), client=store) == 6
+    assert (
+        B.store(str(tmp_path), client=store) == 8
+    )  # small and unsure faces too: the store keeps them out of groups and search
     first, set_ = store.images[0], tmp_path.name
     assert (
         first["app"] == "face-tracks-eval"
@@ -222,7 +222,9 @@ def test_store_leaves_out_skipped_clips(tmp_path):
     store = FakeStore()
     assert B.store(str(tmp_path), client=store, skip={"clip-01"}) == 0 and B.store(str(tmp_path), client=store) == 1
     assert B.unstore(str(tmp_path), client=store) == 1
-    assert store.deleted == [f"/api/faces/images?app=face-tracks-eval&tag=face-tracks-eval%3A{tmp_path.name}/clip-01"]
+    assert store.deleted == [
+        dict(app="face-tracks-eval", tag=f"face-tracks-eval:{tmp_path.name}/clip-01", dry_run=False)
+    ]
 
 
 def test_build_with_nothing_decided_refuses(tmp_path):
