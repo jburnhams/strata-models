@@ -340,6 +340,7 @@ def test_delete_pictures_one_or_by_tag_with_their_kept_copies(client, scheduler,
     copy = os.path.join(settings.data_dir(), one["medium"])
     assert os.path.isfile(copy)
     assert client.post("/api/faces/images/delete", json={}).status_code == 400
+    assert client.post("/api/faces/images/delete", json=dict(ids=[], tag="eval", dry_run=False)).json()["images"] == 0
     plan = client.post("/api/faces/images/delete", json=dict(tag="eval")).json()
     assert plan == dict(images=2, faces=4, decisions=0, confirmed=0, hints=0, deleted=False)
     r = client.delete(f"/api/faces/images/{one['id']}")

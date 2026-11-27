@@ -332,14 +332,16 @@ class FaceStore:
 
     def delete_images(self, *, ids=None, app=None, tag=None, dry_run=True):
         """Remove pictures from the store with everything hanging on them: their faces, embeddings, decisions (assignments) and hints. Pick
-        them by `ids`, `app`, `tag` (pictures matching every one given); at least one is needed, so nothing removes the whole store.
+        them by `ids`, `app`, `tag` (pictures matching every one given; `ids=[]` matches none); at least one is needed, so nothing removes the whole store.
         `dry_run` (the default) only counts. Answers {images, faces, decisions, confirmed, hints, deleted, media}: `confirmed` is how many of
         the faces a person had named (their decisions go too), `media` the kept copies no other picture uses (for the caller to remove)."""
-        if not ids and not app and not tag:
+        if ids is None and not app and not tag:
             raise ValueError("say which pictures: ids, app or tag")
         with self.session() as s:
             q = sa.select(FaceImage.id)
-            if ids:
+            if (
+                ids is not None
+            ):  # an empty list matches nothing: it never widens the other selectors to all their pictures
                 q = q.where(FaceImage.id.in_([int(i) for i in ids]))
             if app:
                 q = q.where(FaceImage.app == str(app))

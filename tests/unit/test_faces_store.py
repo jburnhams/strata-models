@@ -487,6 +487,9 @@ def test_delete_images_counts_first_then_removes_everything_on_them(fs):
     assert plan == dict(images=2, faces=3, decisions=1, confirmed=1, hints=1, deleted=False, media=[])
     assert fs.image(a["id"])["faces"]  # a dry run changes nothing
     assert fs.delete_images(tag="face-tracks-eval", app="photos")["images"] == 0  # every selector must match
+    assert (
+        fs.delete_images(ids=[], app="eval", dry_run=False)["images"] == 0
+    )  # an empty id list matches nothing, never the whole app
     done = fs.delete_images(tag="face-tracks-eval", dry_run=False)
     assert done["deleted"] and done["images"] == 2
     for img in (a, b):
