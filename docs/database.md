@@ -39,6 +39,15 @@ One face store for every app (design, survey and decisions: the face database pr
   (developed by LibRaw), always turned by their EXIF orientation, so `width` and `height` and every box are in the upright picture's pixels.
 - **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
   set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`.
+- **The bar** (owner, 2026-11-27): every face the detector finds is stored, but only faces at least `faces_min_score` (detector score,
+  default 0.7) and `faces_min_px` (the shorter side of the box in the picture's pixels, default 40) are ever searched, clustered, reviewed,
+  proposed or used for merge suggestions. Both are service settings (Settings page), read on every query, so a change applies at once and
+  a lower bar brings stored faces back; no app filters tiny or doubtful faces itself. A clustering's `min_score` can only raise it.
+  Faces a person already decided about stay on their person's page whatever the bar.
+- **Deleting** (`DELETE /api/faces/images/{id}`, `POST /api/faces/images/delete {ids?, app?, tag?, dry_run}`): pictures go with their
+  faces, embeddings, decisions and hints, and their kept copy when no other picture uses it (cached crops stay until the cache is cleared).
+  The bulk form counts first (`dry_run` is the default) and says how many confirmed faces would go; it needs at least one of ids, app and
+  tag, all of which must match. For pictures an eval or a trial put in, under their own app or tag.
 - **Embeddings** (`face_embeddings`) are per face and model: indexing again with another model keeps the faces (matched by box overlap, IoU 0.5)
   and their decisions, and adds the new model's embedding. Searches compare only one model's embeddings.
 - **People** (`identities`) are global; `identity_app_metadata` holds an app's own fields and its id for the person, which override the global

@@ -176,6 +176,9 @@ def test_settings_roundtrip_and_main(client, scheduler, tmp_path, monkeypatch):
         client.put("/api/settings", json=dict(idle_unload_min=5)).json()["idle_unload_min"] == 5
         and scheduler.idle_unload_s == 300
     )
+    r = client.put("/api/settings", json=dict(faces_min_score=0.65, faces_min_px=32)).json()
+    assert (r["faces_min_score"], r["faces_min_px"]) == (0.65, 32)
+    assert client.put("/api/settings", json=dict(faces_min_score=3)).status_code == 400
     assert set(client.get("/api/memory").json()) >= {"rss_mb", "malloc_free_mb"}
     r = client.put("/api/settings", json=dict(gpu_jobs=3, cpu_jobs=6)).json()
     assert (r["gpu_jobs"], r["cpu_jobs"]) == (3, 6) and (scheduler.gpu_jobs, scheduler.cpu_jobs) == (3, 6)

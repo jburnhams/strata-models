@@ -330,3 +330,24 @@ def test_review_round_over_http(client, scheduler, tmp_path):
     allr = client.get(f"/api/identities/{who['id']}/review", params=dict(limit=5000, min_likeness=0.5)).json()
     assert len(allr["items"]) == 4 and allr["counts"]["0.50"] == 4
     assert client.get("/api/identities/999/review").status_code == 404
+
+
+def test_delete_pictures_one_or_by_tag_with_their_kept_copies(client, scheduler, tmp_path):
+    from stratamodels import settings
+
+    one = index(client, scheduler, picture(tmp_path, "a.jpg"), "r1", tags=["eval"])
+    two = index(client, scheduler, picture(tmp_path, "bb.jpg", 300, 100), "r2", tags=["eval"])
+    copy = os.path.join(settings.data_dir(), one["medium"])
+    assert os.path.isfile(copy)
+    assert client.post("/api/faces/images/delete", json={}).status_code == 400
+    assert client.post("/api/faces/images/delete", json=dict(ids=[], tag="eval", dry_run=False)).json()["images"] == 0
+    plan = client.post("/api/faces/images/delete", json=dict(tag="eval")).json()
+    assert plan == dict(images=2, faces=4, decisions=0, confirmed=0, hints=0, deleted=False)
+    r = client.delete(f"/api/faces/images/{one['id']}")
+    assert r.status_code == 200 and r.json()["deleted"] and r.json()["faces"] == 2
+    assert not os.path.exists(copy)
+    assert client.get(f"/api/faces/images/{one['id']}").status_code == 404
+    assert client.delete(f"/api/faces/images/{one['id']}").status_code == 404
+    done = client.post("/api/faces/images/delete", json=dict(tag="eval", dry_run=False)).json()
+    assert done["deleted"] and done["images"] == 1
+    assert client.get(f"/api/faces/images/{two['id']}").status_code == 404

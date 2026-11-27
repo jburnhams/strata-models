@@ -7,6 +7,9 @@
   GET  /api/faces/images?app=&ref=&tag=&include=&before=&limit=   indexed pictures, newest first
   GET  /api/faces/images/{id}            one picture with its faces and each face's person
   GET  /api/faces/images/{id}/picture    the kept medium copy (to show a face in its picture)
+  DELETE /api/faces/images/{id}          one picture out of the store, with its faces, embeddings, decisions and hints
+  POST /api/faces/images/delete          {ids?, app?, tag?, dry_run?} many at once (pictures matching every one given; dry_run, the default,
+                                         only counts): {images, faces, decisions, confirmed, hints, deleted}
   GET  /api/faces/{id}                   one face; GET /api/faces/{id}/crop?px=160&pad=1.6 its crop (cached WebP)
   POST /api/faces/search                 {app, face_id | embedding | path, k?, tags?, include?, named?, max_distance?, model?} nearest faces
   POST /api/faces/cluster                {app, tags?, include?, threshold?, min_size?, limit?, min_score?, model?, suggested?} undecided faces, grouped
@@ -28,7 +31,9 @@
   POST /api/identities/{id}/merge {into, app}; POST /api/identities/{id}/unmerge; POST /api/identities/not-same {a, b}
   GET  /api/identities/merge-suggestions?limit=&model=
 
-The `model` of a search or clustering defaults to the `faces` role's model: embeddings of different models are never compared."""
+The `model` of a search or clustering defaults to the `faces` role's model: embeddings of different models are never compared. Every face is
+stored, but search, clustering, review and propose only see faces over the store's bar (settings faces_min_score and faces_min_px), so a
+caller never has to leave out tiny or doubtful faces itself; `min_score` on a clustering can only raise the bar."""
 
 import hashlib
 import os
@@ -120,6 +125,13 @@ class ProposeIn(BaseModel):
     min_score: float | None = None
     group_share: float | None = None
     group_min: int | None = None
+
+
+class DeleteIn(BaseModel):
+    ids: list[int] | None = None
+    app: str | None = None
+    tag: str | None = None
+    dry_run: bool = True
 
 
 class TagIn(BaseModel):
@@ -297,6 +309,29 @@ def mount(app, scheduler, store: FaceStore | None = None):
         if p is None or not os.path.isfile(p):
             raise HTTPException(404, "no copy of this picture is kept")
         return FileResponse(p, media_type="image/webp", headers={"Cache-Control": "max-age=86400"})
+
+    def delete(ids=None, app_name=None, tag=None, dry_run=True):
+        try:
+            out: dict[str, Any] = fs.delete_images(ids=ids, app=app_name, tag=tag, dry_run=dry_run)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        media = out.pop("media")
+        if out["deleted"]:
+            root = os.path.realpath(faces_dir())
+            for m in media:
+                p = os.path.realpath(os.path.join(settings.data_dir(), m))
+                if p.startswith(root + os.sep) and os.path.isfile(p):
+                    os.remove(p)
+        return out
+
+    @app.delete("/api/faces/images/{image_id:int}")
+    def delete_image(image_id: int):
+        fs.image(image_id)  # 404 when there is no such picture
+        return delete(ids=[image_id], dry_run=False)
+
+    @app.post("/api/faces/images/delete")
+    def delete_images(b: DeleteIn):
+        return delete(b.ids, b.app, b.tag, b.dry_run)
 
     @app.get("/api/faces/tags")
     def get_tags():
