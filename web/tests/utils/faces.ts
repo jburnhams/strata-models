@@ -25,6 +25,7 @@ const initial = () => ({
   tags: [{ tag: 'bright-horizons', images: 40, opt_in: false, note: '' }, { tag: 'nursery', images: 5, opt_in: true, note: 'children' }, { tag: 'face-tracks-eval', images: 9, opt_in: false, note: '' }] as Tag[],
   calls: [] as string[],
   fail: null as string | null, // the path of a write that answers 500
+  hold: null as Promise<void> | null, // a review from one source waits for this, to see the screen between sources
 })
 
 export const faceMock = initial()
@@ -64,10 +65,11 @@ export const faceHandlers = [
     faceMock.people = faceMock.people.map(p => (p.id === Number(params.id) ? { ...p, name: b.name } : p))
     return HttpResponse.json(faceMock.people.find(p => p.id === Number(params.id)))
   }),
-  http.get('/api/identities/:id/review', ({ params, request }) => {
+  http.get('/api/identities/:id/review', async ({ params, request }) => {
     const q = new URL(request.url).searchParams
     const id = Number(params.id), limit = Number(q.get('limit') || 48), min = q.get('min_likeness'), tag = q.get('tag')
     faceMock.calls.push(`review ${id} up to ${limit}${min ? ` at ${min}` : ''}${tag ? ` from ${tag}` : ''}`)
+    if (tag && faceMock.hold) await faceMock.hold
     const scored = (faceMock.suggested[id] ?? []).slice(0, tag ? 1 : undefined).map((f, i) => ({ ...f, distance: 0.1 + i * 0.15 }))
     const counts = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map(x => [x.toFixed(2), scored.filter(f => 1 - f.distance >= x - 1e-9).length]))
     const items = scored.filter(f => !min || 1 - f.distance >= Number(min) - 1e-9).slice(0, limit)

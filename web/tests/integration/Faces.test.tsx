@@ -399,6 +399,18 @@ describe('Faces: one source at a time', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Source' }), '')
     expect(await screen.findByRole('heading', { name: /Is this Cy\? 3\sfaces suggested$/ })).toBeInTheDocument()
   })
+  it('never shows the last source\'s round, chosen and confirmable, while another source loads', async () => {
+    let release = () => {}
+    faceMock.hold = new Promise<void>(r => { release = r })
+    const { user } = setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByRole('button', { name: 'Confirm 3' })).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Source' }), 'face-tracks-eval')
+    await waitFor(() => expect(faceMock.calls).toContain('review 3 up to 48 from face-tracks-eval'))
+    expect(screen.queryByRole('button', { name: /^Confirm/ })).not.toBeInTheDocument() // a Confirm now would decide faces from every source
+    expect(screen.queryByRole('grid', { name: 'Is this Cy?' })).not.toBeInTheDocument()
+    release()
+    expect(await screen.findByRole('button', { name: 'Confirm 1' })).toBeInTheDocument()
+  })
   it('groups only the faces from that source, and says when every one is decided', async () => {
     const { user } = setup(<App />, { route: '/faces?tab=groups' })
     expect(await screen.findByRole('heading', { name: /Group 1 of 2/ })).toBeInTheDocument()
