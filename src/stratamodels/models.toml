@@ -1048,3 +1048,59 @@ licence = "Gemma terms (hosted, free tier)"
 source = "https://build.nvidia.com/google/gemma-4-31b-it"
 used_by = []
 options = { model = "google/gemma-4-31b-it" }
+
+
+# ---- Text embeddings (llama-server --embedding): the mail/chat retrieval eval (evals/specs/mail-retrieval.toml) picks the role's model ------------
+[roles.text-embed]
+description = "One vector per text (email and chat chunks, queries): retrieval over kept mail and messages; params {texts} or {query, docs}"
+model = "qwen3-embedding-0.6b"          # first pick, not yet measured: the eval mail-retrieval decides
+
+[models."qwen3-embedding-0.6b"]
+runtime = "llama-embed"
+name = "Qwen3-Embedding-0.6B Q8_0"
+roles = ["text-embed"]
+vram_gb = 1.2
+licence = "Apache-2.0"
+source = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF"
+used_by = []
+options = { model = "Qwen/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf", pooling = "last", ctx = 2048, query_prefix = "Instruct: Given a question about a person's emails or chat messages, retrieve the message that answers it\nQuery: " }
+
+[models.qwen3-embedding-4b]
+runtime = "llama-embed"
+name = "Qwen3-Embedding-4B Q4_K_M"
+roles = ["text-embed"]
+vram_gb = 3.5
+licence = "Apache-2.0"
+source = "https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF"
+used_by = []
+options = { model = "Qwen/Qwen3-Embedding-4B-GGUF:Qwen3-Embedding-4B-Q4_K_M.gguf", pooling = "last", ctx = 2048, query_prefix = "Instruct: Given a question about a person's emails or chat messages, retrieve the message that answers it\nQuery: " }
+
+[models.bge-m3]
+runtime = "llama-embed"
+name = "bge-m3 Q8_0"
+roles = ["text-embed"]
+vram_gb = 1.0
+licence = "MIT"
+source = "https://huggingface.co/ggml-org/bge-m3-Q8_0-GGUF"
+used_by = []
+options = { model = "ggml-org/bge-m3-Q8_0-GGUF:bge-m3-q8_0.gguf", pooling = "cls", ctx = 4096 }
+
+[models.embeddinggemma-300m]
+runtime = "llama-embed"
+name = "EmbeddingGemma 300M QAT Q4_0"
+roles = ["text-embed"]
+vram_gb = 0.5
+licence = "Gemma Terms of Use"
+source = "https://huggingface.co/ggml-org/embeddinggemma-300M-qat-q4_0-GGUF"
+used_by = []
+options = { model = "ggml-org/embeddinggemma-300M-qat-q4_0-GGUF:embeddinggemma-300M-qat-Q4_0.gguf", ctx = 2048, query_prefix = "task: search result | query: ", doc_prefix = "title: none | text: " }
+
+[models.nomic-embed-v1_5]
+runtime = "llama-embed"
+name = "nomic-embed-text-v1.5 Q8_0"
+roles = ["text-embed"]
+vram_gb = 0.4
+licence = "Apache-2.0"
+source = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF"
+used_by = []
+options = { model = "nomic-ai/nomic-embed-text-v1.5-GGUF:nomic-embed-text-v1.5.Q8_0.gguf", ctx = 2048, query_prefix = "search_query: ", doc_prefix = "search_document: " }
