@@ -37,6 +37,12 @@ One face store for every app (design, survey and decisions: the face database pr
   cached (`faces/crops`), from the original when it is readable, else from the copy.
   Any format strata-python's `images` reads is a picture: JPEG, PNG, WebP, AVIF, TIFF, HEIC/HEIF, JPEG XL and camera raw files
   (developed by LibRaw), always turned by their EXIF orientation, so `width` and `height` and every box are in the upright picture's pixels.
+- **What is stored** (`faces.store.worth_keeping`, one rule for every app, 2026-11-27): a face whose box is under 24 px on a side
+  (`MIN_FACE_PX`: ArcFace sees 112 px, and below that its embedding is noise) or that the detector scored under 0.5 (`MIN_DET_SCORE`) is
+  never stored, whether the `faces` role found it or an app sent it; it is simply left out of the answer (an imported face with no score
+  is kept). Faces stored before the rule stay until their picture is indexed again.
+- **Deleting** (`DELETE /api/faces/images?app=&ref=`, or `?app=&tag=` for all of an app's pictures with a tag): the pictures go with their
+  faces, embeddings, hints and every decision about those faces, and a medium copy no other picture uses; people stay.
 - **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
   set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`.
 - **Embeddings** (`face_embeddings`) are per face and model: indexing again with another model keeps the faces (matched by box overlap, IoU 0.5)

@@ -2,6 +2,14 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-27
+
+**Face store: pictures can be deleted, and tiny or unsure faces are never stored (branch `claude/faces-delete-filter`)**
+Jonathan (2026-11-27): the store needs a delete, and the filtering of tiny or low-confidence faces belongs in strata-models for every app, not in each caller.
+- `faces/store.py`: `worth_keeping` drops a face under 24 px on a side (`MIN_FACE_PX`) or scored under 0.5 (`MIN_DET_SCORE`; an import without a score is kept) in `save_image`, for detected and imported faces alike; they are left out of the answer, so an importer (bright-horizons' copy) records them as not kept. `delete_images(app, ref= | tag=)` removes pictures with their faces, embeddings, hints and decisions; people stay.
+- `faces/api.py`: `DELETE /api/faces/images?app=&ref=` (or `&tag=`) -> `{deleted}`, also removing medium copies nothing else uses.
+- `docs/database.md#faces`; tests in `test_faces_store.py` and `test_faces_api.py`.
+
 ## 2026-11-26
 
 **Faces: suggested faces in rounds, most certain first, re-scored as a person confirms (branch `claude/faces-review`)**

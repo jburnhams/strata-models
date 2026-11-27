@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from stratamodels import gpu
+from stratamodels import gpu, settings
 from stratamodels.registry import Registry
 from stratamodels.runtimes import fake
 from stratamodels.server.app import create_app
@@ -169,6 +169,37 @@ def test_faces_made_elsewhere_and_bad_requests(client, tmp_path):
     assert client.get("/api/faces/999").status_code == 404
     assert client.post("/api/faces/search", json=dict(app="a")).status_code == 400
     assert client.post("/api/faces/search", json=dict(app="a", path=str(tmp_path / "none.jpg"))).status_code == 400
+
+
+def test_delete_pictures_and_their_kept_copy(client, tmp_path):
+    made = dict(bbox=[10, 10, 60, 70], det_score=0.9, embedding=person(3))
+    tiny = dict(
+        bbox=[100, 10, 110, 20], det_score=0.9, embedding=person(4)
+    )  # 10 px: never stored, so not in the answer
+
+    def add(ref, tags):
+        return client.post(
+            "/api/faces/images",
+            json=dict(
+                app="eval",
+                ref=ref,
+                faces=[made, tiny],
+                model="buffalo_l",
+                tags=tags,
+                path=picture(tmp_path, f"{ref}.jpg", 2400, 1200),
+            ),
+        ).json()
+
+    one, two = add("one", ["set-a"]), add("two", ["set-a"])
+    assert len(one["faces"]) == 1 and one["medium"]
+    medium = os.path.join(settings.data_dir(), one["medium"])
+    assert os.path.isfile(medium)
+    assert client.delete("/api/faces/images", params=dict(app="eval", ref="one")).json() == dict(deleted=1)
+    assert not os.path.isfile(medium) and client.get(f"/api/faces/images/{one['id']}").status_code == 404
+    assert client.delete("/api/faces/images", params=dict(app="eval", tag="set-a")).json() == dict(deleted=1)
+    assert client.get(f"/api/faces/{two['faces'][0]['id']}").status_code == 404
+    assert client.delete("/api/faces/images", params=dict(app="eval")).status_code == 400  # neither ref nor tag
+    assert client.delete("/api/faces/images", params=dict(ref="x")).status_code == 422  # no app
 
 
 def test_a_failed_job_is_a_422(client, scheduler, tmp_path, monkeypatch):
