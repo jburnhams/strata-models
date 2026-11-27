@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Face store: pictures can be deleted, and tiny or unsure faces are never stored (branch `claude/project-thread-csasv3`)**
+Jonathan (2026-11-27): the store needs a delete, and the filtering of tiny or low-confidence faces belongs in strata-models for every app, not in each caller.
+- `faces/store.py`: `worth_keeping` drops a face under 24 px on a side (`MIN_FACE_PX`) or scored under 0.5 (`MIN_DET_SCORE`; an import without a score is kept) in `save_image`, for detected and imported faces alike; they are left out of the answer, so an importer (bright-horizons' copy) records them as not kept. `delete_images(app, ref= | tag=)` removes pictures with their faces, embeddings, hints and decisions; people stay.
+- `faces/api.py`: `DELETE /api/faces/images?app=&ref=` (or `&tag=`) -> `{deleted}`, also removing medium copies nothing else uses.
+- `docs/database.md#faces`; tests in `test_faces_store.py` and `test_faces_api.py`.
+
 **face-tracks labelling on the Faces screens instead of labels.toml (branch `claude/project-thread-csasv3`)**
 Jonathan already names faces on the Faces screens, and the people named from photos can name most of the clips' faces for him; a text file of track groups could do neither.
 - `scripts/evals/face_tracks_labels.py`: `store` puts each track's stills into the face store (app and tag `face-tracks-eval`, plus `face-tracks-eval:SET/clip-NN`, SET the proposal folder's name, which prefixes every ref so two sets never share a picture), one picture a still with the box and buffalo_l embedding face-tracks found. Storing alone suggests nobody (Codex), so each track's embedding is searched among confirmed faces and, when 60 % of its 10 nearest within 0.5 are one person, that person is suggested for its stills (their page's review); the rest are grouped with everything else; faces under `--min-px` (24) or `--min-score` (0.5) and `--skip` clips stay out. `build` reads the decisions back: confirmed is that person (`p<identity>`), rejected with nobody is not a face, anything else is ignored; a track whose stills are two people switches half way between them, so the generous setting's mixed tracks are labelled right. `regroup`, the contact sheets and labels.toml are gone.
