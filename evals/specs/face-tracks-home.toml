@@ -2,7 +2,7 @@ name = "face-tracks-home"
 question = "Which detection rate and tracker should serve face-tracks on real home video and race footage?"
 role = "face-tracks"
 dataset = "face-tracks-home"  # scripts/evals/face_tracks_labels.py: real clips whose tracks a person named; private, kept in the data directory
-metrics = ["id_f1", "track_mixed", "track_split", "track_face_miss", "latency_s", "failed"]
+metrics = ["id_f1", "id_f1_clip", "track_mixed", "track_split", "track_face_miss", "latency_s", "failed"]
 
 # The labels start from a generous run (10 fps, byte, low thresholds), named by hand. A track that mixes two people hands an app a wrong
 # name for everything in it, and a split track only asks for one more click, so track_mixed is read beside the primary. Every candidate gets

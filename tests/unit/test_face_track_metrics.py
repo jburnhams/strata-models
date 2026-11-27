@@ -96,3 +96,36 @@ def test_a_face_where_nobody_was_named_is_not_counted():
     assert score("id_f1", it, o) == 1
     it["reference"]["ignore"] = []
     assert score("id_f1", it, o) == pytest.approx(2 * 4 / 12)
+
+
+def test_a_person_in_two_shots_scores_both_tracks_per_shot_not_over_the_clip():
+    it = item(TWO["reference"]["people"], TIMES, cuts=[1.0])
+    o = out(  # one track per person per shot, as face-tracks answers: every face in its person's track
+        track(1, [(0.0, A), (0.5, A)]),
+        track(2, [(1.0, A), (1.5, A)]),
+        track(3, [(0.0, B), (0.5, B)]),
+        track(4, [(1.0, B), (1.5, B)]),
+    )
+    assert score("id_f1", it, o) == 1
+    assert score("id_f1_clip", it, o) == pytest.approx(
+        2 * 4 / 16
+    )  # over the clip, each person can count one of their two tracks
+
+
+def test_without_cuts_the_two_scores_agree_and_a_switch_within_a_shot_still_costs():
+    switch = out(
+        track(1, [(0.0, A), (0.5, A), (1.0, B), (1.5, B)]),
+        track(2, [(0.0, B), (0.5, B), (1.0, A), (1.5, A)]),
+    )
+    assert score("id_f1", TWO, switch) == score("id_f1_clip", TWO, switch) == pytest.approx(0.5)
+    it = item(
+        TWO["reference"]["people"], TIMES, cuts=[1.0]
+    )  # the same switch exactly at a cut: per shot it is two clean pairs
+    assert score("id_f1", it, switch) == 1 and score("track_mixed", it, switch) == (
+        2,
+        2,
+    )  # but the mixed track is still reported
+    assert (
+        score("id_f1_clip", TWO, None, error="boom") == 0
+        and score("id_f1_clip", dict(input={}, reference={}), out()) is None
+    )

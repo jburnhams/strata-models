@@ -4,6 +4,10 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Face tracks eval: identity F1 per shot (branch `claude/id-f1-per-shot`)**
+The first face-tracks-home run (2026-11-27) scored every candidate 0.28-0.39: `id_f1` paired each person with one track for the whole clip, but face-tracks ends every track at a cut by design, so a person in five shots could count only one of their five tracks. `id_f1` now pairs people and tracks one to one within each shot (the item's `cuts`, as `track_split` reads them); the whole-clip score stays as `id_f1_clip`, added to the spec beside it.
+- Tests: `tests/unit/test_face_track_metrics.py` (two shots, one track per person per shot: 1.0 per shot, 0.5 over the clip; a switch exactly at a cut is clean per shot but still `track_mixed`).
+
 **Text embeddings: `text-embed` now serves bge-m3 (decision of eval `mail-retrieval`)**
 The eval (600 questions over email chunks and chat windows, 100-document pools) put bge-m3 and EmbeddingGemma 300M at the top (MRR 0.988; chat top-1 96 %), Qwen3-Embedding 0.6B at 0.980 (the former first pick) and the 4B at 0.983 for four times the time; the owner chose bge-m3 for its 8k-token window (0.6 GB, 0.05 s a question). Only the role's default changed; every candidate stays in the registry.
 
