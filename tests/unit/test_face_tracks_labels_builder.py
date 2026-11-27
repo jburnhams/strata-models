@@ -72,15 +72,20 @@ class FakeStore:
     at a time (2 a page here), a search answering `known` (identity ids of the nearest confirmed faces), and suggestions recorded."""
 
     def __init__(self, known=()):
-        self.images, self.decided, self.known, self.assigned = [], {}, list(known), []
+        self.images, self.decided, self.known, self.assigned, self.deleted = [], {}, list(known), [], []
 
     def _call(self, method, path, body=None):
         if path == "/api/faces/images":
             self.images.append(body)
-            return dict(faces=[dict(id=len(self.images) - 1, status=None)])
+            x0, y0, x1, y1 = body["faces"][0]["bbox"]
+            kept = min(x1 - x0, y1 - y0) >= 24 and body["faces"][0]["det_score"] >= 0.5  # as the store's worth_keeping
+            return dict(faces=[dict(id=len(self.images) - 1, status=None)] if kept else [])
         if path == "/api/faces/search":
             assert body["named"] is True and body["model"] == "buffalo_l"
             return dict(hits=[dict(face=dict(identity_id=i), distance=0.3) for i in self.known])
+        if method == "DELETE":
+            self.deleted.append(path)
+            return dict(deleted=1)
         if path == "/api/faces/assign":
             self.assigned.append(body)
             return dict(batch=1)
@@ -216,6 +221,8 @@ def test_store_leaves_out_skipped_clips(tmp_path):
     (tmp_path / "clip-01.json").write_text(json.dumps(saved))
     store = FakeStore()
     assert B.store(str(tmp_path), client=store, skip={"clip-01"}) == 0 and B.store(str(tmp_path), client=store) == 1
+    assert B.unstore(str(tmp_path), client=store) == 1
+    assert store.deleted == [f"/api/faces/images?app=face-tracks-eval&tag=face-tracks-eval%3A{tmp_path.name}/clip-01"]
 
 
 def test_build_with_nothing_decided_refuses(tmp_path):

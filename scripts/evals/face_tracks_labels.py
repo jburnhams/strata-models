@@ -10,9 +10,11 @@ as possible.
    folder name, which prefixes every picture's ref so two proposal sets never share one), one picture a still holding that track's face,
    with the box and buffalo_l embedding face-tracks found. Each track's embedding is searched among the confirmed faces: when most of its
    nearest belong to one person, that person is suggested for its stills (their page's review), and the rest turn up in Unnamed groups.
-   Faces too small or unsure to be worth a person's look (`--min-px`, `--min-score`) and clips named in `--skip` stay out. Storing again changes nothing already decided.
+   Clips named in `--skip` stay out, and the store itself never keeps a face too small or unsure to be worth a look (docs/database.md#faces). Storing again changes nothing already decided.
 
-       .venv/bin/python scripts/evals/face_tracks_labels.py store OUT [--skip clip-03] [--min-px 24] [--min-score 0.5]
+       .venv/bin/python scripts/evals/face_tracks_labels.py store OUT [--skip clip-03]
+
+   `unstore OUT` takes them out again (DELETE /api/faces/images by their clip's tag), with every decision about them.
 
 3. The person names them on the Faces screens like any face: confirmed for a person is that person; rejected with nobody is not a face.
    Anything else (undecided, only suggested, "not this person") is not labelled, and it is not held against anyone: an answered face where
@@ -35,6 +37,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -120,7 +123,7 @@ def suggest(client, face_ids, embedding, k=SUGGEST_K, max_distance=SUGGEST_DISTA
     return who
 
 
-def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
+def store(out_dir, client=None, skip=()):
     """Every worthwhile still of every clip's tracks into the face store, one picture each, and a known person suggested for each track's
     stills where the faces nearest it agree (`suggest`); returns how many stills."""
     if client is None:
@@ -134,13 +137,7 @@ def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
         for tr in answer["tracks"]:
             undecided = []
             for st in tr.get("stills") or []:
-                x0, y0, x1, y1 = st["bbox"]
-                if (
-                    not st.get("image")
-                    or not st.get("embedding")
-                    or min(x1 - x0, y1 - y0) < min_px
-                    or (st.get("det_score") or 0) < min_score
-                ):
+                if not st.get("image") or not st.get("embedding"):
                     continue
                 face = dict(
                     bbox=st["bbox"],
@@ -164,13 +161,25 @@ def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
                         height=answer["height"],
                     ),
                 )
-                n += 1
+                n += bool((img or {}).get("faces"))  # the store leaves out a face too small or unsure to keep
                 undecided += [f["id"] for f in (img or {}).get("faces") or [] if f.get("status") is None]
             suggested += bool(suggest(client, undecided, tr.get("embedding")))
         print(f"{key}: stored")
     print(
         f"{n} faces in the face store under {STORE}, a known person suggested for {suggested} tracks: name them on the Faces screens"
     )
+    return n
+
+
+def unstore(out_dir, client=None):
+    """Take this proposal set's stills out of the face store again (their faces and every decision about them; people stay)."""
+    if client is None:
+        import strata_models_client as client
+    n = 0
+    for key in _keys(out_dir):
+        tag = urllib.parse.quote(f"{STORE}:{label_set(out_dir)}/{key}")
+        n += client._call("DELETE", f"/api/faces/images?app={STORE}&tag={tag}")["deleted"]
+    print(f"{n} stills taken out of the face store")
     return n
 
 
@@ -300,8 +309,8 @@ def main(argv=None):
     s = sub.add_parser("store")
     s.add_argument("out")
     s.add_argument("--skip", action="append", default=[], help="a clip to leave out (clip-03), again for more")
-    s.add_argument("--min-px", type=float, default=24, help="smallest face side worth a look, in source pixels")
-    s.add_argument("--min-score", type=float, default=0.5, help="lowest detection score worth a look")
+    u = sub.add_parser("unstore", help="take the set's stills out of the face store again")
+    u.add_argument("out")
     b = sub.add_parser("build")
     b.add_argument("out")
     b.add_argument("--name", default="face-tracks-home")
@@ -310,7 +319,9 @@ def main(argv=None):
     if a.cmd == "propose":
         propose(a.out, a.clips)
     elif a.cmd == "store":
-        store(a.out, skip=set(a.skip), min_px=a.min_px, min_score=a.min_score)
+        store(a.out, skip=set(a.skip))
+    elif a.cmd == "unstore":
+        unstore(a.out)
     else:
         print(build(a.out, a.name, a.every).to_json())
 
