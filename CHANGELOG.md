@@ -8,6 +8,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
 - `web/src/components/PersonPage.tsx`: `BULK_ABOVE = 40` (picker when confirmed > 40); `web/tests/integration/Faces.test.tsx`: 40 keeps rounds, 41 shows the picker; docs/database.md.
 
+**Text embeddings: a retrieval pool can name its documents in a shared corpus file (`corpus` + `pick`)**
+`llama-embed` takes `{query, corpus: <JSON list of strings>, pick: [indices]}` beside `{query, docs}`: hundreds of pools over one corpus no longer repeat every document in every dataset item (a 600-item mail-retrieval dataset was 100 MB that way). The corpus file is read once per loaded model.
+
 **Fix: the `mail-retrieval` spec named a metric that does not exist (`peak_vram_mb`; it is `peak_vram_gb`), so the service refused to load it**
 New `tests/unit/test_shipped_specs.py` parses every spec in `evals/specs/`, so a typo like this fails the gate instead of the page.
 **face-tracks labels: stills stored with boxes in their own frame's pixels (branch `claude/project-thread-csasv3`)**
