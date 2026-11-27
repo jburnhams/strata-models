@@ -505,28 +505,60 @@ def track_matches(item, output):
     return pairs, labelled, answered
 
 
-def _id_f1(item, output, error):
-    """The identity F1 of multi-object tracking (Ristani et al. 2016): people and tracks paired one to one so the most labelled faces fall in
-    their person's track; a face in another track, or in none, is missed, and an answered face not in its pair is false."""
+def _shot_of(item):
+    """A labelled moment's shot number, from the item's `cuts` (input): 0 before the first cut, 1 after it, ..."""
+    cuts = sorted(float(c) for c in (item.get("input") or {}).get("cuts") or [])
+    return lambda t: sum(1 for c in cuts if t >= c - 1e-6)
+
+
+def _identity_tp(pairs):
+    """Labelled faces in their person's track, people and tracks paired one to one so the most fall in their pair (Ristani et al. 2016)."""
+    from scipy.optimize import linear_sum_assignment
+
+    if not pairs:
+        return 0
+    people = sorted({p for p, _, _ in pairs})
+    tracks = sorted({t for _, t, _ in pairs})
+    c = np.zeros((len(people), len(tracks)))
+    for p, t, _ in pairs:
+        c[people.index(p), tracks.index(t)] += 1
+    rows, cols = linear_sum_assignment(-c)
+    return int(c[rows, cols].sum())
+
+
+def _id_f1_scored(item, output, error, per_shot):
     if (item.get("reference") or {}).get("people") is None:
         return None
     if error:
         return 0.0
-    from scipy.optimize import linear_sum_assignment
-
     pairs, labelled, answered = track_matches(item, output)
     if not labelled and not answered:
         return 1.0
-    people = sorted({p for p, _, _ in pairs})
-    tracks = sorted({t for _, t, _ in pairs})
-    idtp = 0
-    if pairs:
-        c = np.zeros((len(people), len(tracks)))
-        for p, t, _ in pairs:
-            c[people.index(p), tracks.index(t)] += 1
-        rows, cols = linear_sum_assignment(-c)
-        idtp = int(c[rows, cols].sum())
+    if per_shot:
+        shot = _shot_of(item)
+        by_shot = {}
+        for pr in pairs:
+            by_shot.setdefault(shot(pr[2]), []).append(pr)
+        idtp = sum(_identity_tp(ps) for ps in by_shot.values())
+    else:
+        idtp = _identity_tp(pairs)
     return 2 * idtp / (labelled + answered)
+
+
+def _id_f1(item, output, error):
+    """The identity F1 of multi-object tracking (Ristani et al. 2016) within each shot: in every shot (the item's `cuts`), people and tracks
+    are paired one to one so the most labelled faces fall in their person's track; a face in another track, or in none, is missed, and an
+    answered face not in its pair is false. Per shot because face-tracks ends every track at a cut by design (one track per person per
+    shot), so a person seen in five shots is five tracks, all of which can count. A track that runs across a cut is paired in each shot
+    apart; if it changes person there, track_mixed says so."""
+    return _id_f1_scored(item, output, error, per_shot=True)
+
+
+def _id_f1_clip(item, output, error):
+    """The identity F1 over the whole clip (the first face-tracks-home run's id_f1, 2026-11-27): one track per person for every shot, so a
+    person seen in several shots can count only one of their tracks. Kept to compare with the per-shot id_f1, and for a tracker that is
+    meant to follow a person across cuts."""
+    return _id_f1_scored(item, output, error, per_shot=False)
 
 
 def _track_mixed(item, output, error):
@@ -546,8 +578,7 @@ def _track_split(item, output, error):
     the item's `cuts` (input)."""
     if (item.get("reference") or {}).get("people") is None or error:
         return None
-    cuts = sorted(float(c) for c in (item.get("input") or {}).get("cuts") or [])
-    shot = lambda t: sum(1 for c in cuts if t >= c - 1e-6)
+    shot = _shot_of(item)
     pairs, _, _ = track_matches(item, output)
     seen = {}
     for p, t, when in pairs:
@@ -1425,9 +1456,17 @@ METRICS = {
             "id_f1",
             "mean",
             "higher",
-            "Face tracks: identity F1, the labelled faces in their person's track (people and tracks paired one to one) against all labelled and answered faces",
+            "Face tracks: identity F1 within each shot, the labelled faces in their person's track (people and tracks paired one to one per shot) against all labelled and answered faces",
             "",
             _id_f1,
+        ),
+        Metric(
+            "id_f1_clip",
+            "mean",
+            "higher",
+            "Face tracks: identity F1 over the whole clip (one track per person across every shot), the score before 2026-11-27, to compare",
+            "",
+            _id_f1_clip,
         ),
         Metric(
             "track_mixed",

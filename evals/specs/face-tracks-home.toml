@@ -2,7 +2,7 @@ name = "face-tracks-home"
 question = "Which detection rate and tracker should serve face-tracks on real home video and race footage?"
 role = "face-tracks"
 dataset = "face-tracks-home"  # scripts/evals/face_tracks_labels.py: real clips whose tracks a person named; private, kept in the data directory
-metrics = ["id_f1", "track_mixed", "track_split", "track_face_miss", "latency_s", "failed"]
+metrics = ["id_f1", "id_f1_clip", "track_mixed", "track_split", "track_face_miss", "latency_s", "failed"]
 
 # The labels start from a generous run (10 fps, byte, low thresholds), named by hand. A track that mixes two people hands an app a wrong
 # name for everything in it, and a split track only asks for one more click, so track_mixed is read beside the primary. Every candidate gets
@@ -10,7 +10,7 @@ metrics = ["id_f1", "track_mixed", "track_split", "track_face_miss", "latency_s"
 # one such as CR-FIQA) is judged blind in an eval of its own, once a second score is served.
 [decision]
 primary = "id_f1"
-baseline = "fps5-iou-emb"
+baseline = "fps10-byte"  # served since 2026-11-27, chosen by this eval over the first guess fps5-iou-emb
 min_effect = 0.02
 guards = { latency_s = 2.0, failed = 1.0 }
 
@@ -18,7 +18,7 @@ guards = { latency_s = 2.0, failed = 1.0 }
 name = "fps5-iou-emb"
 model = "buffalo_l-tracks"
 params = { fps = 5, tracker = "iou-emb" }
-note = "the served baseline (2026-11-26): first guesses"
+note = "the first guess, served 2026-11-26 to 2026-11-27: per-shot id_f1 0.66 against 0.82 for fps10-byte"
 
 [[candidates]]
 name = "fps2-iou-emb"
@@ -47,3 +47,4 @@ note = "ByteTrack's second pass: unsure faces (0.3 to 0.5) carry a track on, nev
 name = "fps10-byte"
 model = "buffalo_l-tracks"
 params = { fps = 10, tracker = "byte" }
+note = "served since 2026-11-27 (2026-11-27 run: per-shot id_f1 0.82, the best; misses 0.09 % of faces; twice the run time of 5 fps)"

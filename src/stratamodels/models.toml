@@ -101,7 +101,7 @@ model = "ffmpeg-scene-score"                 # the plain baseline (2026-11-23, f
 
 [roles.face-tracks]
 description = "Faces in a video followed from frame to frame: one track per person per shot, with its span, boxes, embedding and best stills"
-model = "buffalo_l-tracks"                   # the baseline (2026-11-26, for strata-360 and strata-reels): eval face-tracks-home chooses fps, tracker and still quality
+model = "buffalo_l-tracks"                   # for strata-360 and strata-reels; fps and tracker chosen by eval face-tracks-home (2026-11-27: 10 fps, byte); still quality not yet
 
 [roles.page-build]
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
@@ -127,7 +127,7 @@ vram_gb = 1.0
 licence = "insightface models: non-commercial research only (fine for private use); ffmpeg LGPL/GPL"
 source = "https://github.com/deepinsight/insightface/tree/master/model_zoo"
 used_by = []
-options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"], fps = 5, tracker = "iou-emb", stills = 3 }   # first guesses, not yet measured: eval face-tracks-home
+options = { det_size = [640, 640], modules = ["detection", "recognition", "landmark_3d_68"], fps = 10, tracker = "byte", stills = 3 }   # eval face-tracks-home 2026-11-27 (8 real clips, 15 people): per-shot id_f1 0.82 against 0.66 for the first guess (5 fps, iou-emb), +0.155 [0.054, 0.278]; misses 0.09 % of faces against 3.2 %; about 100 s for a 2-minute clip (twice 5 fps)
 
 [models.whisper-large-v3]
 runtime = "venv-worker"
