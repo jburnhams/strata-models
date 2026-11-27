@@ -1053,7 +1053,7 @@ options = { model = "google/gemma-4-31b-it" }
 # ---- Text embeddings (llama-server --embedding): the mail/chat retrieval eval (evals/specs/mail-retrieval.toml) picks the role's model ------------
 [roles.text-embed]
 description = "One vector per text (email and chat chunks, queries): retrieval over kept mail and messages; params {texts} or {query, docs}"
-model = "qwen3-embedding-0.6b"          # first pick, not yet measured: the eval mail-retrieval decides
+model = "bge-m3"          # eval mail-retrieval, 2026-11-27: bge-m3 and EmbeddingGemma tie at the top (MRR 0.988, chat top-1 96 %); bge-m3 has the 8k-token window (report: docs tech/code/strata-models/evals/2026-11-27-mail-retrieval.md)
 
 [models."qwen3-embedding-0.6b"]
 runtime = "llama-embed"
@@ -1082,7 +1082,7 @@ roles = ["text-embed"]
 vram_gb = 1.0
 licence = "MIT"
 source = "https://huggingface.co/ggml-org/bge-m3-Q8_0-GGUF"
-used_by = []
+used_by = ["strata-takeout"]
 options = { model = "ggml-org/bge-m3-Q8_0-GGUF:bge-m3-q8_0.gguf", pooling = "cls", ctx = 4096 }
 
 [models.embeddinggemma-300m]
