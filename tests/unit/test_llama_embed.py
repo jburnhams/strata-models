@@ -1,5 +1,6 @@
 """The text-embedding runtime (stratamodels.runtimes.llamaembed) against a fake llama-server, and the retrieval metrics."""
 
+import json
 import math
 
 import numpy as np
@@ -119,3 +120,27 @@ def test_retrieval_metrics_rank_the_answer_in_its_pool():
     )
     assert M.METRICS["mrr"].score(dict(reference={}), out, None) is None
     assert math.isinf(M._rank_of_answer(item(9), out, None))
+
+
+def test_a_pool_can_name_its_documents_in_a_shared_corpus_file(setup, tmp_path):  # noqa: F811
+    tmp, _ = setup
+    h, _ = loaded(tmp)
+    corpus = tmp_path / "c.json"
+    corpus.write_text(json.dumps(["b", "c", "a", "d"]), encoding="utf-8")
+    r = llamaembed.run(h, dict(query="a", corpus=str(corpus), pick=[3, 2, 0]), probe=lambda: {}, post=fake_post)
+    assert r["scores"] == [0.0, 1.0, 0.0]  # d, a, b
+    for bad in (
+        dict(query="a", corpus=str(corpus), pick=[9]),
+        dict(query="a", corpus=str(corpus)),
+        dict(query="a", corpus=str(tmp_path / "nope.json"), pick=[0]),
+        dict(query="a", corpus=str(corpus), docs=["a"], pick=[0]),
+    ):
+        with pytest.raises(RunError):
+            llamaembed.run(h, bad, probe=lambda: {}, post=fake_post)
+    corpus.write_text("not json", encoding="utf-8")
+    with pytest.raises(RunError, match="not JSON"):
+        llamaembed.run(h, dict(query="a", corpus=str(corpus), pick=[0]), probe=lambda: {}, post=fake_post)
+    corpus.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(RunError, match="list of strings"):
+        llamaembed.run(h, dict(query="a", corpus=str(corpus), pick=[0]), probe=lambda: {}, post=fake_post)
+    llamaembed.unload(h)

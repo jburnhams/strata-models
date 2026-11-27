@@ -11,10 +11,14 @@ params (one of):
   texts   a list of strings: one L2-normalised vector each. `out` names an .npz file to write {vectors} into instead of answering with the numbers.
   query + docs   a string and a list of strings: cosine similarity of the query to each document, in the documents' order ("scores"); the
                  query gets query_prefix, the documents doc_prefix. This is what a retrieval eval item is: a question and a pool to rank.
+  query + corpus + pick   the same, with the documents named by index: `corpus` is a JSON file holding a list of strings, `pick` the indices of
+                 this item's pool in it. A dataset of hundreds of pools over one shared corpus stays small, and the file is read once per model.
 Answer: {scores, dim, tokens_in, seconds, peak_vram_mb, model} or {vectors | out, n, dim, ...}."""
 
 import dataclasses
+import json
 import math
+import os
 import threading
 import time
 
@@ -23,7 +27,7 @@ import numpy as np
 from stratamodels import gpu
 from stratamodels.runtimes import RunError, llama
 
-PARAMS = {"texts", "query", "docs", "out"}
+PARAMS = {"texts", "query", "docs", "corpus", "pick", "out"}
 BATCH = 16
 MAX_BODY_CHARS = 200_000
 CACHE_MAX = 20_000  # vectors kept per loaded model
@@ -81,13 +85,40 @@ def embed(handle, texts, post=None):
     return (np.stack(out) if out else np.zeros((0, 0), dtype=np.float32)), tokens
 
 
+def corpus_docs(handle, path, pick):
+    """The documents `pick` names in the JSON list at `path`, read once per loaded model (and again when the file changes)."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime_ns, st.st_size)
+        cache = handle.setdefault("corpora", {})
+        if key not in cache:
+            with open(path, encoding="utf-8") as f:
+                docs = json.load(f)
+            if not isinstance(docs, list) or not all(isinstance(d, str) for d in docs):
+                raise RunError(f"{path}: a corpus is a JSON list of strings")
+            cache.clear()  # one corpus at a time
+            cache[key] = docs
+        docs = cache[key]
+    except OSError as e:
+        raise RunError(f"corpus file {path}: {e}")
+    except ValueError as e:
+        raise RunError(f"corpus file {path} is not JSON: {e}")
+    if not isinstance(pick, list) or not pick or not all(isinstance(i, int) and 0 <= i < len(docs) for i in pick):
+        raise RunError(f"pick is a non-empty list of indices into the {len(docs)} documents of the corpus")
+    return [docs[i] for i in pick]
+
+
 def run(handle, params, probe=gpu.query, post=None):
     unknown = set(params) - PARAMS
     if unknown:
         raise RunError(f"unknown params for a text-embedding model: {sorted(unknown)}")
-    pairs = "query" in params or "docs" in params
+    pairs = "query" in params or "docs" in params or "corpus" in params
     if pairs == ("texts" in params):
-        raise RunError("give either texts, or query and docs")
+        raise RunError("give either texts, or query with docs (or corpus and pick)")
+    if "corpus" in params:
+        if "docs" in params:
+            raise RunError("give docs, or corpus and pick, not both")
+        params = dict(params, docs=corpus_docs(handle, params["corpus"], params.get("pick")))
     peak = [0.0]
     stop = threading.Event()
     pid = handle["proc"].pid
