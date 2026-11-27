@@ -22,10 +22,11 @@
                                          min_score?, group_share?, group_min?} turn the app's hints into suggested faces (dry_run, the default,
                                          only counts); nothing is ever confirmed here
   GET  /api/faces/tags; PUT /api/faces/tags/{tag} {opt_in, note?}
-  GET  /api/identities?app=&q=&app_ref=&limit=   people (as `app` sees them; `faces` confirmed, `suggested` waiting); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
+  GET  /api/identities?app=&q=&app_ref=&limit=&tag=   people (as `app` sees them; `faces` confirmed, `suggested` waiting; `tag`: only
+                                         people with faces in pictures carrying it, counting those); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
   GET/PATCH /api/identities/{id}         one person (?app=); {name?, fields?} change the global ones
   PUT  /api/identities/{id}/apps/{app}   {fields, app_ref?} an app's own fields for a person
-  GET  /api/identities/{id}/review?limit=48&min_likeness=   the next round of their suggested faces, most certain first, each with its `distance` to
+  GET  /api/identities/{id}/review?limit=48&min_likeness=&tag=   the next round of their suggested faces, most certain first, each with its `distance` to
                                          the person (their confirmed faces once there are 3, else the tightest group of the suggestions)
   GET  /api/identities/{id}/faces?status=confirmed&limit=&offset=   a person's faces in that state (`suggested`: waiting for a person), best first
   POST /api/identities/{id}/merge {into, app}; POST /api/identities/{id}/unmerge; POST /api/identities/not-same {a, b}
@@ -486,8 +487,9 @@ def mount(app, scheduler, store: FaceStore | None = None):
         q: str | None = None,
         app_ref: str | None = None,
         limit: int = 200,
+        tag: str | None = None,
     ):
-        return dict(items=fs.identities(app_name, q, app_ref, limit))
+        return dict(items=fs.identities(app_name, q, app_ref, limit, tag=tag))
 
     @app.post("/api/identities", status_code=201)
     def post_identity(b: IdentityIn):
@@ -528,8 +530,14 @@ def mount(app, scheduler, store: FaceStore | None = None):
         return dict(items=fs.faces_of(identity_id, status, limit, offset))
 
     @app.get("/api/identities/{identity_id:int}/review")
-    def get_review(identity_id: int, limit: int = 48, model: str | None = None, min_likeness: float | None = None):
-        return fs.review(identity_id, model or role_model()[0], limit, min_likeness=min_likeness)
+    def get_review(
+        identity_id: int,
+        limit: int = 48,
+        model: str | None = None,
+        min_likeness: float | None = None,
+        tag: str | None = None,
+    ):
+        return fs.review(identity_id, model or role_model()[0], limit, min_likeness=min_likeness, tag=tag)
 
     @app.post("/api/identities/{identity_id:int}/merge")
     def post_merge(identity_id: int, b: MergeIn):

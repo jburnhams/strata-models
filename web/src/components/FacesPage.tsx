@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, BulkBar, Button, DataTable, DataView, EmptyState, Field, Input, NativeSelect, PageHeader, SelectableGrid, Status, Switch, TableSkeleton, Tabs, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable, type Column } from 'strata-react'
 import { facesApi, personName, type Group, type Person, type Suggestion, type Tag } from '../faces'
+import { SourcePicker, useSource, withSource } from './SourcePicker'
 
 const tabs = [
   { value: 'people', label: 'People' },
@@ -21,8 +22,8 @@ const byName = (a: Person, b: Person) => personName(a).localeCompare(personName(
 const crop = (faceId: number) => <Thumbnail src={facesApi.cropUrl(faceId)} alt="" missing="No picture" className="size-full" />
 
 // ---- people --------------------------------------------------------------------------------------------------------------------------------
-const peopleColumns: Column<Person>[] = [
-  { key: 'name', header: 'Person', cell: p => <TextLink to={`/faces/people/${p.id}`}>{personName(p)}</TextLink>, sort: byName },
+const peopleColumns = (source: string): Column<Person>[] => [
+  { key: 'name', header: 'Person', cell: p => <TextLink to={withSource(`/faces/people/${p.id}`, source)}>{personName(p)}</TextLink>, sort: byName },
   { key: 'faces', header: 'Faces', numeric: true, cell: p => format.integer(p.faces), sort: (a, b) => a.faces - b.faces },
   { key: 'suggested', header: 'Suggested', numeric: true, cell: p => (p.suggested ? format.integer(p.suggested) : format.missing), sort: (a, b) => a.suggested - b.suggested },
   { key: 'apps', header: 'Named in', cell: p => Object.keys(p.apps).sort().join(', ') || format.missing },
@@ -32,12 +33,16 @@ function People() {
   const [q, setQ] = useSearchParam<string>('q', { default: '' })
   const [text, setText] = useState(q)
   useEffect(() => { const t = setTimeout(() => setQ(text.trim() || null), 250); return () => clearTimeout(t) }, [text, setQ])
-  const load = useLoad({ queryKey: ['faces', 'people', q], queryFn: () => facesApi.people(q) })
+  const [source] = useSource()
+  const load = useLoad({ queryKey: ['faces', 'people', q, source], queryFn: () => facesApi.people(q, source) })
   return (
     <div className="grid gap-4">
-      <Field label="Find a person" className="max-w-sm"><Input type="search" value={text} onChange={e => setText(e.target.value)} /></Field>
-      <DataView state={load} isEmpty={p => p.length === 0} skeleton={<TableSkeleton rows={6} columns={3} />} empty={<EmptyState title={q ? `Nobody called “${q}”` : 'Nobody is named yet'}>{q ? 'Try part of the name.' : <>Name a group of faces on <TextLink to="/faces?tab=groups">Unnamed groups</TextLink>.</>}</EmptyState>}>
-        {p => <DataTable caption="People" columns={peopleColumns} rows={[...p].sort((a, b) => b.faces - a.faces || b.suggested - a.suggested || byName(a, b))} rowKey={x => String(x.id)} sortParam="sort" />}
+      <div className="flex flex-wrap items-end gap-4">
+        <Field label="Find a person" className="max-w-sm"><Input type="search" value={text} onChange={e => setText(e.target.value)} /></Field>
+        <SourcePicker />
+      </div>
+      <DataView state={load} isEmpty={p => p.length === 0} skeleton={<TableSkeleton rows={6} columns={3} />} empty={<EmptyState title={q ? `Nobody called “${q}”` : source ? `Nobody has faces from ${source}` : 'Nobody is named yet'}>{q ? 'Try part of the name.' : <>Name a group of faces on <TextLink to={withSource('/faces?tab=groups', source)}>Unnamed groups</TextLink>.</>}</EmptyState>}>
+        {p => <DataTable caption={source ? `People with faces from ${source}` : 'People'} columns={peopleColumns(source)} rows={[...p].sort((a, b) => b.faces - a.faces || b.suggested - a.suggested || byName(a, b))} rowKey={x => String(x.id)} sortParam="sort" />}
       </DataView>
     </div>
   )
@@ -82,15 +87,25 @@ function GroupReview({ group, index, total, people, onDecide }: { group: Group; 
 }
 
 function Groups() {
+  const [source] = useSource()
+  return (
+    <div className="grid gap-4">
+      <SourcePicker />
+      <SourceGroups key={source} source={source} />
+    </div>
+  )
+}
+
+function SourceGroups({ source }: { source: string }) {
   const qc = useQueryClient()
-  const load = useLoad({ queryKey: ['faces', 'groups'], queryFn: facesApi.groups, staleTime: 5 * 60_000 })
+  const load = useLoad({ queryKey: ['faces', 'groups', source], queryFn: () => facesApi.groups(source), staleTime: 5 * 60_000 })
   const people = usePeople()
   const undoable = useUndoable()
   const [at, setAt] = useState(0)
   const undecided = (all: Group[]) => all.map(g => ({ faces: g.faces.filter(f => !undoable.isRemoved(String(f))) })).filter(g => g.faces.length > 0).map(g => ({ ...g, size: g.faces.length }))
   return (
     <div className="grid gap-4">
-      <DataView state={load} isEmpty={g => undecided(g).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title="Every face has been decided">New pictures an app indexes bring new groups here.</EmptyState>}>
+      <DataView state={load} isEmpty={g => undecided(g).length === 0} skeleton={<TableSkeleton rows={3} columns={6} />} empty={<EmptyState title={source ? `Every face from ${source} has been decided` : 'Every face has been decided'}>New pictures an app indexes bring new groups here.</EmptyState>}>
         {all => {
           const left = undecided(all)
           const i = Math.min(at, left.length - 1)

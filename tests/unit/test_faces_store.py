@@ -512,3 +512,24 @@ def test_delete_images_names_only_the_kept_copies_no_other_picture_uses(fs):
     assert sorted(fs.delete_images(app="a", dry_run=True)["media"]) == ["faces/medium/own.webp"]
     assert fs.delete_images(app="b")["media"] == []  # "one" still uses it
     assert fs.delete_images(ids=ids)["media"] == ["faces/medium/own.webp", "faces/medium/shared.webp"]
+
+
+def test_one_source_people_and_review_round(fs):
+    photos = index(fs, "immich", "p1", [face(1, x=i * 50, seed=i) for i in range(3)])
+    clip = index(fs, "eval", "c1", [face(1, x=i * 50, seed=10 + i) for i in range(2)], tags=["video"])
+    other = index(fs, "immich", "p2", [face(2, seed=30)])
+    one, two = fs.create_identity(name="One")["id"], fs.create_identity(name="Two")["id"]
+    fs.assign([f["id"] for f in photos["faces"]], one, "a")
+    fs.assign([f["id"] for f in clip["faces"]], one, "a", status="suggested", source="hint", confidence=0.9)
+    fs.assign([other["faces"][0]["id"]], two, "a", status="suggested", source="hint", confidence=0.9)
+    everyone = {p["id"]: (p["faces"], p["suggested"]) for p in fs.identities()}
+    assert everyone == {one: (3, 2), two: (0, 1)}
+    video = fs.identities(tag="video")
+    assert [(p["id"], p["faces"], p["suggested"]) for p in video] == [
+        (one, 0, 2)
+    ]  # only people seen there, counting those faces
+    assert fs.identities(tag="nowhere") == []
+    r = fs.review(one, "buffalo_l", tag="video")
+    assert r["suggested"] == 2 and sorted(i["id"] for i in r["items"]) == sorted(f["id"] for f in clip["faces"])
+    assert r["basis"] == "confirmed"  # the person's model still comes from all their confirmed faces
+    assert fs.review(two, "buffalo_l", tag="video")["items"] == []

@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AsyncButton, BulkBar, Button, DataView, EmptyState, Field, Input, NumberField, PageHeader, SelectableGrid, TableSkeleton, TextLink, Thumbnail, UndoBar, format, useAsyncAction, useLoad, useSearchParam, useSelection, useUndoable } from 'strata-react'
 import { facesApi, personName, type Face, type Person } from '../faces'
 import { FaceInPhoto } from './FaceInPhoto'
+import { SourcePicker, useSource, withSource } from './SourcePicker'
 
 const isId = (raw: string) => /^\d+$/.test(raw)
 
@@ -80,13 +81,13 @@ const DEFAULT_MIN = 70
 const isPct = (raw: string) => /^\d{2}$/.test(raw) && Number(raw) >= 50 && Number(raw) <= 99
 const likeness = (d: number) => `${format.share(Math.max(0, 1 - d))} alike`
 
-function Round({ person, open, setOpen }: Open & { person: Person }) {
+function Round({ person, open, setOpen, source }: Open & { person: Person; source: string }) {
   const qc = useQueryClient()
   const who = personName(person)
   const bulk = person.faces > BULK_ABOVE
   const [minRaw, setMin] = useSearchParam<string>('min', { default: String(DEFAULT_MIN), parse: isPct })
   const min = Number(minRaw)
-  const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100) : facesApi.review(person.id, ROUND)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
+  const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0, source], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100, source) : facesApi.review(person.id, ROUND, undefined, source)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
   const undoable = useUndoable()
   const rows = load.status === 'ready' ? load.data.items.filter(f => !undoable.isRemoved(String(f.id))) : []
   const selection = useSelection(rows, f => String(f.id), () => true)
@@ -111,7 +112,8 @@ function Round({ person, open, setOpen }: Open & { person: Person }) {
   const basis = r?.basis === 'confirmed' ? `Scored against ${format.count(r.basis_faces, 'confirmed face')}.` : r?.basis === 'group' ? `Nothing confirmed yet: these are from the tightest group of ${format.count(r.basis_faces, 'suggestion')}, all photos an app says ${who} is in.` : ''
   return (
     <section aria-labelledby="round" className="grid gap-4">
-      <h2 id="round" className="type-heading">{`Is this ${who}? ${format.count(person.suggested, 'face')} suggested`}</h2>
+      <h2 id="round" className="type-heading">{source ? `Is this ${who}? ${format.count(r?.suggested ?? 0, 'face')} suggested from ${source}` : `Is this ${who}? ${format.count(person.suggested, 'face')} suggested`}</h2>
+      <SourcePicker />
       {r && <p className="type-body-sm max-w-prose text-muted-foreground">{`${basis} ${format.integer(r.near['0.3'] ?? 0)} are very close and ${format.integer(r.near['0.4'] ?? 0)} close. Untick any that are someone else.`}</p>}
       {bulk && (
         <div className="grid gap-2">
@@ -208,6 +210,7 @@ export default function PersonPage() {
   const id = Number(useParams().id)
   const [open, setOpen] = useSearchParam<string>('face', { default: '', parse: isId })
   const person = useLoad({ queryKey: ['faces', 'person', id], queryFn: () => facesApi.person(id) })
+  const [source] = useSource()
   const [browse, setBrowse] = useState(false)
   const [all, setAll] = useState(false) // the best 500 at first; the service gives up to 5000
   const faces = useLoad({ queryKey: ['faces', 'faces-of', id, all], queryFn: () => facesApi.facesOf(id, all ? 5000 : 500) })
@@ -217,7 +220,7 @@ export default function PersonPage() {
   const apps = p ? Object.keys(p.apps).sort() : []
   return (
     <div className="grid gap-8">
-      <PageHeader title={p ? personName(p) : 'Person'} scope={<TextLink to="/faces">Every person</TextLink>} finding={p ? { text: `${format.count(p.faces, 'face')} confirmed${p.suggested ? `, ${format.integer(p.suggested)} suggested` : ''}${apps.length ? `, named in ${apps.join(', ')}` : ''}.` } : undefined} />
+      <PageHeader title={p ? personName(p) : 'Person'} scope={<TextLink to={withSource('/faces', source)}>Every person</TextLink>} finding={p ? { text: `${format.count(p.faces, 'face')} confirmed${p.suggested ? `, ${format.integer(p.suggested)} suggested` : ''}${apps.length ? `, named in ${apps.join(', ')}` : ''}.` } : undefined} />
       {open && <InPhoto open={open} setOpen={setOpen} names={names} />}
       <DataView state={person} isEmpty={() => false} skeleton={<TableSkeleton rows={1} columns={2} />} empty={<EmptyState title="No such person" />}>
         {pp => <Rename key={pp.id} person={pp} />}
@@ -235,7 +238,7 @@ export default function PersonPage() {
           </div>
         ) : null)}
       </DataView>
-      {p && p.suggested > 0 && <Round key={p.id} person={p} open={open} setOpen={setOpen} />}
+      {p && p.suggested > 0 && <Round key={`${p.id}-${source}`} person={p} open={open} setOpen={setOpen} source={source} />}
       {p && p.suggested > 0 && (browse
         ? <Suggested key={`all-${p.id}`} person={p} open={open} setOpen={setOpen} />
         : <div><Button variant="ghost" onPress={() => setBrowse(true)}>{`Browse every suggestion (${format.integer(p.suggested)})`}</Button></div>)}

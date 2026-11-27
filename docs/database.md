@@ -44,6 +44,10 @@ One face store for every app (design, survey and decisions: the face database pr
   proposed or used for merge suggestions. Both are service settings (Settings page), read on every query, so a change applies at once and
   a lower bar brings stored faces back; no app filters tiny or doubtful faces itself. A clustering's `min_score` can only raise it.
   Faces a person already decided about stay on their person's page whatever the bar.
+- **Sources:** every tag is a source (an app's name, or a tag it gave, such as a video eval's stills). `GET /api/identities?tag=` lists
+  only people with faces there, counting those; `GET /api/identities/{id}/review?tag=` offers only that source's suggestions (scored
+  against all the person's confirmed faces); `cluster`'s `tags` groups only its faces. The web app's Faces screens share one Source
+  picker (`?source=`).
 - **Deleting** (`DELETE /api/faces/images/{id}`, `POST /api/faces/images/delete {ids?, app?, tag?, dry_run}`): pictures go with their
   faces, embeddings, decisions and hints, and their kept copy when no other picture uses it (cached crops stay until the cache is cleared).
   The bulk form counts first (`dry_run` is the default) and says how many confirmed faces would go; it needs at least one of ids, app and
