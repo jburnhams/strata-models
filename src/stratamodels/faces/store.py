@@ -91,9 +91,32 @@ def face_row(f, state=None):
     return out
 
 
+def default_bar():
+    """(min_score, min_px) from the service's settings: faces_min_score and faces_min_px."""
+    from stratamodels import settings
+
+    return settings.faces_min_score(), settings.faces_min_px()
+
+
 class FaceStore:
-    def __init__(self, engine, clock=time.time):
-        self.engine, self.clock = engine, clock
+    def __init__(self, engine, clock=time.time, bar=default_bar):
+        """`bar` gives (min_score, min_px): the faces worth a person's look or a match, read on every query so a changed setting applies at
+        once. Faces under it are kept (a lower bar later brings them back) but never searched, grouped, suggested or proposed."""
+        self.engine, self.clock, self.bar = engine, clock, bar
+
+    def usable(self, min_score=None):
+        """The store's one bar for a face worth matching: the detector's score at least faces_min_score (or `min_score` when higher), and the
+        box's shorter side at least faces_min_px of the picture's pixels. Applied here, in every search, grouping, review and proposal, so
+        no app has to filter tiny or doubtful faces itself."""
+        score, px = self.bar()
+        if min_score is not None:
+            score = max(score, float(min_score))
+        conds = []
+        if score > 0:
+            conds.append(Face.det_score >= score)
+        if px > 0:
+            conds += [Face.x1 - Face.x0 >= px, Face.y1 - Face.y0 >= px]
+        return sa.and_(sa.true(), *conds)
 
     def session(self):
         return Session(self.engine, expire_on_commit=False)
@@ -307,6 +330,66 @@ class FaceStore:
             s.commit()
             return self._image_dict(s, img)
 
+    def delete_images(self, *, ids=None, app=None, tag=None, dry_run=True):
+        """Remove pictures from the store with everything hanging on them: their faces, embeddings, decisions (assignments) and hints. Pick
+        them by `ids`, `app`, `tag` (pictures matching every one given); at least one is needed, so nothing removes the whole store.
+        `dry_run` (the default) only counts. Answers {images, faces, decisions, confirmed, hints, deleted, media}: `confirmed` is how many of
+        the faces a person had named (their decisions go too), `media` the kept copies no other picture uses (for the caller to remove)."""
+        if not ids and not app and not tag:
+            raise ValueError("say which pictures: ids, app or tag")
+        with self.session() as s:
+            q = sa.select(FaceImage.id)
+            if ids:
+                q = q.where(FaceImage.id.in_([int(i) for i in ids]))
+            if app:
+                q = q.where(FaceImage.app == str(app))
+            if tag:
+                q = q.where(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag == str(tag))))
+            images = list(s.scalars(q))
+            faces = []
+            for part in _chunks(images):
+                faces += list(s.scalars(sa.select(Face.id).where(Face.image_id.in_(part))))
+            state = self._current(s, faces) if faces else {}
+            decisions = hints = 0
+            for part in _chunks(faces):
+                decisions += s.scalar(sa.select(sa.func.count()).where(FaceAssignment.face_id.in_(part))) or 0
+            for part in _chunks(images):
+                hints += s.scalar(sa.select(sa.func.count()).where(FaceHint.image_id.in_(part))) or 0
+            media = set()
+            for part in _chunks(images):
+                media.update(m for m in s.scalars(sa.select(FaceImage.medium).where(FaceImage.id.in_(part))) if m)
+            if media:  # a kept copy is named by its content: another picture may share it
+                media -= set(
+                    s.scalars(
+                        sa.select(FaceImage.medium).where(
+                            FaceImage.medium.in_(sorted(media)), FaceImage.id.not_in(images)
+                        )
+                    )
+                )
+            out = dict(
+                images=len(images),
+                faces=len(faces),
+                decisions=decisions,
+                confirmed=sum(1 for a in state.values() if a.status == "confirmed"),
+                hints=hints,
+                deleted=False,
+                media=sorted(media),
+            )
+            if dry_run or not images:
+                return out
+            for part in _chunks(faces):  # by hand, not by ON DELETE CASCADE: SQLite enforces it only when asked to
+                s.execute(sa.delete(FaceAssignment).where(FaceAssignment.face_id.in_(part)))
+                s.execute(sa.delete(FaceHint).where(FaceHint.face_id.in_(part)))
+                s.execute(sa.delete(FaceEmbedding).where(FaceEmbedding.face_id.in_(part)))
+            for part in _chunks(images):
+                s.execute(sa.delete(FaceHint).where(FaceHint.image_id.in_(part)))
+                s.execute(sa.delete(Face).where(Face.image_id.in_(part)))
+                s.execute(sa.delete(FaceImageTag).where(FaceImageTag.image_id.in_(part)))
+                s.execute(sa.delete(FaceImage).where(FaceImage.id.in_(part)))
+            s.commit()
+            out["deleted"] = True
+            return out
+
     def face(self, face_id):
         with self.session() as s:
             f = s.get(Face, int(face_id))
@@ -348,7 +431,7 @@ class FaceStore:
                 sa.select(FaceEmbedding)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include))
+                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable())
             )
             if exclude:
                 stmt = stmt.where(FaceEmbedding.face_id.not_in([int(x) for x in exclude]))
@@ -392,11 +475,9 @@ class FaceStore:
                 sa.select(FaceEmbedding.face_id)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include))
+                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable(min_score))
                 .order_by(Face.id.desc())
             )
-            if min_score is not None:
-                q = q.where(Face.det_score >= float(min_score))
             state = self._current(s)
             free = [f for f in s.scalars(q) if f not in state or (suggested and state[f].status == "suggested")][
                 :limit
@@ -635,6 +716,13 @@ class FaceStore:
             state = self._current(s)
             mine = {f: a for f, a in state.items() if a.identity_id == root}
             sug = [f for f, a in mine.items() if a.status == "suggested"]
+            if (
+                sug
+            ):  # a suggestion under the store's bar is not offered (it stays, and comes back if the bar is lowered)
+                ok = set()
+                for part in _chunks(sorted(sug)):
+                    ok.update(s.scalars(sa.select(Face.id).where(Face.id.in_(part), self.usable())))
+                sug = [f for f in sug if f in ok]
             conf = [f for f, a in mine.items() if a.status == "confirmed"]
             rej = [f for f, a in mine.items() if a.status == "rejected"]
             out = dict(basis=None, basis_faces=0, suggested=len(sug), confirmed=len(conf), near={}, counts={}, items=[])
@@ -807,7 +895,7 @@ class FaceStore:
                 rows = s.execute(
                     sa.select(FaceEmbedding.vector)
                     .join(Face, Face.id == FaceEmbedding.face_id)
-                    .where(FaceEmbedding.model == model, FaceEmbedding.face_id.in_(fids))
+                    .where(FaceEmbedding.model == model, FaceEmbedding.face_id.in_(fids), self.usable())
                     .order_by(Face.det_score.desc())
                     .limit(EXEMPLARS)
                 ).all()
@@ -940,7 +1028,7 @@ class FaceStore:
             for fid, img, score, vec in s.execute(
                 sa.select(Face.id, Face.image_id, Face.det_score, FaceEmbedding.vector)
                 .join(FaceEmbedding, FaceEmbedding.face_id == Face.id)
-                .where(FaceEmbedding.model == model, Face.image_id.in_(part))
+                .where(FaceEmbedding.model == model, Face.image_id.in_(part), self.usable())
                 .order_by(Face.id)
             ):
                 out[img].append((fid, plan_hints.unit(np.array(vec, dtype=np.float64)), float(score)))

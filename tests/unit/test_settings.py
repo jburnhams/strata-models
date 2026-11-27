@@ -155,3 +155,21 @@ def test_bound_settings_are_read_once_per_ttl_and_at_once_after_a_save_here(monk
     settings.save(dict(cpu_jobs=2))
     assert settings.load() == dict(gpu_jobs="3", cpu_jobs="2")  # a save here shows at once
     settings.bind(None)
+
+
+def test_face_bar_default_validate_and_fall_back(monkeypatch):
+    assert (settings.faces_min_score(), settings.faces_min_px()) == (0.7, 40.0)
+    assert settings.all_settings()["faces_min_px"] == 40.0
+    assert settings.save(dict(faces_min_score=0.5, faces_min_px=0))["faces_min_px"] == "0.0"
+    assert (settings.faces_min_score(), settings.faces_min_px()) == (0.5, 0.0)
+    for key, bad, msg in (
+        ("faces_min_score", 1.5, "between 0 and 1"),
+        ("faces_min_score", "x", "detector score"),
+        ("faces_min_px", -1, "between 0 and 1000"),
+        ("faces_min_px", "big", "pixels"),
+    ):
+        with pytest.raises(ValueError, match=msg):
+            settings.save({key: bad})
+    monkeypatch.setenv("STRATAMODELS_FACES_MIN_PX", "huge")
+    monkeypatch.setenv("STRATAMODELS_FACES_MIN_SCORE", "2")
+    assert (settings.faces_min_score(), settings.faces_min_px()) == (0.7, 40.0)

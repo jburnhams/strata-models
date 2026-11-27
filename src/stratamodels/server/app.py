@@ -125,6 +125,8 @@ class SettingsIn(BaseModel):
     cpu_jobs: int | None = None
     whole_card_gb: float | None = None
     idle_unload_min: float | None = None
+    faces_min_score: float | None = None
+    faces_min_px: float | None = None
     claude_budget_usd: float | None = None
     claude_rollover: str | None = None  # YYYY-MM-DD; "" clears it
     gemini_budget_usd: float | None = None
@@ -429,6 +431,8 @@ def create_app(scheduler: Scheduler, history: gpu.History | None = None):
             "cpu_jobs",
             "whole_card_gb",
             "idle_unload_min",
+            "faces_min_score",
+            "faces_min_px",
             "claude_budget_usd",
             "claude_rollover",
             "gemini_budget_usd",

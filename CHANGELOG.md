@@ -2,6 +2,14 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-27
+
+**Faces: one bar for tiny and doubtful faces, kept by the store; deleting pictures (branch `claude/faces-bar-delete`)**
+Jonathan: filtering tiny and low-confidence faces should be done here for every app, not left to callers; and the store needs a delete (to load a video eval's faces into the Faces screens and take them out again). Live store, read-only: of 100,436 faces, 13 % score under 0.7 and 10 % are under 40 px on their shorter side; every confirmed (3,236) and suggested (21,678) face is above both, since propose already left out faces under 0.7, but Unnamed groups and search had no bar.
+- Settings `faces_min_score` (0.7) and `faces_min_px` (40), on the Settings page and in `PUT /api/settings`; `FaceStore.usable()` applies them in search, cluster, review, propose and merge suggestions. Faces under the bar are still stored, so a lower bar brings them back at once.
+- `FaceStore.delete_images(ids, app, tag, dry_run=True)`, `DELETE /api/faces/images/{id}` and `POST /api/faces/images/delete`: a picture with its faces, embeddings, decisions, hints and its kept copy when no other picture shares it; counts first.
+- Tests: `test_faces_store.py`, `test_faces_api.py`, `test_settings.py`, `test_server.py`, `web/tests/integration/App.test.tsx`.
+
 ## 2026-11-26
 
 **Faces: suggested faces in rounds, most certain first, re-scored as a person confirms (branch `claude/faces-review`)**

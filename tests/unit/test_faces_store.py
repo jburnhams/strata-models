@@ -452,3 +452,60 @@ def test_review_offers_the_tightest_group_first_then_ranks_by_confirmed_faces(fs
     assert fs.review(nobody_here["id"], "buffalo_l")["items"] == []  # no embedding of this model
     with pytest.raises(NotFound):
         fs.review(999, "buffalo_l")
+
+
+def test_faces_under_the_bar_are_kept_but_never_searched_grouped_or_reviewed(clock):
+    bar = [0.7, 40.0]
+    fs = FaceStore(memory_store(clock).engine, clock=clock, bar=lambda: tuple(bar))
+    good = [face(1, x=i * 50, seed=i) for i in range(3)]
+    tiny = [dict(face(1, x=200 + i * 50, seed=10 + i), bbox=[200 + i * 50, 10, 220 + i * 50, 30]) for i in range(3)]
+    doubtful = [face(1, x=400 + i * 50, seed=20 + i, score=0.6) for i in range(3)]
+    ids = [f["id"] for f in index(fs, "a", "p1", good + tiny + doubtful)["faces"]]
+    assert len(ids) == 9  # every face is stored
+    assert [g["faces"] for g in fs.cluster("buffalo_l")] == [ids[:3]]
+    assert sorted(h["face"]["id"] for h in fs.search(person(1), "buffalo_l", k=20)) == ids[:3]
+    assert fs.cluster("buffalo_l", min_score=0.5)[0]["faces"] == ids[:3]  # a caller can raise the bar, never lower it
+    pid = fs.create_identity(name="One")["id"]
+    fs.assign(ids, pid, "a", status="suggested", source="hint", confidence=0.9)
+    r = fs.review(pid, "buffalo_l")
+    assert sorted(i["id"] for i in r["items"]) == ids[:3] and r["suggested"] == 3
+    bar[:] = [0.0, 0.0]  # the setting lowered: the same faces come back at once
+    assert sorted(h["face"]["id"] for h in fs.search(person(1), "buffalo_l", k=20)) == sorted(ids)
+    assert fs.review(pid, "buffalo_l")["suggested"] == 9
+
+
+def test_delete_images_counts_first_then_removes_everything_on_them(fs):
+    a = index(fs, "eval", "c1", [face(1), face(2, x=100)], tags=["face-tracks-eval"])
+    b = index(fs, "eval", "c2", [face(1, seed=3)], tags=["face-tracks-eval"])
+    keep = index(fs, "photos", "p1", [face(1, seed=4)])
+    pid = fs.create_identity(name="One")["id"]
+    fs.assign([a["faces"][0]["id"], keep["faces"][0]["id"]], pid, "photos")
+    fs.add_hints("eval", [dict(image_id=b["id"], app_ref="x", name="One")])
+    with pytest.raises(ValueError, match="say which pictures"):
+        fs.delete_images()
+    plan = fs.delete_images(tag="face-tracks-eval")
+    assert plan == dict(images=2, faces=3, decisions=1, confirmed=1, hints=1, deleted=False, media=[])
+    assert fs.image(a["id"])["faces"]  # a dry run changes nothing
+    assert fs.delete_images(tag="face-tracks-eval", app="photos")["images"] == 0  # every selector must match
+    done = fs.delete_images(tag="face-tracks-eval", dry_run=False)
+    assert done["deleted"] and done["images"] == 2
+    for img in (a, b):
+        with pytest.raises(NotFound):
+            fs.image(img["id"])
+    assert [f["id"] for f in fs.faces_of(pid)] == [keep["faces"][0]["id"]]  # the person keeps their other faces
+    assert fs.hints("eval") == [] and fs.image(keep["id"])["faces"]
+    assert fs.delete_images(ids=[keep["id"]], dry_run=False)["faces"] == 1
+
+
+def test_delete_images_names_only_the_kept_copies_no_other_picture_uses(fs):
+    ids = [index(fs, app, ref, [face(1)])["id"] for app, ref in (("a", "one"), ("a", "two"), ("b", "three"))]
+    with fs.session() as s:
+        from stratamodels.db.models import FaceImage
+
+        for img in s.query(FaceImage):
+            img.medium = "faces/medium/shared.webp" if img.ref != "two" else "faces/medium/own.webp"
+        s.commit()
+    assert fs.delete_images(app="a")["media"] == ["faces/medium/own.webp"]  # "three" still shows the shared copy
+    assert sorted(fs.delete_images(app="a", dry_run=True)["media"]) == ["faces/medium/own.webp"]
+    assert fs.delete_images(app="b")["media"] == []  # "one" still uses it
+    assert fs.delete_images(ids=ids)["media"] == ["faces/medium/own.webp", "faces/medium/shared.webp"]
