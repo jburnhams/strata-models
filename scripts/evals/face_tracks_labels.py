@@ -6,10 +6,11 @@ as possible.
 
        .venv/bin/python scripts/evals/face_tracks_labels.py propose OUT clip.mp4 other.mp4@60-150 ...
 
-2. store: each track's stills go into the face store (app and tag `face-tracks-eval`, and `face-tracks-eval:clip-NN`), one picture a still holding that track's face, with
-   the box and buffalo_l embedding face-tracks found. They are compared with every other face of that model, so the people already named
-   from photos are suggested for them, and the rest turn up in Unnamed groups. Faces too small or unsure to be worth a person's look
-   (`--min-px`, `--min-score`) and clips named in `--skip` stay out. Storing again changes nothing already decided.
+2. store: each track's stills go into the face store (app and tag `face-tracks-eval`, and `face-tracks-eval:SET/clip-NN`, SET being OUT's
+   folder name, which prefixes every picture's ref so two proposal sets never share one), one picture a still holding that track's face,
+   with the box and buffalo_l embedding face-tracks found. Each track's embedding is searched among the confirmed faces: when most of its
+   nearest belong to one person, that person is suggested for its stills (their page's review), and the rest turn up in Unnamed groups.
+   Faces too small or unsure to be worth a person's look (`--min-px`, `--min-score`) and clips named in `--skip` stay out. Storing again changes nothing already decided.
 
        .venv/bin/python scripts/evals/face_tracks_labels.py store OUT [--skip clip-03] [--min-px 24] [--min-score 0.5]
 
@@ -34,6 +35,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "src"))
@@ -43,6 +45,11 @@ from stratamodels.evals import metrics as M  # noqa: E402
 GENEROUS = dict(fps=10, tracker="byte", det_thresh=0.3, sim_min=0.25, min_track_s=0.3, stills=3, still_gap_s=0.5)
 APP = "face-tracks-labels"
 STORE = "face-tracks-eval"  # the face store's app and tag for the stills: kept apart from every app's own pictures, and found again by build
+SUGGEST_K, SUGGEST_DISTANCE, SUGGEST_SHARE = (
+    10,
+    0.5,
+    0.6,
+)  # a track's nearest confirmed faces, how near (the store's propose uses 0.5), how many must agree
 STORE_MODEL = "buffalo_l"  # the faces role's model, whose embeddings face-tracks' are (buffalo_l-tracks runs the same network): compared with every photo's
 
 
@@ -72,20 +79,60 @@ def _load(out_dir, key):
         return json.load(f)
 
 
-def _ref(key, track, still):
-    return f"{key}/t{int(track)}/{float(still['time']):.3f}"
+def label_set(out_dir):
+    """The proposal set's name in the face store (its folder's name): two sets both have a clip-01, and must not share its pictures."""
+    return os.path.basename(os.path.abspath(out_dir))
+
+
+def _ref(prefix, track, still):
+    return f"{prefix}/t{int(track)}/{float(still['time']):.3f}"
+
+
+def suggest(client, face_ids, embedding, k=SUGGEST_K, max_distance=SUGGEST_DISTANCE, share=SUGGEST_SHARE):
+    """Suggest a known person for a track's undecided stills: the people confirmed on the `k` faces nearest the track's embedding, within
+    `max_distance`; the commonest one is suggested when they hold `share` of those faces. The person confirms or rejects it on their page.
+    Returns the person suggested, or None."""
+    if not face_ids or not embedding:
+        return None
+    hits = client._call(
+        "POST",
+        "/api/faces/search",
+        dict(app=STORE, embedding=embedding, k=k, named=True, max_distance=max_distance, model=STORE_MODEL),
+    )["hits"]
+    votes = Counter(h["face"]["identity_id"] for h in hits)
+    if not votes:
+        return None
+    who, n = votes.most_common(1)[0]
+    if n < max(2, share * len(hits)):
+        return None
+    client._call(
+        "POST",
+        "/api/faces/assign",
+        dict(
+            face_ids=face_ids,
+            identity_id=who,
+            app=STORE,
+            status="suggested",
+            source="face-tracks",
+            confidence=round(n / len(hits), 3),
+        ),
+    )
+    return who
 
 
 def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
-    """Every worthwhile still of every clip's tracks into the face store, one picture each; returns how many."""
+    """Every worthwhile still of every clip's tracks into the face store, one picture each, and a known person suggested for each track's
+    stills where the faces nearest it agree (`suggest`); returns how many stills."""
     if client is None:
         import strata_models_client as client
-    n = 0
+    n, suggested = 0, 0
     for key in _keys(out_dir):
         if key in skip:
             continue
+        prefix = f"{label_set(out_dir)}/{key}"
         answer = _load(out_dir, key)["answer"]
         for tr in answer["tracks"]:
+            undecided = []
             for st in tr.get("stills") or []:
                 x0, y0, x1, y1 = st["bbox"]
                 if (
@@ -103,14 +150,14 @@ def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
                     embedding=st["embedding"],
                     found_by="face-tracks",
                 )
-                client._call(
+                img = client._call(
                     "POST",
                     "/api/faces/images",
                     dict(
                         app=STORE,
-                        ref=_ref(key, tr["id"], st),
+                        ref=_ref(prefix, tr["id"], st),
                         path=st["image"],
-                        tags=[STORE, f"{STORE}:{key}"],
+                        tags=[STORE, f"{STORE}:{prefix}"],
                         faces=[face],
                         model=STORE_MODEL,
                         width=answer["width"],
@@ -118,19 +165,25 @@ def store(out_dir, client=None, skip=(), min_px=24, min_score=0.5):
                     ),
                 )
                 n += 1
+                undecided += [f["id"] for f in (img or {}).get("faces") or [] if f.get("status") is None]
+            suggested += bool(suggest(client, undecided, tr.get("embedding")))
         print(f"{key}: stored")
-    print(f"{n} faces in the face store under {STORE}: name them on the Faces screens")
+    print(
+        f"{n} faces in the face store under {STORE}, a known person suggested for {suggested} tracks: name them on the Faces screens"
+    )
     return n
 
 
-def decisions(client=None):
-    """ref -> 'p<identity>' (confirmed), 'none' (rejected as not a face) for every stored still a person decided about."""
+def decisions(out_dir, client=None):
+    """ref -> 'p<identity>' (confirmed), 'none' (rejected as not a face) for every still of this proposal set a person decided about."""
     if client is None:
         import strata_models_client as client
     out, before = {}, None
     while True:
         page = client._call("GET", f"/api/faces/images?app={STORE}&limit=500" + (f"&before={before}" if before else ""))
         for img in page["items"]:
+            if not img["ref"].startswith(label_set(out_dir) + "/"):
+                continue
             for f in img["faces"][:1]:
                 if f.get("status") == "confirmed" and f.get("identity_id") is not None:
                     out[img["ref"]] = f"p{f['identity_id']}"
@@ -141,14 +194,14 @@ def decisions(client=None):
             return out
 
 
-def track_labels(key, answer, decided):
+def track_labels(prefix, answer, decided):
     """track id -> [(person, from_time)] from its stills' decisions, in time order; a change of person starts half way between the stills."""
     out = {}
     for tr in answer["tracks"]:
         seen = sorted(
             (float(st["time"]), decided[r])
             for st in tr.get("stills") or []
-            if (r := _ref(key, tr["id"], st)) in decided
+            if (r := _ref(prefix, tr["id"], st)) in decided
         )
         names = [n for _, n in seen if n != "none"]
         if not seen:
@@ -220,11 +273,11 @@ def item_for(key, saved, labels, every):
 
 
 def build(out_dir, name="face-tracks-home", every=0.5, client=None):
-    decided = decisions(client)
+    decided = decisions(out_dir, client)
     items, mixed = [], 0
     for key in _keys(out_dir):
         saved = _load(out_dir, key)
-        labels = track_labels(key, saved["answer"], decided)
+        labels = track_labels(f"{label_set(out_dir)}/{key}", saved["answer"], decided)
         mixed += sum(len(v) > 1 for v in labels.values())
         if labels:  # a clip whose decided faces are all `none` stays: its false faces count
             items.append(item_for(key, saved, labels, every))

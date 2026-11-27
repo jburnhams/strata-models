@@ -68,16 +68,22 @@ class FakeClient:
 
 
 class FakeStore:
-    """The face store's two calls the script makes: pictures posted, and pictures listed by app a page at a time (2 a page here)."""
+    """The face store's calls the script makes: pictures posted (one face each, its id the picture's index), pictures listed by app a page
+    at a time (2 a page here), a search answering `known` (identity ids of the nearest confirmed faces), and suggestions recorded."""
 
-    def __init__(self):
-        self.images, self.decided = [], {}
+    def __init__(self, known=()):
+        self.images, self.decided, self.known, self.assigned = [], {}, list(known), []
 
     def _call(self, method, path, body=None):
-        if method == "POST":
-            assert path == "/api/faces/images"
+        if path == "/api/faces/images":
             self.images.append(body)
-            return {}
+            return dict(faces=[dict(id=len(self.images) - 1, status=None)])
+        if path == "/api/faces/search":
+            assert body["named"] is True and body["model"] == "buffalo_l"
+            return dict(hits=[dict(face=dict(identity_id=i), distance=0.3) for i in self.known])
+        if path == "/api/faces/assign":
+            self.assigned.append(body)
+            return dict(batch=1)
         assert path.startswith("/api/faces/images?app=face-tracks-eval")
         before = int(path.split("before=")[1]) if "before=" in path else len(self.images)
         page = list(range(before - 1, max(before - 3, -1), -1))
@@ -130,21 +136,30 @@ def test_propose_store_then_build(tmp_path):
 
     store = FakeStore()
     assert B.store(str(tmp_path), client=store) == 6
-    first = store.images[0]
-    assert first["app"] == "face-tracks-eval" and first["ref"] == "clip-01/t1/0.500" and first["model"] == "buffalo_l"
-    assert first["tags"] == ["face-tracks-eval", "face-tracks-eval:clip-01"] and (first["width"], first["height"]) == (
+    first, set_ = store.images[0], tmp_path.name
+    assert (
+        first["app"] == "face-tracks-eval"
+        and first["ref"] == f"{set_}/clip-01/t1/0.500"
+        and first["model"] == "buffalo_l"
+    )
+    assert first["tags"] == ["face-tracks-eval", f"face-tracks-eval:{set_}/clip-01"] and (
+        first["width"],
+        first["height"],
+    ) == (
         640,
         360,
     )
     assert first["faces"][0]["embedding"] == ANA and first["faces"][0]["found_by"] == "face-tracks"
     yes = lambda p: dict(identity_id=p, status="confirmed")
     store.decided = {
-        "clip-01/t1/0.500": yes(7),
-        "clip-01/t1/1.500": dict(identity_id=8, status="suggested"),  # only suggested: not a decision
-        "clip-01/t2/0.500": yes(8),
-        "clip-01/t2/3.500": yes(7),  # the generous setting mixed ana into ben's track: switches at 2.0 s
-        "clip-01/t3/3.000": dict(identity_id=None, status="rejected"),  # not a face
+        f"{set_}/clip-01/t1/0.500": yes(7),
+        f"{set_}/clip-01/t1/1.500": dict(identity_id=8, status="suggested"),  # only suggested: not a decision
+        f"{set_}/clip-01/t2/0.500": yes(8),
+        f"{set_}/clip-01/t2/3.500": yes(7),  # the generous setting mixed ana into ben's track: switches at 2.0 s
+        f"{set_}/clip-01/t3/3.000": dict(identity_id=None, status="rejected"),  # not a face
+        "another-set/clip-01/t3/3.000": yes(9),  # another proposal set's clip-01: not this one's
     }
+    store.images.append(dict(ref="another-set/clip-01/t3/3.000"))
     ds = B.build(str(tmp_path), name="ft-test", every=0.5, client=store)
     it = ds.items[0]
     assert it["input"] == {"path": os.path.abspath("/v/a.mp4"), "cuts": [2.0]}
@@ -173,9 +188,25 @@ def test_a_track_nobody_decided_about_is_ignored_not_false(tmp_path):
     (tmp_path / "clip-01.json").write_text(json.dumps(saved))
     store = FakeStore()
     B.store(str(tmp_path), client=store)
-    store.decided = {"clip-01/t1/0.500": dict(identity_id=7, status="confirmed")}
+    store.decided = {f"{tmp_path.name}/clip-01/t1/0.500": dict(identity_id=7, status="confirmed")}
     ref = B.build(str(tmp_path), name="ft-test", client=store).items[0]["reference"]
     assert list(ref["people"]) == ["p7"] and ref["ignore"] and {o[1] for o in ref["ignore"]} == {300.0, 10.0}
+
+
+def test_a_track_most_like_one_known_person_has_them_suggested(tmp_path):
+    B.propose(str(tmp_path), ["/v/a.mp4"], client=FakeClient(tmp_path))
+    saved = json.loads((tmp_path / "clip-01.json").read_text())
+    saved["answer"]["tracks"] = saved["answer"]["tracks"][:1]
+    saved["answer"]["tracks"][0]["stills"] = [_still(0.5, 10.0, "s.jpg"), _still(1.5, 10.0, "s.jpg")]
+    (tmp_path / "clip-01.json").write_text(json.dumps(saved))
+    store = FakeStore(known=[7, 7, 7, 8])
+    B.store(str(tmp_path), client=store)
+    (a,) = store.assigned
+    assert a["face_ids"] == [0, 1] and a["identity_id"] == 7 and a["status"] == "suggested" and a["confidence"] == 0.75
+    for known in ([7, 8, 9, 10], [7], []):  # no clear majority, too few, nobody near: nothing suggested
+        store = FakeStore(known=known)
+        B.store(str(tmp_path), client=store)
+        assert store.assigned == []
 
 
 def test_store_leaves_out_skipped_clips(tmp_path):
