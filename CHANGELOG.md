@@ -9,6 +9,12 @@ Jonathan: filtering tiny and low-confidence faces should be done here for every 
 - Settings `faces_min_score` (0.7) and `faces_min_px` (40), on the Settings page and in `PUT /api/settings`; `FaceStore.usable()` applies them in search, cluster, review, propose and merge suggestions. Faces under the bar are still stored, so a lower bar brings them back at once.
 - `FaceStore.delete_images(ids, app, tag, dry_run=True)`, `DELETE /api/faces/images/{id}` and `POST /api/faces/images/delete`: a picture with its faces, embeddings, decisions, hints and its kept copy when no other picture shares it; counts first.
 - Tests: `test_faces_store.py`, `test_faces_api.py`, `test_settings.py`, `test_server.py`, `web/tests/integration/App.test.tsx`.
+**Text embeddings: role `text-embed`, runtime `llama-embed`, eval `mail-retrieval` (branch `mail-embed`)**
+One vector per text for retrieval over kept email and chat messages; the model is chosen by an eval, like every other role.
+- `runtimes/llamaembed.py`: llama-server with `--embedding` (same binary and files as the vision-language models), params `{texts}` (vectors, or an .npz via `out`) or `{query, docs}` (cosine scores in the documents' order); options `pooling`, `query_prefix`, `doc_prefix`, `dim` (Matryoshka truncation); vectors cached per loaded model, so the pools of a retrieval eval cost their new documents only.
+- Models: qwen3-embedding-0.6b (the first pick), qwen3-embedding-4b, bge-m3, embeddinggemma-300m, nomic-embed-v1_5.
+- Metrics `hit_at_1`, `hit_at_5`, `mrr` (rank of the item's `reference.answer` in the scored pool; ties count against it). Spec `evals/specs/mail-retrieval.toml` (candidates include no-instruction and 256-dimension variants of the first pick); the dataset is private and built outside this repo.
+- Not deployed: the service needs a restart (by the deploys thread) to see the new role; the runtime was smoke-tested on CPU against the real binary.
 
 ## 2026-11-26
 

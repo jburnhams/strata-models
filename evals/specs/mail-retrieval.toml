@@ -1,0 +1,47 @@
+name = "mail-retrieval"
+question = "Which text-embedding model, and which instruction/dimension setting, finds the right email chunk or chat window for a question asked in everyday words?"
+role = "text-embed"
+dataset = "mail-retrieval-600"
+metrics = ["mrr", "hit_at_1", "hit_at_5", "latency_s", "peak_vram_mb", "failed"]
+
+# Each item: a question and a pool of 100 chunks (email and chat windows mixed) with the answer's index; the model scores the pool and the metric
+# reads the rank of the right chunk. tags.source = "email" | "chat" breaks the report down. The dataset is private (builder: the owner's own
+# scripts; it names real mail), so it lives only in the data folder.
+[decision]
+primary = "mrr"
+baseline = "qwen3-embedding-0.6b"
+min_effect = 0.02           # two points of mean reciprocal rank
+guards = { failed = 1.0, latency_s = 8.0 }
+
+[[candidates]]
+name = "qwen3-embedding-0.6b"
+model = "qwen3-embedding-0.6b"
+note = "the role's first pick, with its instruction"
+
+[[candidates]]
+name = "qwen3-0.6b-no-instruction"
+model = "qwen3-embedding-0.6b"
+options = { query_prefix = "" }
+note = "the same model without the task instruction (how much does it matter?)"
+
+[[candidates]]
+name = "qwen3-0.6b-256d"
+model = "qwen3-embedding-0.6b"
+options = { dim = 256 }
+note = "Matryoshka truncation to 256 dimensions: a quarter of the storage"
+
+[[candidates]]
+name = "qwen3-embedding-4b"
+model = "qwen3-embedding-4b"
+
+[[candidates]]
+name = "bge-m3"
+model = "bge-m3"
+
+[[candidates]]
+name = "embeddinggemma-300m"
+model = "embeddinggemma-300m"
+
+[[candidates]]
+name = "nomic-embed-v1.5"
+model = "nomic-embed-v1_5"
