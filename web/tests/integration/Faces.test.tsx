@@ -162,6 +162,16 @@ describe('Faces: rounds of suggested faces', () => {
 })
 
 describe('Faces: every suggestion above a likeness, once a person has many confirmed faces', () => {
+  it('keeps the rounds up to 40 confirmed faces and shows the picker from 41', async () => {
+    faceMock.people[2].faces = 40
+    const { unmount } = setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByRole('button', { name: 'Confirm 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Show every suggestion at least this alike' })).not.toBeInTheDocument()
+    unmount()
+    faceMock.people[2].faces = 41
+    setup(<App />, { route: '/faces/people/3' })
+    expect(await screen.findByRole('textbox', { name: 'Show every suggestion at least this alike' })).toBeInTheDocument()
+  })
   it('shows every suggestion at the chosen likeness with counts at each, and confirms them all at once', async () => {
     faceMock.people[2].faces = 150
     const { user, unmount } = setup(<App />, { route: '/faces/people/3' })

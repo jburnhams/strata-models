@@ -4,6 +4,10 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Faces: the likeness picker from more than 40 confirmed faces (was 100) (branch `claude/faces-picker-40`)**
+The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
+- `web/src/components/PersonPage.tsx`: `BULK_ABOVE = 40` (picker when confirmed > 40); `web/tests/integration/Faces.test.tsx`: 40 keeps rounds, 41 shows the picker; docs/database.md.
+
 **Fix: the `mail-retrieval` spec named a metric that does not exist (`peak_vram_mb`; it is `peak_vram_gb`), so the service refused to load it**
 New `tests/unit/test_shipped_specs.py` parses every spec in `evals/specs/`, so a typo like this fails the gate instead of the page.
 **face-tracks labels: stills stored with boxes in their own frame's pixels (branch `claude/project-thread-csasv3`)**

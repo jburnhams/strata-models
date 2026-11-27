@@ -73,9 +73,9 @@ function Faces({ person, faces, open, setOpen }: Open & { person: Person; faces:
 }
 
 const ROUND = 48
-// From this many confirmed faces the person's own faces are a sure model, so every suggestion above a chosen likeness is shown at once
+// Above this many confirmed faces the person's own faces are a sure model, so every suggestion above a chosen likeness is shown at once
 // rather than in rounds. Over all suggestions, the name's main Immich cluster agreed 99.8 % at 65-70 % alike and 100 % from 70 % up.
-const BULK_FROM = 100
+const BULK_ABOVE = 40 // the owner's choice (2026-11-27): more than 40 confirmed
 const DEFAULT_MIN = 70
 const isPct = (raw: string) => /^\d{2}$/.test(raw) && Number(raw) >= 50 && Number(raw) <= 99
 const likeness = (d: number) => `${format.share(Math.max(0, 1 - d))} alike`
@@ -83,7 +83,7 @@ const likeness = (d: number) => `${format.share(Math.max(0, 1 - d))} alike`
 function Round({ person, open, setOpen }: Open & { person: Person }) {
   const qc = useQueryClient()
   const who = personName(person)
-  const bulk = person.faces >= BULK_FROM
+  const bulk = person.faces > BULK_ABOVE
   const [minRaw, setMin] = useSearchParam<string>('min', { default: String(DEFAULT_MIN), parse: isPct })
   const min = Number(minRaw)
   const load = useLoad({ queryKey: ['faces', 'review', person.id, bulk ? min : 0], queryFn: () => (bulk ? facesApi.review(person.id, 10000, min / 100) : facesApi.review(person.id, ROUND)), placeholderData: prev => prev }) // the faces on show stay (and stay chosen) while another likeness loads
