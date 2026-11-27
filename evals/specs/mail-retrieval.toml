@@ -9,14 +9,14 @@ metrics = ["mrr", "hit_at_1", "hit_at_5", "latency_s", "peak_vram_gb", "failed"]
 # scripts; it names real mail), so it lives only in the data folder.
 [decision]
 primary = "mrr"
-baseline = "qwen3-embedding-0.6b"
+baseline = "bge-m3"
 min_effect = 0.02           # two points of mean reciprocal rank
 guards = { failed = 1.0, latency_s = 8.0 }
 
 [[candidates]]
 name = "qwen3-embedding-0.6b"
 model = "qwen3-embedding-0.6b"
-note = "the role's first pick, with its instruction"
+note = "the role's first pick until 2026-11-27, with its instruction"
 
 [[candidates]]
 name = "qwen3-0.6b-no-instruction"

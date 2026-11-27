@@ -4,6 +4,9 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-27
 
+**Text embeddings: `text-embed` now serves bge-m3 (decision of eval `mail-retrieval`)**
+The eval (600 questions over email chunks and chat windows, 100-document pools) put bge-m3 and EmbeddingGemma 300M at the top (MRR 0.988; chat top-1 96 %), Qwen3-Embedding 0.6B at 0.980 (the former first pick) and the 4B at 0.983 for four times the time; the owner chose bge-m3 for its 8k-token window (0.6 GB, 0.05 s a question). Only the role's default changed; every candidate stays in the registry.
+
 **Faces: one source at a time (branch `claude/faces-source-filter`)**
 Jonathan: a way on Faces to see only the video ones to name. A **Source** picker (every tag of the store: an app's name or a tag it gave, with its picture count; held in the address as `?source=`) on People, Unnamed groups and a person's round of suggestions.
 - `GET /api/identities?tag=`: only people with faces in pictures carrying the tag, counting those faces; `GET /api/identities/{id}/review?tag=`: only that source's suggestions (the person's model is still all their confirmed faces); Unnamed groups pass it as `cluster`'s `tags`.
