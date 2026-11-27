@@ -13,7 +13,8 @@ params (one of):
                  query gets query_prefix, the documents doc_prefix. This is what a retrieval eval item is: a question and a pool to rank.
   query + corpus + pick   the same, with the documents named by index: `corpus` is a JSON file holding a list of strings, `pick` the indices of
                  this item's pool in it. A dataset of hundreds of pools over one shared corpus stays small, and the file is read once per model.
-Answer: {scores, dim, tokens_in, seconds, peak_vram_mb, model} or {vectors | out, n, dim, ...}."""
+Answer: {scores, dim, tokens_in, cut, seconds, peak_vram_mb, model} or {vectors | out, n, dim, cut, ...}; `cut` counts the texts that were longer than the
+model's context and were cut at the end to fit (a text is cut the same way every time)."""
 
 import dataclasses
 import json
@@ -62,27 +63,69 @@ def _normalise(v, dim):
     return a / n if n else a
 
 
+def _post_batch(handle, chunk, post):
+    r = (post or llama._post)(handle["url"] + "/v1/embeddings", {"input": chunk, "model": handle["key"]})
+    data = sorted(r["data"], key=lambda d: d["index"])
+    if len(data) != len(chunk):
+        raise RunError(f"llama-server returned {len(data)} embeddings for {len(chunk)} texts")
+    return data, int((r.get("usage") or {}).get("prompt_tokens") or 0)
+
+
+def _too_long(e):
+    m = str(e)
+    return "exceeds the available context" in m or "too large to process" in m
+
+
+def _embed_one(handle, text, post):
+    """(embedding, tokens, truncated?) of one text. One longer than the model's context is cut to 60 % at a time until it fits: a single long
+    document must not fail the whole pool it sits in (what is cut is the end, where a chunk's least distinctive words are)."""
+    cut = False
+    while True:
+        try:
+            data, tok = _post_batch(handle, [text], post)
+            return data[0]["embedding"], tok, cut
+        except RunError as e:
+            if not _too_long(e) or len(text) < 50:
+                raise
+            text, cut = (
+                text[: int(len(text) * 0.6)],
+                True,
+            )  # ends once the server accepts it, or at the 50-character guard above
+
+
 def embed(handle, texts, post=None):
-    """(vectors (n, dim) float32, prompt tokens) of `texts`, in order. A text embedded before (the pools of a retrieval eval share most of their
-    documents) is answered from the handle's cache, so a pool of 100 costs its new documents only; the cache is dropped with the model."""
+    """(vectors (n, dim) float32, prompt tokens, how many texts were cut to fit) of `texts`, in order. A text embedded before (the pools of a
+    retrieval eval share most of their documents) is answered from the handle's cache, so a pool of 100 costs its new documents only; the cache
+    is dropped with the model."""
     cache = handle.setdefault("cache", {})
     texts = [t[:MAX_BODY_CHARS] or " " for t in texts]
     todo = list(dict.fromkeys(t for t in texts if t not in cache))
     tokens = 0
     for i in range(0, len(todo), BATCH):
         chunk = todo[i : i + BATCH]
-        r = (post or llama._post)(handle["url"] + "/v1/embeddings", {"input": chunk, "model": handle["key"]})
-        data = sorted(r["data"], key=lambda d: d["index"])
-        if len(data) != len(chunk):
-            raise RunError(f"llama-server returned {len(data)} embeddings for {len(chunk)} texts")
-        for t, d in zip(chunk, data, strict=True):
-            cache[t] = _normalise(d["embedding"], handle.get("dim"))
-        tokens += int((r.get("usage") or {}).get("prompt_tokens") or 0)
-    out = [cache[t] for t in texts]
+        try:
+            data, tok = _post_batch(handle, chunk, post)
+            got = [(d["embedding"], False) for d in data]
+        except RunError as e:
+            if not _too_long(e):
+                raise
+            got, tok = [], 0  # one text in the batch is too long: embed them one at a time, cutting the long one
+            for t in chunk:
+                emb, k, cut = _embed_one(handle, t, post)
+                got.append((emb, cut))
+                tok += k
+        for t, (emb, cut) in zip(chunk, got, strict=True):
+            cache[t] = (
+                _normalise(emb, handle.get("dim")),
+                cut,
+            )  # the vector and whether it is of a cut text, so a cached one still counts
+        tokens += tok
+    out = [cache[t][0] for t in texts]
+    cuts = sum(cache[t][1] for t in texts)
     if len(cache) > CACHE_MAX:  # keep the newest half
         for k in list(cache)[: len(cache) // 2]:
             del cache[k]
-    return (np.stack(out) if out else np.zeros((0, 0), dtype=np.float32)), tokens
+    return (np.stack(out) if out else np.zeros((0, 0), dtype=np.float32)), tokens, cuts
 
 
 def corpus_docs(handle, path, pick):
@@ -141,18 +184,18 @@ def run(handle, params, probe=gpu.query, post=None):
                 or not all(isinstance(d, str) for d in docs)
             ):
                 raise RunError("query is a string and docs a non-empty list of strings")
-            vq, tq = embed(handle, [handle["query_prefix"] + q], post)
-            vd, td = embed(handle, [handle["doc_prefix"] + d for d in docs], post)
+            vq, tq, cq = embed(handle, [handle["query_prefix"] + q], post)
+            vd, td, cd = embed(handle, [handle["doc_prefix"] + d for d in docs], post)
             scores = [round(float(x), 6) for x in vd @ vq[0]]
             if any(math.isnan(x) for x in scores):
                 raise RunError("the model returned NaN similarities (a too-long input overflowing its context?)")
-            res: dict = dict(scores=scores, tokens_in=tq + td, dim=int(vq.shape[1]))
+            res: dict = dict(scores=scores, tokens_in=tq + td, dim=int(vq.shape[1]), cut=cq + cd)
         else:
             texts = params["texts"]
             if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
                 raise RunError("texts is a list of strings")
-            v, tok = embed(handle, [handle["doc_prefix"] + t for t in texts], post)
-            res = dict(n=len(texts), dim=int(v.shape[1]) if len(texts) else 0, tokens_in=tok)
+            v, tok, cut = embed(handle, [handle["doc_prefix"] + t for t in texts], post)
+            res = dict(n=len(texts), dim=int(v.shape[1]) if len(texts) else 0, tokens_in=tok, cut=cut)
             if params.get("out"):
                 np.savez_compressed(params["out"], vectors=v)
                 res["out"] = params["out"]

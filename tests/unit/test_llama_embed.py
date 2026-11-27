@@ -144,3 +144,37 @@ def test_a_pool_can_name_its_documents_in_a_shared_corpus_file(setup, tmp_path):
     with pytest.raises(RunError, match="list of strings"):
         llamaembed.run(h, dict(query="a", corpus=str(corpus), pick=[0]), probe=lambda: {}, post=fake_post)
     llamaembed.unload(h)
+
+
+def test_a_text_longer_than_the_context_is_cut_not_fatal(setup):  # noqa: F811
+    tmp, _ = setup
+    h, _ = loaded(tmp)
+    calls = []
+
+    def post(url, body, timeout=0):
+        calls.append(body["input"])
+        if any(len(t) > 60 for t in body["input"]):
+            raise RunError(
+                'llama-server refused the request (400): {"error":{"message":"request (2084 tokens) exceeds the available context size (2048 tokens)"}}'
+            )
+        return fake_post(url, body)
+
+    r = llamaembed.run(h, dict(query="a", docs=["b", "c" + "a" * 150, "d"]), probe=lambda: {}, post=post)
+    assert len(r["scores"]) == 3 and r["cut"] == 1 and all(len(t) <= 60 for c in calls[-2:] for t in c)
+    again = llamaembed.run(h, dict(query="d", docs=["b", "c" + "a" * 150]), probe=lambda: {}, post=post)
+    assert again["cut"] == 1  # the cut text came from the cache and still counts
+    huge = llamaembed.run(h, dict(query="a", docs=["c" + "a" * 90_000]), probe=lambda: {}, post=post)
+    assert huge["cut"] == 1  # shrinks as far as it takes, not a fixed number of tries
+    llamaembed.unload(h)
+
+
+def test_other_server_errors_still_fail_the_job(setup):  # noqa: F811
+    tmp, _ = setup
+    h, _ = loaded(tmp)
+
+    def post(url, body, timeout=0):
+        raise RunError("llama-server refused the request (500): out of memory")
+
+    with pytest.raises(RunError, match="out of memory"):
+        llamaembed.run(h, dict(texts=["a"]), probe=lambda: {}, post=post)
+    llamaembed.unload(h)

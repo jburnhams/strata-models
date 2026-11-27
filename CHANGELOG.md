@@ -8,7 +8,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 Jonathan: a way on Faces to see only the video ones to name. A **Source** picker (every tag of the store: an app's name or a tag it gave, with its picture count; held in the address as `?source=`) on People, Unnamed groups and a person's round of suggestions.
 - `GET /api/identities?tag=`: only people with faces in pictures carrying the tag, counting those faces; `GET /api/identities/{id}/review?tag=`: only that source's suggestions (the person's model is still all their confirmed faces); Unnamed groups pass it as `cluster`'s `tags`.
 - A person opened from a filtered list keeps the source, and "Every person" goes back to it.
+- Switching source remounts the round (keyed by person and source), so the last source's faces are never left chosen and confirmable while the new ones load (Codex on the duplicate #155); a test holds the answer and checks there is no Confirm meanwhile.
 - Tests: `test_faces_store.py`, `test_faces_api.py`, `web/tests/integration/Faces.test.tsx`.
+
+**Text embeddings: a document longer than the model's context is cut, not fatal (`llama-embed`)**
+In the first `mail-retrieval` run, 57 of 600 pools (9.5 %) failed for every Qwen3 and EmbeddingGemma candidate because one document in the pool was over the 2048-token context, and a failed pool counts as wrong. The runtime now embeds such a text alone and cuts it to 60 % at a time until it fits; the answer's `cut` says how many were cut. Other server errors still fail the job.
 
 **Faces: the likeness picker from more than 40 confirmed faces (was 100) (branch `claude/faces-picker-40`)**
 The owner's choice: two rounds of 48 should be enough before every suggestion above a likeness can be confirmed at once.
