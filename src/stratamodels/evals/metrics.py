@@ -1197,6 +1197,32 @@ def _exact(item, output, error):
     return " ".join(normalise(str(got))) == " ".join(normalise(str(want)))
 
 
+def _rank_of_answer(item, output, error):
+    """1-based rank of the item's right document among the scored pool (ties count against the answer: the worst rank of equals), or None
+    when the item has no `reference.answer` (an index into the pool)."""
+    want = (item.get("reference") or {}).get("answer")
+    if want is None:
+        return None
+    scores = output.get("scores") if isinstance(output, dict) else None
+    if error or not scores or not 0 <= int(want) < len(scores):
+        return math.inf
+    s = scores[int(want)]
+    return 1 + sum(1 for i, x in enumerate(scores) if i != int(want) and x >= s)
+
+
+def _hit_at(k):
+    def score(item, output, error):
+        r = _rank_of_answer(item, output, error)
+        return None if r is None else r <= k
+
+    return score
+
+
+def _mrr(item, output, error):
+    r = _rank_of_answer(item, output, error)
+    return None if r is None else (0.0 if r == math.inf else 1.0 / r)
+
+
 def _parsed(item, output, error):
     if error:
         return False
@@ -1242,6 +1268,30 @@ METRICS = {
             _wer,
         ),
         Metric("cer", "ratio", "lower", "Character error rate, the same on characters", "%", _cer),
+        Metric(
+            "hit_at_1",
+            "binary",
+            "higher",
+            "The right document ranks first among the item's pool (retrieval)",
+            "%",
+            _hit_at(1),
+        ),
+        Metric(
+            "hit_at_5",
+            "binary",
+            "higher",
+            "The right document is among the first 5 of the item's pool (retrieval)",
+            "%",
+            _hit_at(5),
+        ),
+        Metric(
+            "mrr",
+            "mean",
+            "higher",
+            "Mean reciprocal rank of the right document in the item's pool (retrieval)",
+            "",
+            _mrr,
+        ),
         Metric(
             "cer_exact",
             "ratio",
