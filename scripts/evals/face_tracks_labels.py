@@ -1,40 +1,44 @@
-"""Label real clips for the face-tracks eval (`evals/specs/face-tracks-home.toml`), with as little work for the person as possible.
+"""Label real clips for the face-tracks eval (`evals/specs/face-tracks-home.toml`) on the Faces screens, with as little work for the person
+as possible.
 
 1. propose: each clip is cut into shots (role shot-boundaries) and tracked by a generous setting of face-tracks (10 fps, `byte`, low thresholds:
-   it splits more than it mixes, which is the cheap way round to correct). Its answer is saved (clip-NN.json), then `regroup` runs:
+   it splits more than it mixes, which is the cheap way round to correct). Its answer is saved (clip-NN.json):
 
        .venv/bin/python scripts/evals/face_tracks_labels.py propose OUT clip.mp4 other.mp4@60-150 ...
 
-2. regroup: a family film of two minutes gives hundreds of tracks (the first real clips, 2026-11-26: 12 to 354), too many to name one by one.
-   So the tracks of each clip are grouped by their embeddings (average linkage, cosine GROUP_SIM; two tracks seen together never share a
-   group), and the person names groups. The contact sheet (clip-NN.png) has a row a group, longest first: one face from each of its
-   tracks, captioned with the track's id. labels.toml gets a line a group, listing its tracks. Run it alone to regroup without tracking again:
+2. store: each track's stills go into the face store (app and tag `face-tracks-eval`, and `face-tracks-eval:SET/clip-NN`, SET being OUT's
+   folder name, which prefixes every picture's ref so two proposal sets never share one), one picture a still holding that track's face,
+   with the box and buffalo_l embedding face-tracks found. Each track's embedding is searched among the confirmed faces: when most of its
+   nearest belong to one person, that person is suggested for its stills (their page's review), and the rest turn up in Unnamed groups.
+   Clips named in `--skip` stay out; faces too small or unsure to be worth a look are the store's to leave out of groups, search and
+   suggestions (its faces_min_px and faces_min_score settings, docs/database.md#faces), so they are stored like any other. Storing again changes nothing already decided.
 
-       .venv/bin/python scripts/evals/face_tracks_labels.py regroup OUT [--sim 0.4]
+       .venv/bin/python scripts/evals/face_tracks_labels.py store OUT [--skip clip-03]
 
-3. The person writes a name against each group worth naming (the same name in two groups is one person; `none` is not a face), and fixes a
-   track that is in the wrong group under [clip-NN.tracks] (`17 = "ben"`, or `17 = "ana, ben@14.2"` for one that switches person at 14.2 s).
-   A group or track left empty is not labelled, and it is not held against anyone: an answered face where it was is ignored, as are faces in
-   tracks too short to show (MOT's "don't care" regions). So naming only the main people is enough.
+   `unstore OUT` takes them out again (POST /api/faces/images/delete by their clip's tag), with every decision about them.
 
-4. build: the named tracks become the dataset: every clip an item, labelled at `--every` seconds (0.5) by interpolating each named track's
-   boxes, the moments listed so that an answered face no label matches (and no blank track covers) counts as false.
+3. The person names them on the Faces screens like any face: confirmed for a person is that person; rejected with nobody is not a face.
+   Anything else (undecided, only suggested, "not this person") is not labelled, and it is not held against anyone: an answered face where
+   it was is ignored (MOT's "don't care" regions). So naming only the main people is enough.
+
+4. build: each track takes the people its stills were confirmed as, in time order (a track whose stills are two people switches half way
+   between them, so a tracker that mixed two people is caught); a track with only not-a-face stills is `none`, one with no decided still
+   is ignored. Every clip an item, labelled at `--every` seconds (0.5) by interpolating each named track's boxes, the moments listed so
+   that an answered face no label matches (and no ignored track covers) counts as false.
 
        .venv/bin/python scripts/evals/face_tracks_labels.py build OUT [--name face-tracks-home] [--every 0.5]
 
-Items: input {path, clip, cuts}; reference {people: {name: [[time, x0, y0, x1, y1], ...]}, ignore: [[time, x0, y0, x1, y1], ...], times};
-tags {source}. Faces the generous setting missed are not labelled (a candidate that finds one is charged a false face): add them to the clip's
-`extra` in labels.toml as `extra = [["ana", time, x0, y0, x1, y1], ...]`. Clips and labels are private: they stay in the data directory, never
-in the repo."""
+Items: input {path, clip, cuts}; reference {people: {person: [[time, x0, y0, x1, y1], ...]}, ignore: [[time, x0, y0, x1, y1], ...], times};
+tags {source}. People are `p<identity id>` (a merge reads through to the person kept). Faces the generous setting missed are not labelled (a
+candidate that finds one is charged a false face). Clips and labels are private: they stay in the data directory and the face store, never in
+the repo."""
 
 import argparse
 import json
 import os
 import re
 import sys
-import tomllib
-
-import numpy as np
+from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "src"))
@@ -43,8 +47,13 @@ from stratamodels.evals import metrics as M  # noqa: E402
 
 GENEROUS = dict(fps=10, tracker="byte", det_thresh=0.3, sim_min=0.25, min_track_s=0.3, stills=3, still_gap_s=0.5)
 APP = "face-tracks-labels"
-GROUP_SIM = 0.4  # ArcFace cosine above which two tracks are probably one person (same-person pairs are mostly over 0.4, others under 0.3)
-PER_ROW = 10  # tracks shown in a group's row of the contact sheet
+STORE = "face-tracks-eval"  # the face store's app and tag for the stills: kept apart from every app's own pictures, and found again by build
+SUGGEST_K, SUGGEST_DISTANCE, SUGGEST_SHARE = (
+    10,
+    0.5,
+    0.6,
+)  # a track's nearest confirmed faces, how near (the store's propose uses 0.5), how many must agree
+STORE_MODEL = "buffalo_l"  # the faces role's model, whose embeddings face-tracks' are (buffalo_l-tracks runs the same network): compared with every photo's
 
 
 def parse_clip(arg):
@@ -55,22 +64,8 @@ def parse_clip(arg):
     return os.path.abspath(arg), None
 
 
-def parse_label(text):
-    """A track's label -> [(name, from_time)]: `ana` is [("ana", 0)], `ana, ben@14.2` is ana then ben from 14.2 s; '' is []."""
-    out = []
-    for part in [p.strip() for p in (text or "").split(",") if p.strip()]:
-        name, _, at = part.partition("@")
-        try:
-            out.append((name.strip(), float(at) if at else 0.0))
-        except ValueError as e:
-            raise SystemExit(f"bad label {text!r}: {part!r} is not name or name@seconds") from e
-    if out and out[0][1] != 0.0:
-        raise SystemExit(f"bad label {text!r}: the first name takes no time")
-    return out
-
-
 def name_at(label, t):
-    """Who a labelled track is at time t (None when unlabelled or `none`)."""
+    """Who a track is at time t, from its label [(name, from_time)] (None when unlabelled or `none`)."""
     name = None
     for n, since in label:
         if t >= since - 1e-9:
@@ -78,135 +73,160 @@ def name_at(label, t):
     return None if name in (None, "none", "") else name
 
 
-def group_tracks(answer, sim=GROUP_SIM):
-    """The clip's tracks in groups that are probably one person each: average-linkage clustering of the track embeddings, merging the most
-    alike first while the mean similarity between two groups is at least `sim`; tracks seen together (`together`) never share a group. Groups
-    as lists of track ids, the longest (total seconds) first; a track without an embedding is a group of its own."""
-    tracks = [t for t in answer["tracks"] if t.get("embedding")]
-    groups = [[t["id"]] for t in answer["tracks"] if not t.get("embedding")]
-    if tracks:
-        ids = [t["id"] for t in tracks]
-        e = np.array([t["embedding"] for t in tracks], dtype=np.float32)
-        e /= np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-9)
-        s = e @ e.T
-        n = len(ids)
-        where = {tid: i for i, tid in enumerate(ids)}
-        total = s.astype(np.float64)  # sum of similarities between two groups' tracks
-        size = np.ones(n)
-        apart = np.zeros((n, n), dtype=bool)
-        for x, y in answer.get("together") or []:
-            if x in where and y in where:
-                apart[where[x], where[y]] = apart[where[y], where[x]] = True
-        alive = np.ones(n, dtype=bool)
-        members = {i: [i] for i in range(n)}
-        while True:
-            mean = total / np.outer(size, size)
-            mean[apart | ~alive[:, None] | ~alive[None, :]] = -np.inf
-            np.fill_diagonal(mean, -np.inf)
-            a, b = np.unravel_index(int(np.argmax(mean)), mean.shape)
-            if mean[a, b] < sim:
-                break
-            a, b = int(min(a, b)), int(max(a, b))  # b joins a: sums, sizes and what may not share a group add up
-            total[a, :] += total[b, :]
-            total[:, a] += total[:, b]
-            size[a] += size[b]
-            apart[a, :] |= apart[b, :]
-            apart[:, a] |= apart[:, b]
-            alive[b] = False
-            members[a] += members.pop(b)
-        groups += [[ids[i] for i in m] for m in members.values()]
-    length = {t["id"]: t["end"] - t["start"] for t in answer["tracks"]}
-    groups = [sorted(g, key=lambda i: -length[i]) for g in groups]
-    return sorted(groups, key=lambda g: (-sum(length[i] for i in g), g[0]))
-
-
-def _crop(answer, still, thumb):
-    from PIL import Image
-
-    with Image.open(still["image"]) as im:
-        sx, sy = im.width / answer["width"], im.height / answer["height"]
-        x0, y0, x1, y1 = still["bbox"]
-        pad = 0.25 * max(x1 - x0, y1 - y0)
-        crop = im.crop((int((x0 - pad) * sx), int((y0 - pad) * sy), int((x1 + pad) * sx), int((y1 + pad) * sy)))
-        crop.thumbnail((thumb, thumb))
-        return crop.copy()
-
-
-def contact_sheet(answer, groups, path, thumb=80):
-    """One row a group: its name and size, then the best face of each of its first PER_ROW tracks with the track's id under it. A PNG."""
-    from PIL import Image, ImageDraw
-
-    by_id = {t["id"]: t for t in answer["tracks"]}
-    row_h = thumb + 22
-    sheet = Image.new("RGB", (110 + PER_ROW * (thumb + 6), max(1, len(groups)) * row_h + 8), "white")
-    draw = ImageDraw.Draw(sheet)
-    for r, g in enumerate(groups):
-        y = 8 + r * row_h
-        secs = sum(by_id[i]["end"] - by_id[i]["start"] for i in g)
-        draw.text((8, y + 4), f"g{r + 1}", fill="black")
-        draw.text((8, y + 22), f"{len(g)} tracks", fill="gray")
-        draw.text((8, y + 40), f"{secs:.0f} s", fill="gray")
-        for k, tid in enumerate(g[:PER_ROW]):
-            stills = [st for st in by_id[tid]["stills"] if st.get("image") and os.path.isfile(st["image"])]
-            x = 110 + k * (thumb + 6)
-            if stills:
-                sheet.paste(_crop(answer, max(stills, key=lambda st: st.get("quality") or 0), thumb), (x, y))
-            draw.text((x, y + thumb + 4), f"{tid}", fill="black")
-    sheet.save(path)
-
-
 def _keys(out_dir):
     return sorted(f[:-5] for f in os.listdir(out_dir) if re.fullmatch(r"clip-\d+\.json", f))
 
 
-def has_names(path):
-    """Whether a labels file holds any name (a group or track labelled, `none` included): a person's work, never to be overwritten."""
-    if not os.path.exists(path):
-        return False
-    with open(path, "rb") as f:
-        labels = tomllib.load(f)
-    return any(
-        str(v).strip()
-        for clip in labels.values()
-        if isinstance(clip, dict)
-        for part in ("groups", "tracks")
-        for v in (clip.get(part) or {}).values()
+def _load(out_dir, key):
+    with open(os.path.join(out_dir, f"{key}.json"), encoding="utf8") as f:
+        return json.load(f)
+
+
+def label_set(out_dir):
+    """The proposal set's name in the face store (its folder's name): two sets both have a clip-01, and must not share its pictures."""
+    return os.path.basename(os.path.abspath(out_dir))
+
+
+def _ref(prefix, track, still):
+    return f"{prefix}/t{int(track)}/{float(still['time']):.3f}"
+
+
+def suggest(client, face_ids, embedding, k=SUGGEST_K, max_distance=SUGGEST_DISTANCE, share=SUGGEST_SHARE):
+    """Suggest a known person for a track's undecided stills: the people confirmed on the `k` faces nearest the track's embedding, within
+    `max_distance`; the commonest one is suggested when they hold `share` of those faces. The person confirms or rejects it on their page.
+    Returns the person suggested, or None."""
+    if not face_ids or not embedding:
+        return None
+    hits = client._call(
+        "POST",
+        "/api/faces/search",
+        dict(app=STORE, embedding=embedding, k=k, named=True, max_distance=max_distance, model=STORE_MODEL),
+    )["hits"]
+    votes = Counter(h["face"]["identity_id"] for h in hits)
+    if not votes:
+        return None
+    who, n = votes.most_common(1)[0]
+    if n < max(2, share * len(hits)):
+        return None
+    client._call(
+        "POST",
+        "/api/faces/assign",
+        dict(
+            face_ids=face_ids,
+            identity_id=who,
+            app=STORE,
+            status="suggested",
+            source="face-tracks",
+            confidence=round(n / len(hits), 3),
+        ),
     )
+    return who
 
 
-def regroup(out_dir, sim=GROUP_SIM):
-    """Groups, contact sheets and labels.toml from the saved answers. When labels.toml already holds a name, the new grouping goes to
-    labels.new.toml and clip-NN.new.png instead, so the named file keeps the sheets its group numbers refer to."""
-    keep = has_names(os.path.join(out_dir, "labels.toml"))
-    suffix = ".new" if keep else ""
-    lines = [
-        "# Name each group worth naming: the same name = the same person; none = not a face. Leave the rest empty: they are not held against",
-        '# anyone. Fix a track in the wrong group under [clip-NN.tracks]: 17 = "ben", or 17 = "ana, ben@14.2" (ben from 14.2 s).',
-        "",
-    ]
+def store(out_dir, client=None, skip=()):
+    """Every worthwhile still of every clip's tracks into the face store, one picture each, and a known person suggested for each track's
+    stills where the faces nearest it agree (`suggest`); returns how many stills."""
+    if client is None:
+        import strata_models_client as client
+    n, suggested = 0, 0
     for key in _keys(out_dir):
-        with open(os.path.join(out_dir, f"{key}.json"), encoding="utf8") as f:
-            saved = json.load(f)
-        answer, clip = saved["answer"], saved.get("clip")
-        groups = group_tracks(answer, sim)
-        contact_sheet(answer, groups, os.path.join(out_dir, f"{key}{suffix}.png"))
-        by_id = {t["id"]: t for t in answer["tracks"]}
-        span = f" {clip[0]:g}-{clip[1]:g} s" if clip else ""
-        lines += [
-            f"[{key}]",
-            f"# {os.path.basename(saved['path'])}{span}: {len(answer['tracks'])} tracks in {len(groups)} groups, sheet {key}{suffix}.png",
-            f"sim = {sim:g}   # the grouping's similarity: build groups the tracks again with it, so leave it as it is",
-            f"[{key}.groups]",
-        ]
-        for n, g in enumerate(groups, 1):
-            secs = sum(by_id[i]["end"] - by_id[i]["start"] for i in g)
-            lines.append(f'g{n} = ""   # {len(g)} tracks, {secs:.0f} s: {", ".join(str(i) for i in g)}')
-        lines += [f"[{key}.tracks]", ""]
-        print(f"{key}: {len(answer['tracks'])} tracks in {len(groups)} groups")
-    labels = os.path.join(out_dir, f"labels{suffix}.toml")  # never overwrite a person's work
-    with open(labels, "w", encoding="utf8") as f:
-        f.write("\n".join(lines))
-    print(f"fill in {labels}")
+        if key in skip:
+            continue
+        prefix = f"{label_set(out_dir)}/{key}"
+        answer = _load(out_dir, key)["answer"]
+        for tr in answer["tracks"]:
+            undecided = []
+            for st in tr.get("stills") or []:
+                if not st.get("image") or not st.get("embedding"):
+                    continue
+                face = dict(
+                    bbox=st["bbox"],
+                    det_score=st.get("det_score"),
+                    kps=st.get("kps"),
+                    pose=st.get("pose"),
+                    embedding=st["embedding"],
+                    found_by="face-tracks",
+                )
+                img = client._call(
+                    "POST",
+                    "/api/faces/images",
+                    dict(
+                        app=STORE,
+                        ref=_ref(prefix, tr["id"], st),
+                        path=st["image"],
+                        tags=[STORE, f"{STORE}:{prefix}"],
+                        faces=[face],
+                        model=STORE_MODEL,
+                        width=answer["width"],
+                        height=answer["height"],
+                    ),
+                )
+                n += 1
+                undecided += [f["id"] for f in (img or {}).get("faces") or [] if f.get("status") is None]
+            suggested += bool(suggest(client, undecided, tr.get("embedding")))
+        print(f"{key}: stored")
+    print(
+        f"{n} faces in the face store under {STORE}, a known person suggested for {suggested} tracks: name them on the Faces screens"
+    )
+    return n
+
+
+def unstore(out_dir, client=None):
+    """Take this proposal set's stills out of the face store again (their faces and every decision about them; people stay)."""
+    if client is None:
+        import strata_models_client as client
+    n = 0
+    for key in _keys(out_dir):
+        tag = f"{STORE}:{label_set(out_dir)}/{key}"
+        n += client._call("POST", "/api/faces/images/delete", dict(app=STORE, tag=tag, dry_run=False))["deleted"]
+    print(f"{n} stills taken out of the face store")
+    return n
+
+
+def decisions(out_dir, client=None):
+    """ref -> 'p<identity>' (confirmed), 'none' (rejected as not a face) for every still of this proposal set a person decided about."""
+    if client is None:
+        import strata_models_client as client
+    out, before = {}, None
+    while True:
+        page = client._call("GET", f"/api/faces/images?app={STORE}&limit=500" + (f"&before={before}" if before else ""))
+        for img in page["items"]:
+            if not img["ref"].startswith(label_set(out_dir) + "/"):
+                continue
+            for f in img["faces"][:1]:
+                if f.get("status") == "confirmed" and f.get("identity_id") is not None:
+                    out[img["ref"]] = f"p{f['identity_id']}"
+                elif f.get("status") == "rejected" and f.get("identity_id") is None:
+                    out[img["ref"]] = "none"
+        before = page.get("next")
+        if not before:
+            return out
+
+
+def track_labels(prefix, answer, decided):
+    """track id -> [(person, from_time)] from its stills' decisions, in time order; a change of person starts half way between the stills."""
+    out = {}
+    for tr in answer["tracks"]:
+        seen = sorted(
+            (float(st["time"]), decided[r])
+            for st in tr.get("stills") or []
+            if (r := _ref(prefix, tr["id"], st)) in decided
+        )
+        names = [n for _, n in seen if n != "none"]
+        if not seen:
+            continue
+        if not names:
+            out[int(tr["id"])] = [("none", 0.0)]
+            continue
+        label, prev = [], None
+        for t, who in [(t, n) for t, n in seen if n != "none"]:
+            if not label:
+                label.append((who, 0.0))
+            elif who != label[-1][0]:
+                label.append((who, round((prev + t) / 2, 3)))
+            prev = t
+        out[int(tr["id"])] = label
+    return out
 
 
 def propose(out_dir, clips, client=None):
@@ -226,20 +246,13 @@ def propose(out_dir, clips, client=None):
         with open(os.path.join(out_dir, f"{key}.json"), "w", encoding="utf8") as f:
             json.dump(dict(path=path, clip=clip, cuts=cuts, answer=answer), f)
         print(f"{key}: {len(answer['tracks'])} tracks, {len(cuts)} cuts")
-    regroup(out_dir)
+    print(f"next: store {out_dir}")
 
 
 def item_for(key, saved, labels, every):
-    """One dataset item from a proposal (saved: its JSON) and its labels ({groups: {gN: label}, tracks: {id: label}, extra: [...]}). Groups
-    are numbered as regroup numbered them (the grouping is recomputed with the same similarity, `sim` in the labels, default GROUP_SIM)."""
+    """One dataset item from a proposal (saved: its JSON) and its tracks' labels (track id -> [(person, from_time)]; a track not in it is
+    ignored)."""
     answer = saved["answer"]
-    named = {}
-    group_labels = labels.get("groups") or {}
-    if group_labels:
-        for n, g in enumerate(group_tracks(answer, float(labels.get("sim", GROUP_SIM))), 1):
-            for tid in g:
-                named[int(tid)] = parse_label(group_labels.get(f"g{n}", ""))
-    named.update({int(tid): parse_label(text) for tid, text in (labels.get("tracks") or {}).items()})
     start = saved["clip"][0] if saved.get("clip") else 0.0
     end = start + float(answer["duration"])
     times = [
@@ -248,7 +261,7 @@ def item_for(key, saved, labels, every):
     people, ignore = {}, []
     fps = float(answer["fps"])
     for tr in answer["tracks"]:
-        label = named.get(int(tr["id"])) or []
+        label = labels.get(int(tr["id"])) or []
         for t in times:
             box = M.track_box_at(tr["boxes"], t, fps)
             if box is None:
@@ -258,34 +271,30 @@ def item_for(key, saved, labels, every):
                 ignore.append([t, *box])  # nobody named it: what is answered there is not held against anyone
             elif who := name_at(label, t):
                 people.setdefault(who, []).append([t, *box])
-    for name, t, *box in labels.get("extra") or []:
-        t = min(times, key=lambda x: abs(x - float(t)))  # an added face counts at the nearest labelled moment
-        people.setdefault(name, []).append([t, *box])
     for obs in people.values():
         obs.sort()
     return dict(
         id=key,
         input=dict(path=saved["path"], **({"clip": saved["clip"]} if saved.get("clip") else {}), cuts=saved["cuts"]),
         reference=dict(people=people, ignore=sorted(ignore), times=times),
-        tags=dict(source=labels.get("source", "video")),
+        tags=dict(source="video"),
     )
 
 
-def build(out_dir, name="face-tracks-home", every=0.5):
-    with open(os.path.join(out_dir, "labels.toml"), "rb") as f:
-        labels = tomllib.load(f)
-    items = []
-    for key in sorted(labels):
-        with open(os.path.join(out_dir, f"{key}.json"), encoding="utf8") as f:
-            saved = json.load(f)
-        it = item_for(key, saved, labels[key], every)
-        named = [v for part in ("groups", "tracks") for v in (labels[key].get(part) or {}).values() if str(v).strip()]
-        if it["reference"]["people"] or named:  # a clip whose faces are all `none` stays: its false faces count
-            items.append(it)
+def build(out_dir, name="face-tracks-home", every=0.5, client=None):
+    decided = decisions(out_dir, client)
+    items, mixed = [], 0
+    for key in _keys(out_dir):
+        saved = _load(out_dir, key)
+        labels = track_labels(f"{label_set(out_dir)}/{key}", saved["answer"], decided)
+        mixed += sum(len(v) > 1 for v in labels.values())
+        if labels:  # a clip whose decided faces are all `none` stays: its false faces count
+            items.append(item_for(key, saved, labels, every))
     if not items:
-        raise SystemExit("no labelled clips")
+        raise SystemExit("no clip has a face decided on the Faces screens yet")
     faces = sum(len(v) for it in items for v in it["reference"]["people"].values())
     people = len({p for it in items for p in it["reference"]["people"]})
+    print(f"{mixed} tracks the generous setting mixed (stills of two people)")
     return C.write_dataset(
         name, items, description=f"{len(items)} real clips, {faces} faces of {people} people labelled every {every:g} s"
     )
@@ -297,9 +306,11 @@ def main(argv=None):
     p = sub.add_parser("propose")
     p.add_argument("out")
     p.add_argument("clips", nargs="+")
-    g = sub.add_parser("regroup")
-    g.add_argument("out")
-    g.add_argument("--sim", type=float, default=GROUP_SIM)
+    s = sub.add_parser("store")
+    s.add_argument("out")
+    s.add_argument("--skip", action="append", default=[], help="a clip to leave out (clip-03), again for more")
+    u = sub.add_parser("unstore", help="take the set's stills out of the face store again")
+    u.add_argument("out")
     b = sub.add_parser("build")
     b.add_argument("out")
     b.add_argument("--name", default="face-tracks-home")
@@ -307,8 +318,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "propose":
         propose(a.out, a.clips)
-    elif a.cmd == "regroup":
-        regroup(a.out, a.sim)
+    elif a.cmd == "store":
+        store(a.out, skip=set(a.skip))
+    elif a.cmd == "unstore":
+        unstore(a.out)
     else:
         print(build(a.out, a.name, a.every).to_json())
 
