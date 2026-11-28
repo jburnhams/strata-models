@@ -85,6 +85,13 @@ class Batcher:
         """Whether jobs on `model` can go through a batch API (a served model whose runtime has one)."""
         return model is not None and model.served and self._runtime(model) is not None
 
+    def one_lot(self, model):
+        """Whether an eval queues every job on `model` at once: a batched model, or one whose jobs only wait on a batched model (`waits`:
+        image-kind or vectorise asking Claude), which the scheduler's wait lane runs together so their delegated calls are one batch."""
+        if self.batchable(model):
+            return True
+        return asks_batched(model, self.s.registry.models, self.s.get_runtime)
+
     def decide(self, model, n, priority):
         """Whether `n` jobs queued together on `model` at `priority` are batched: always on a model with a batch API, except one job at high
         priority (someone waiting on that one answer)."""
@@ -319,3 +326,22 @@ class Batcher:
             )
             for b in self.store.batches(status="submitted")
         ]
+
+
+def asks_batched(model, models, get_runtime):
+    """Whether `model`'s jobs only wait on a model of `models` (its options `vlm` or `llm`) that has a batch API."""
+    if model is None or not model.served or model.vram_gb > 0:
+        return False
+    o = model.options or {}
+    try:
+        waits = getattr(get_runtime(model.runtime), "waits", None)
+        asks = models.get(str(o.get("vlm") or o.get("llm") or ""))
+        return bool(
+            callable(waits)
+            and waits(o)
+            and asks is not None
+            and asks.served
+            and callable(getattr(get_runtime(asks.runtime), "batch_submit", None))
+        )
+    except Exception:  # an unknown runtime: the job's own run says why
+        return False

@@ -10,6 +10,11 @@ from stratamodels.runtimes import RunError
 LOADED = []  # handles currently loaded, so tests can see loads and unloads
 
 
+def waits(options):
+    """Given options `waits`, it stands in for a runtime that only waits on another model (image-kind asking Claude): the wait lane."""
+    return bool(options.get("waits"))
+
+
 def load(model, models_dir):
     h = dict(model=model.key, options=dict(model.options))
     LOADED.append(h)

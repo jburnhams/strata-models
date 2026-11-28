@@ -408,3 +408,32 @@ def test_a_bulk_submission_is_checked_before_anything_is_queued(sch):
         sch.submit_many("nope", [{}], "app")
     assert sch.submit_many("caption", [], "app", batch=True) == []
     assert sch.store.queued() == []
+
+
+def test_an_eval_queues_every_job_at_once_on_a_model_that_only_waits_on_a_batched_one(sch):
+    """image-kind asking Claude: its jobs run together in the wait lane, so their delegated calls are one batch, not one batch each."""
+    from stratamodels.batches import asks_batched
+    from stratamodels.registry import Model
+
+    def model(key, runtime="image-kind", vram_gb=0.0, **options):
+        sch.registry.models[key] = m = Model(
+            key=key, runtime=runtime, name="", roles=("image-kind",), vram_gb=vram_gb, options=options
+        )
+        return m
+
+    haiku = sch.registry.models["haiku"]
+    asks_claude = model("kind-haiku", engine="vlm", vlm="haiku")
+    assert sch.batcher.one_lot(haiku) and sch.batcher.one_lot(asks_claude) and not sch.batcher.batchable(asks_claude)
+    assert sch._waits(asks_claude)
+    draws = model("vec-haiku", runtime="vectorise", engine="llm", llm="haiku")
+    assert sch.batcher.one_lot(draws) and sch._waits(draws)
+    assert not sch.batcher.one_lot(
+        model("kind-local", engine="vlm", vlm="small")
+    )  # waits, but on a model with no batch API
+    assert not sch.batcher.one_lot(model("kind-rules", engine="rules"))
+    assert not sch.batcher.one_lot(model("vec-potrace", runtime="vectorise", engine="potrace"))
+    assert not sch.batcher.one_lot(model("kind-gone", engine="vlm", vlm="gone"))
+    assert not asks_batched(
+        model("odd", runtime="no-such-runtime", engine="vlm", vlm="haiku"), sch.registry.models, sch.get_runtime
+    )
+    assert not asks_batched(None, sch.registry.models, sch.get_runtime)
