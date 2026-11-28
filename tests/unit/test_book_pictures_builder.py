@@ -41,7 +41,9 @@ def test_files_take_their_pages_label_by_shape_and_others_join_by_path(tmp_path,
     )
     photo = pic(tmp_path / "IMG_1.jpg", (120, 90))
     other = tmp_path / "others.toml"
-    other.write_text(f'[[pictures]]\npath = "{photo}"\nkind = "photograph"\nsource = "Takeout photos"\n')
+    other.write_text(
+        f"[[pictures]]\npath = '{photo}'\nkind = 'photograph'\nsource = 'Takeout photos'\n"
+    )  # a literal string: a Windows path's backslashes stay
     (tmp_path / "here").mkdir()
     (tmp_path / "here" / "labels.toml").write_text(
         "pictures = []\n"
