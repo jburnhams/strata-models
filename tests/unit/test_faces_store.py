@@ -111,6 +111,28 @@ def test_search_by_tag_and_opt_in(fs):
         fs.set_tag(" ", True)
 
 
+def test_an_opt_in_tag_can_share_its_named_faces(fs):
+    tape = index(fs, "strata-reels", "t1", [face(1, seed=1), face(1, x=100, seed=4)], tags=["strata-reels"])
+    index(fs, "strata-stills", "s1", [face(5, seed=3)])
+    named, unnamed = (f["id"] for f in tape["faces"])
+    fs.set_tag("strata-reels", True)
+    pid = fs.create_identity(name="Ann")["id"]
+    fs.assign([named], pid, "strata-reels")
+    q = person(1)
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=3)] == ["s1"]  # opt-in, not shared: none of it
+    assert fs.set_tag("strata-reels", True, share_named=True) == dict(tag="strata-reels", opt_in=True, share_named=True)
+    # shared: the named face counts in every search, the unnamed one never does
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=3)] == ["t1", "s1"]
+    assert [h["face"]["id"] for h in fs.search(q, "buffalo_l", k=3, named=True)] == [named]
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=3, named=False)] == ["s1"]
+    # asking for the tag still gives all of it; leaving share_named out keeps it as it was
+    assert {h["face"]["id"] for h in fs.search(q, "buffalo_l", k=3, include=["strata-reels"])} >= {named, unnamed}
+    fs.set_tag("strata-reels", True, note="family tapes")
+    assert {t["tag"]: t for t in fs.tags()}["strata-reels"]["share_named"] is True
+    assert fs.set_tag("strata-reels", True, share_named=False)["share_named"] is False
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=3)] == ["s1"]
+
+
 def test_search_named_or_not(fs):
     img = index(fs, "a", "p1", [face(1, seed=1), face(1, x=100, seed=2), face(1, x=200, seed=3)])
     ids = [f["id"] for f in img["faces"]]

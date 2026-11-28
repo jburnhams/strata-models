@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**Face store: an opt-in tag can lend its named faces to every search (branch `claude/project-thread-l890x5`)**
+Jonathan, after naming the faces on a family tape in strata-reels: "let named tape faces help elsewhere". Reels keeps its tapes' faces under the opt-in tag `strata-reels` (other people's children are on them), so a face confirmed there as Hannah did not help find Hannah in strata-stills. The person page's review and the merge suggestions already used every confirmed face; `search` (and with it `group-tracks` suggestions and apps' own lookups) did not.
+- `db/models.py`, `migrations/20261128_e8c2206d9638_face_tags_share_named.py` (**new**): `face_tags.share_named`, false by default.
+- `faces/store.py`: `search` lets in the pictures of opt-in tags that share, and answers only their confirmed faces (never their unnamed or suggested ones), asking the index for more so the answer is still `k` long; asking for the tag still gives all of it. `set_tag(..., share_named=)` (left as it was when not given) and `tags()` report it.
+- `faces/api.py`: `PUT /api/faces/tags/{tag}` takes `share_named`.
+- `web/src/components/FacesPage.tsx`, `web/src/faces.ts`: the Tags table's "Named faces" switch, on an opt-in tag only; `src/stratamodels/server/static/` rebuilt.
+- `docs/database.md`: Tags.
+- `tests/unit/test_faces_store.py`, `tests/unit/test_faces_api.py`, `web/tests/integration/Faces.test.tsx`, `web/tests/utils/faces.ts`.
+
 **font-match: four times faster, and a fit kept for the same call (branch `faster-fits`)**
 Jonathan: reuse model work where possible; see if the GPU can help, or optimise any other way. A page's fit took about two minutes of CPU, one face after another, and strata-scan sets pages one at a time: a book's rebuild took hours.
 - Profile of one page (36 lines, 5 faces): 79 s, of which a third was PIL's MaxFilter (the ink measure's dilation) and two fifths rendering words (FreeType, through Pillow, which holds Python's lock: threads made it no faster, measured). Neither is GPU work worth moving: the glyphs are drawn by FreeType one word at a time.

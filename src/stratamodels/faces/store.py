@@ -4,7 +4,8 @@ What lives here is record keeping and search; what a match means stays in the ca
 consent). Decided with the owner 2026-11-25:
   - one global identity per person; each app may add its own fields (identity_app_metadata), which win when that app reads the person;
   - every picture carries its app as a tag; search and clustering cover every tag except opt-in ones (face_tags.opt_in, e.g. other people's
-    children), which count only when the caller names them;
+    children), which count only when the caller names them; an opt-in tag with share_named (2026-11-28) still lends its faces a person
+    confirmed for someone to every search, so naming a face on a family tape helps recognise that person in other apps;
   - merges across apps are suggested here and made by a person, never automatically; undone by clearing `merged_into`;
   - decisions about faces are append-only (face_assignments), the newest not undone wins, and a batch undoes as one;
   - one global layer of decisions (2026-11-26): a confirmation counts for every app, its app kept as the source. An app's possible labels
@@ -127,17 +128,44 @@ class FaceStore:
         return Session(self.engine, expire_on_commit=False)
 
     # ---- tags --------------------------------------------------------------------------------------------------------------------------
-    def _scope(self, s, tags=None, include=()):
+    def _scope(self, s, tags=None, include=(), named_too=False):
         """A condition on FaceImage.id: pictures with any of `tags` (when given), never one with an opt-in tag that is not in `include` or
-        `tags` (naming a tag in `tags` counts as asking for it)."""
+        `tags` (naming a tag in `tags` counts as asking for it). `named_too` lets in the pictures of opt-in tags that share their named
+        faces; the caller must then keep only the confirmed faces of the pictures `_shared_only` names."""
         conds = []
         if tags:
             conds.append(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(list(tags)))))
-        allowed = set(include or ()) | set(tags or ())
-        hidden = [t for t in s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True))) if t not in allowed]
+        hidden = self._hidden(s, tags, include)
+        if named_too:
+            hidden = [t for t in hidden if t not in self._sharing(s)]
         if hidden:
             conds.append(FaceImage.id.not_in(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(hidden))))
         return sa.and_(sa.true(), *conds)
+
+    def _hidden(self, s, tags=None, include=()):
+        """The opt-in tags the caller did not ask for."""
+        allowed = set(include or ()) | set(tags or ())
+        return [t for t in s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True))) if t not in allowed]
+
+    def _sharing(self, s):
+        """The opt-in tags whose named faces count everywhere."""
+        return set(s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True), FaceTag.share_named.is_(True))))
+
+    def _shared_only(self, s, image_ids, tags=None, include=()):
+        """Of these pictures, the ones in scope only through a sharing tag: only their confirmed faces may be answered."""
+        partial = [t for t in self._hidden(s, tags, include) if t in self._sharing(s)]
+        if not partial or not image_ids:
+            return set()
+        out = set()
+        for part in _chunks(sorted(set(image_ids))):
+            out.update(
+                s.scalars(
+                    sa.select(FaceImageTag.image_id).where(
+                        FaceImageTag.image_id.in_(part), FaceImageTag.tag.in_(partial)
+                    )
+                )
+            )
+        return out
 
     def tags(self):
         with self.session() as s:
@@ -148,12 +176,14 @@ class FaceStore:
                     tag=t,
                     images=counts.get(t, 0),
                     opt_in=bool(opt[t].opt_in) if t in opt else False,
+                    share_named=bool(opt[t].share_named) if t in opt else False,
                     note=opt[t].note if t in opt else "",
                 )
                 for t in sorted(set(counts) | set(opt))
             ]
 
-    def set_tag(self, tag, opt_in, note=None):
+    def set_tag(self, tag, opt_in, note=None, share_named=None):
+        """Sets a tag's opt-in (and, when given, whether its named faces count everywhere; left as it was when None)."""
         tag = str(tag).strip()
         if not tag:
             raise ValueError("a tag needs a name")
@@ -163,10 +193,12 @@ class FaceStore:
                 row = FaceTag(tag=tag, updated_at=self.clock())
                 s.add(row)
             row.opt_in, row.updated_at = bool(opt_in), self.clock()
+            if share_named is not None:
+                row.share_named = bool(share_named)
             if note is not None:
                 row.note = str(note)[:500]
             s.commit()
-        return dict(tag=tag, opt_in=bool(opt_in))
+            return dict(tag=tag, opt_in=bool(opt_in), share_named=bool(row.share_named))
 
     # ---- pictures and faces --------------------------------------------------------------------------------------------------------------
     def _current(self, s, face_ids=None):
@@ -431,27 +463,39 @@ class FaceStore:
     # ---- search and clustering -----------------------------------------------------------------------------------------------------------
     def search(self, vector, model, *, k=20, tags=None, include=(), named=None, max_distance=None, exclude=()):
         """The faces nearest `vector` among `model`'s embeddings, in scope (tags, opt-in), closest first. `named` True/False keeps faces with or
-        without a confirmed person. Asks the index for more than `k` when it must filter after it (named), so the answer is still k long."""
+        without a confirmed person. The confirmed faces of an opt-in tag that shares them are in scope too (never its other faces). Asks the
+        index for more than `k` when it must filter after it (named, or a sharing tag), so the answer is still k long."""
         k = max(1, min(int(k), 500))
         with self.session() as s:
             stmt = (
                 sa.select(FaceEmbedding)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable())
+                .where(
+                    FaceEmbedding.model == model,
+                    self._scope(s, tags, include, named_too=named is not False),
+                    self.usable(),
+                )
             )
             if exclude:
                 stmt = stmt.where(FaceEmbedding.face_id.not_in([int(x) for x in exclude]))
-            want = k if named is None else k * 5 + 50
+            sharing = named is not False and any(t in self._sharing(s) for t in self._hidden(s, tags, include))
+            want = k if named is None and not sharing else k * 5 + 50
             hits = nearest(s, FaceEmbedding.vector, vector, k=want, select=stmt, max_distance=max_distance)
             state = self._current(s, [e.face_id for e, _ in hits])
+            faces = {e.face_id: s.get(Face, e.face_id) for e, _ in hits}
+            shared_only = (
+                self._shared_only(s, [f.image_id for f in faces.values()], tags, include) if sharing else set()
+            )
             out = []
             for e, d in hits:
                 st = state.get(e.face_id)
                 is_named = st is not None and st.status == "confirmed" and st.identity_id is not None
                 if named is not None and bool(named) != is_named:
                     continue
-                f = s.get(Face, e.face_id)
+                f = faces[e.face_id]
+                if f.image_id in shared_only and not is_named:
+                    continue  # an opt-in picture lends only its named faces
                 img = s.get(FaceImage, f.image_id)
                 out.append(dict(face=face_row(f, st), distance=round(float(d), 6), app=img.app, ref=img.ref))
                 if len(out) >= k:

@@ -22,7 +22,7 @@ const initial = () => ({
   } as Record<number, FaceImage>,
   groups: [{ faces: [31, 32, 33], size: 3 }, { faces: [41, 42], size: 2 }] as Group[],
   suggestions: [{ a: 1, b: 3, distance: 0.3, apps_a: ['bright-horizons'], apps_b: ['strata-360'] }] as Suggestion[],
-  tags: [{ tag: 'bright-horizons', images: 40, opt_in: false, note: '' }, { tag: 'nursery', images: 5, opt_in: true, note: 'children' }, { tag: 'face-tracks-eval', images: 9, opt_in: false, note: '' }] as Tag[],
+  tags: [{ tag: 'bright-horizons', images: 40, opt_in: false, share_named: false, note: '' }, { tag: 'nursery', images: 5, opt_in: true, share_named: false, note: 'children' }, { tag: 'face-tracks-eval', images: 9, opt_in: false, share_named: false, note: '' }] as Tag[],
   calls: [] as string[],
   fail: null as string | null, // the path of a write that answers 500
   hold: null as Promise<void> | null, // a review from one source waits for this, to see the screen between sources
@@ -108,10 +108,10 @@ export const faceHandlers = [
   http.get('/api/faces/tags', () => HttpResponse.json({ items: faceMock.tags })),
   http.put('/api/faces/tags/:tag', async ({ params, request }) => {
     const f = failing('tag'); if (f) return f
-    const b = (await request.json()) as { opt_in: boolean }
-    faceMock.calls.push(`tag ${params.tag} ${b.opt_in}`)
-    faceMock.tags = faceMock.tags.map(t => (t.tag === params.tag ? { ...t, opt_in: b.opt_in } : t))
-    return HttpResponse.json({ tag: params.tag, opt_in: b.opt_in })
+    const b = (await request.json()) as { opt_in: boolean; share_named?: boolean }
+    faceMock.calls.push(`tag ${params.tag} ${b.opt_in}${b.share_named === undefined ? '' : ` share ${b.share_named}`}`)
+    faceMock.tags = faceMock.tags.map(t => (t.tag === params.tag ? { ...t, opt_in: b.opt_in, share_named: b.share_named ?? t.share_named } : t))
+    return HttpResponse.json({ tag: params.tag, opt_in: b.opt_in, share_named: b.share_named ?? false })
   }),
   http.get('/api/faces/images/:id', ({ params }) => { const i = faceMock.images[Number(params.id)]; return i ? HttpResponse.json(i) : notFound('picture') }),
   http.get('/api/faces/:id', ({ params }) => {
