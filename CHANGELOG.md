@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**group-tracks: suggestions from one read of the named faces; face-tracks says its embeddings' model (branch `faster-group-tracks`)**
+Jonathan: strata-reels' People tab is very slow to load. Of its 15 s, 14 were `group-tracks`: a `search(named=True)` per group, and each search is an exact scan of all 225,000 faces (the scope's filters keep Postgres off the vector index; EXPLAIN: 0.47 s).
+- `faces/store.py`: `_named_nearest` (**new**) reads the confirmed faces in scope once (vectors, through the scope, the bar, sharing tags and the newest decision not undone, in chunks) and answers every group's nearest in numpy; `group_tracks` uses it. On omarchy's store, 31 groups: 1.9 s against 7.9 s for 31 searches, the same faces for all 31.
+- `runtimes/facetracks.py`: the answer carries `embedding_model`, the face pack's name (`buffalo_l`): the face store keys embeddings by it, and strata-reels had indexed a tape's stills under `buffalo_l-tracks` (the registry name, the answer's `model`), where no other app's search could find them.
+- `tests/unit/test_faces_store.py`: `_named_nearest` answers as `search(named=True)` does (scope, bar, undone decisions, opt-in). `tests/unit/test_facetracks_runtime.py`: `embedding_model`.
+
 **`nsfw` role: a 0-1 sensitive score per picture (branch `nsfw-sensitive-role`)**
 The role was listed with NudeNet but had no runtime, so no app could ask the service. Chosen by looking at 341 real photos (see docs/progress.md): NudeNet's box score is not a fraction (0.45-0.7 on everyday pictures, 0.38-0.44 on explicit ones), Marqo's classifier is near 0 or 1.
 - `runtimes/nsfw.py`: **new**, runtime `nsfw` (timm and torch, the gpu group): `paths` or `path` in, `sensitive` per picture out; the model's own 384 px centre crop (squeezing the whole picture was measurably worse); a corrupt file fails its own item, not the job. `models.toml`: model `nsfw-marqo-384` (Apache-2.0, 0.3 GB), now the `nsfw` role's default; `nudenet-320n` stays listed for strata-stills, which runs it itself.

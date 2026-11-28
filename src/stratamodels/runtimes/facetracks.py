@@ -480,7 +480,8 @@ def load(model: Any, models_dir: str) -> dict[str, Any]:
             "ffmpeg is not installed (pacman -S ffmpeg; apt install ffmpeg; brew install ffmpeg; choco install ffmpeg)"
         )
     pack = faces.load(model, models_dir)
-    return dict(exe=exe, pack=pack, detect=faces.detect, key=model.key, options=opts)
+    # the embeddings are the pack's own (ArcFace in buffalo_l): the face store keys them by the pack's name, as the faces role stores them
+    return dict(exe=exe, pack=pack, detect=faces.detect, key=model.key, embedding_model=model.name, options=opts)
 
 
 def _out_dir(params: dict[str, Any]) -> str:
@@ -656,6 +657,8 @@ def run(handle: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         tracker=tracker,
         seconds=round(time.monotonic() - t0, 3),
         model=handle["key"],
+        # the face store's model for these embeddings: searching or indexing a still under `model` would find nothing else
+        embedding_model=handle.get("embedding_model") or handle["key"],
     )
     if folder:
         result["out_dir"] = folder[0]
