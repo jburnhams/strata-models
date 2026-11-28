@@ -236,6 +236,38 @@ Schoolbook and Latin Modern, from CTAN), listed in `runtimes/fonts.toml` (74 in 
 - Before the role is deployed, `scripts/evals/font_match_trial.py` runs the same candidates with the stages through the running service and
   the fit in its own process.
 
+## Pictures in books: what kind each is, and line art as SVG (`image-kind`, `vectorise-plates`)
+Two roles for strata-scan's pictures (2026-11-28, Jonathan: "detect which images are drawings, not photos, then vectorise"), with one
+dataset builder, `scripts/evals/book_pictures.py`: the figures and picture pages strata-scan cut from Ward 1874, Collier and Cruikshank 1828
+and Speaight's history, labelled by eye in `scripts/evals/image_kind/labels.toml` (a book, a page and the picture's shape, so it matches the
+files of any export of the same books; who labelled and why a kind was hard are kept beside each).
+- **`image-kind`** (`runtimes/imagekind.py`): 20 kinds, each in one of three groups. `illustration` (line drawing, engraving, wood engraving,
+  woodcut, hand-coloured, lithograph, colour print, tonal drawing, painting, diagram, ornament, silhouette), `photo` (photograph, halftone),
+  and `other`, for what is neither (pattern, binding, handwriting, stamp, text, blank): a marbled endpaper or a spine is not a picture to
+  sort into photo or drawing, and a crop that is mostly a page of type says the crop is wrong. The kind is how the picture was made, not how
+  the book printed it (a halftone of an engraving is an engraving). `line_art` marks the kinds a tracer redraws exactly. Engines: `rules`
+  (numpy: tone, colour apart from the paper's tint, a halftone screen's spectral peak, edges), `clip` (zero-shot open_clip, three
+  caption-like prompts a kind, on the CPU) and `vlm` (any vision-language model with preset `image-kind-v1`, its schema the kinds). The eval
+  decides on `group_right`; `kind_right`, `line_right` and the macro F1s beside it, as the books are mostly engravings.
+- **`vectorise-plates`** (`runtimes/vectorise.py`): 30 of those pictures, a spread of kinds. Engines: `potrace` (the paper flattened
+  without whitening a woodcut's solid black, enlarged, cut at Otsu's threshold or a share of the way from ink to paper, traced by the
+  potrace command), `potrace-tones` (stacked greys), `vtracer` (colour clustering, in-process), `lines-colour` (VTracer's washes under
+  potrace's ink), and four that ask a model: `llm` (the model writes the SVG; `refine` shows it the picture beside its drawing and takes
+  its correction), `llm-plan` (the model picks the tracer and its settings), `llm-colour` (the model draws the colour washes under potrace's
+  ink; a picture with no colour skips the call) and `llm-clean` (the model tidies a trace under 60 KB). An answer is an SVG file and its
+  rendering at the picture's size (`path`), which the Judge tab shows. No reference exists, so the drawing is scored against the picture
+  with its paper made white (`evals/vector.py`): `vec_ink_f1` (lines, 1 px tolerance), `vec_ssim` (the look at reading size), `vec_tone`
+  and `vec_colour` (light, dark and colour in their places at an eighth of the size), `vec_kb` and `vec_nodes` (what the file costs). People
+  decide (`primary = "judged"`); a model judge (Opus through agy) stands beside them until it is measured.
+- **Running them beside the live service**: `strata-models eval run NAME --local` runs the jobs in the CLI's own scheduler on a database
+  of its own (`STRATAMODELS_DATABASE_URL=sqlite:///...`), refuses any model with vram, and sends the models a job's model asks in turn (a
+  `vlm` reader, an `llm` drawer) to the service as jobs (`runtimes/delegate.py`), so the card stays the service's and cloud spend is in its
+  ledger. That is how a branch's new roles are measured before they are deployed.
+- Not candidates, and why: autotrace's centreline mode (no maintained package; Inkscape 1.x's centreline trace is the same idea, worth a
+  try for handwriting), StarVector, OmniSVG and InternSVG (trained on icons and emoji, 1 to 8 B parameters on the GPU the rebuilds use;
+  published fidelity on complex pictures far below VTracer's), VectorArk (CVPR 2026, code not released), LIVE and DiffVG optimisation
+  (minutes a picture on the GPU for a few hundred paths, where an engraving has tens of thousands of strokes).
+
 ## Rules of thumb
 - Compare on the same items, always; never compare numbers from two datasets or two dataset versions.
 - One primary metric. Others are guards or context; they do not decide.

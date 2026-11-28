@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 
 import pytest
 
@@ -138,6 +139,22 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
         and '"ran": 6' in capsys.readouterr().out
         and len(calls) == 6
     )
+
+
+def test_eval_run_local_runs_cpu_models_here_and_refuses_gpu_ones(capsys, monkeypatch, tmp_path, setup):
+    """`eval run --local`: jobs in this process's own scheduler (a branch's CPU and cloud candidates beside the deployed service), never a
+    model that needs the card."""
+    monkeypatch.setenv("STRATAMODELS_DATABASE_URL", "sqlite:///" + str(tmp_path / "db.sqlite"))
+    with open(os.path.join(os.environ["STRATAMODELS_DATA"], "models.toml"), "w") as f:
+        f.write(
+            '[roles.echo]\nmodel = "small"\n'
+            '[models.small]\nruntime = "fake"\nname = "small"\nroles = ["echo"]\nvram_gb = 0.0\n'
+            '[models.big]\nruntime = "fake"\nname = "big"\nroles = ["echo"]\nvram_gb = 6.0\n'
+        )
+    assert cli.main(["eval", "run", "fake-asr", "--local", "--candidate", "base", "--limit", "3"]) == 0
+    assert '"ran": 3' in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="needs the GPU"):
+        cli.main(["eval", "run", "fake-asr", "--local", "--candidate", "better", "--limit", "1"])
 
 
 def test_role_prefer_and_seed_change_the_database(capsys, monkeypatch, tmp_path):

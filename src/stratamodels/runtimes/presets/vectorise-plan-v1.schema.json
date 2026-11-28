@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "properties": {
+    "engine": {
+      "type": "string",
+      "enum": [
+        "potrace",
+        "potrace-tones",
+        "vtracer",
+        "lines-colour"
+      ]
+    },
+    "threshold": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "levels": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "turdsize": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "alphamax": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "colours": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "why": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "engine",
+    "threshold",
+    "levels",
+    "turdsize",
+    "alphamax",
+    "colours",
+    "why"
+  ],
+  "additionalProperties": false
+}

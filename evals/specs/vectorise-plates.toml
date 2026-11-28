@@ -1,0 +1,124 @@
+name = "vectorise-plates"
+question = "Which way of redrawing a book's illustrations as SVG looks most like the picture and stays clean and small: a tracer (potrace, VTracer), a vision-language model writing the SVG itself, or a tracer steered or finished by a model?"
+role = "vectorise"
+dataset = "vectorise-plates"     # scripts/evals/book_pictures.py: 30 pictures of the three books, a spread of kinds (engravings, wood engravings, woodcuts, an ornament, handwriting, coloured plates, a wash drawing, a halftone)
+metrics = ["vec_ssim", "vec_ink_f1", "vec_tone", "vec_colour", "vec_kb", "vec_nodes", "latency_s", "cost_usd", "failed"]
+judge = true                     # blind: which drawing is the better replacement for the picture (the Judge tab shows each SVG drawn at the picture's size)
+similarity = "image"
+
+[decision]
+primary = "judged"
+baseline = "potrace"
+min_effect = 0.1
+guards = { failed = 1.0 }
+# Nothing scores a redrawing alone: a trace that keeps every speck has the best ink F1 and is the worst SVG, a model's tidy drawing loses the
+# lines and looks clean. So people decide (judged), and the scores say why: vec_ink_f1 the lines, vec_ssim the look at reading size, vec_tone
+# light and dark in their places, vec_colour for coloured plates, vec_kb and vec_nodes what the file costs. Model judges stand beside people's
+# judgments until one is measured against them.
+
+[[candidates]]
+name = "potrace"
+model = "vectorise-potrace"
+note = "paper flattened, enlarged 2x, Otsu's threshold, potrace defaults (turdsize 2, alphamax 1.0)"
+
+[[candidates]]
+name = "potrace-light"
+model = "vectorise-potrace"
+params = { threshold = 0.35 }
+note = "a darker cut: only the darker ink is kept, so hatching stays open and show-through goes"
+
+[[candidates]]
+name = "potrace-clean"
+model = "vectorise-potrace"
+params = { threshold = 0.35, turdsize = 12, alphamax = 1.2 }
+note = "the darker cut, specks up to 12 px (at 2x) dropped, rounder curves"
+
+[[candidates]]
+name = "potrace-x3"
+model = "vectorise-potrace"
+params = { scale = 3, threshold = 0.35 }
+note = "enlarged 3x before the cut: smoother outlines of fine lines, a bigger file"
+
+[[candidates]]
+name = "potrace-tones"
+model = "vectorise-potrace"
+params = { engine = "potrace-tones", levels = 3 }
+note = "three stacked greys: tone as flat steps"
+
+[[candidates]]
+name = "vtracer"
+model = "vectorise-vtracer"
+note = "VTracer in colour, its splines and stacked layers"
+
+[[candidates]]
+name = "vtracer-bw"
+model = "vectorise-vtracer"
+params = { colours = 2 }
+note = "VTracer on the same black-and-white cut as potrace"
+
+[[candidates]]
+name = "lines-colour"
+model = "vectorise-potrace"
+params = { engine = "lines-colour", colours = 8 }
+note = "VTracer's colour washes (smoothed, 8 colours) under potrace's ink"
+
+[[candidates]]
+name = "opus"
+model = "vectorise-llm"
+items = 12
+note = "Claude Opus 5.5 writes the SVG from the picture (preset vectorise-llm-v1); a sample, as each drawing is up to 24k tokens"
+
+[[candidates]]
+name = "opus-refine"
+model = "vectorise-llm"
+params = { refine = 1 }
+items = 12
+note = "Opus draws, then sees the picture beside its drawing once and corrects it"
+
+[[candidates]]
+name = "sonnet"
+model = "vectorise-llm"
+options = { llm = "claude-sonnet-5-5-api" }
+items = 12
+
+[[candidates]]
+name = "flash"
+model = "vectorise-llm"
+options = { llm = "gemini-3.8-flash-api", max_tokens = 32000 }
+items = 12
+note = "Gemini 3.8 Flash on the free key (20 calls a day)"
+
+[[candidates]]
+name = "qwen"
+model = "vectorise-llm"
+options = { llm = "qwen3.5-9b-vl", max_tokens = 12000 }
+items = 12
+note = "the local Qwen 3.5 9B through the service's queue; its 16k context bounds the drawing"
+
+[[candidates]]
+name = "plan-sonnet"
+model = "vectorise-llm"
+options = { engine = "llm-plan", llm = "claude-sonnet-5-5-api" }
+note = "Sonnet looks at the picture and picks the tracer and its settings (preset vectorise-plan-v1); the tracer draws"
+
+[[candidates]]
+name = "colour-opus"
+model = "vectorise-llm"
+options = { engine = "llm-colour" }
+note = "potrace's ink over the colour washes Opus draws (preset vectorise-colour-v1); a picture with no colour is the trace alone"
+
+[[candidates]]
+name = "clean-sonnet"
+model = "vectorise-llm"
+options = { engine = "llm-clean", llm = "claude-sonnet-5-5-api" }
+params = { threshold = 0.35 }
+note = "potrace's trace tidied by Sonnet (preset vectorise-clean-v1); only traces under 60 KB fit, so detailed plates fail by design"
+
+[[judges]]
+name = "opus-agy"
+cli = "agy"
+model = "claude-opus-5-5-low"
+kind = "vision"
+pairs = "baseline"
+limit = 120
+criteria = "The first picture is an illustration from a scanned book; X and Y are two SVG redrawings of it, each drawn at the same size. Prefer the one that would be the better replacement for the picture in a reprinted book: the same figures, lines and shading in the same places, looking like the original print, with no specks, blobs, smears or missing parts. A clean, faithful drawing beats a messy exact one and a tidy but wrong one."

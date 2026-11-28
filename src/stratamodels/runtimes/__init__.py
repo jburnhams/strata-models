@@ -27,6 +27,8 @@ RUNTIMES = {
     "claude-api": "stratamodels.runtimes.claude",
     "gemini-api": "stratamodels.runtimes.gemini",
     "nvidia-nim": "stratamodels.runtimes.nim",
+    "image-kind": "stratamodels.runtimes.imagekind",
+    "vectorise": "stratamodels.runtimes.vectorise",
 }
 NEEDS = {
     "fake": (),
@@ -47,6 +49,8 @@ NEEDS = {
     "claude-api": ("anthropic",),
     "gemini-api": (),
     "nvidia-nim": (),
+    "image-kind": (),  # engine clip loads open_clip and torch (the gpu group) when a model asks for it
+    "vectorise": ("vtracer", "resvg_py"),
 }  # venv-worker: its libraries are in the model's own venv (checked when it loads)
 
 
@@ -92,6 +96,10 @@ def available():
         out["gemini-api"] = out["gemini-api"] + [f"the key GEMINI_FREE_API_KEY or GEMINI_API_KEY ({keys.path()})"]
     if not tesseract.binary():
         out["tesseract"] = out["tesseract"] + ["the tesseract command (Tesseract 5)"]
+    from stratamodels.runtimes import vectorise
+
+    if not vectorise.binary():
+        out["vectorise"] = out["vectorise"] + ["the potrace command (potrace 1.16)"]
     from stratamodels.runtimes import scenes
 
     if not scenes.binary():

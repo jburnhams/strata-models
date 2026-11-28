@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "line-drawing",
+        "engraving",
+        "wood-engraving",
+        "woodcut",
+        "hand-coloured",
+        "lithograph",
+        "colour-print",
+        "tonal-drawing",
+        "painting",
+        "diagram",
+        "ornament",
+        "silhouette",
+        "photograph",
+        "halftone",
+        "pattern",
+        "binding",
+        "handwriting",
+        "stamp",
+        "text",
+        "blank"
+      ]
+    },
+    "colour": {
+      "type": "boolean"
+    },
+    "why": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "colour",
+    "why"
+  ],
+  "additionalProperties": false
+}

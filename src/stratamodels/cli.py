@@ -201,6 +201,17 @@ def cmd_eval(args):
         spec = C.load_spec(args.name, engine)
     except C.EvalError as e:
         sys.exit(str(e))
+    if args.action == "run" and args.local:
+        r = C.run(
+            spec,
+            engine,
+            _local_executor(engine),
+            candidates=args.candidate or None,
+            limit=args.limit,
+            recover=args.recover,
+        )
+        print(json.dumps(r))
+        return 0
     if args.action == "run":
         import os
 
@@ -239,6 +250,37 @@ def cmd_eval(args):
     else:
         print(text)
     return 0
+
+
+def _local_executor(engine):
+    """Eval jobs run in this process (`eval run --local`), for candidates that hold no GPU: CPU runtimes and cloud APIs, from a branch, on a
+    database of its own (STRATAMODELS_DATABASE_URL=sqlite:///...: never the live one, whose queue the service works), while the deployed
+    service keeps the card. A model with vram is refused: the card is the service's alone. A model the job's model asks in turn
+    (runtimes/delegate.py) is sent to the service as a job of its own."""
+    import os
+
+    from stratamodels import registry as reg
+    from stratamodels.evals import core as C
+    from stratamodels.scheduler import Scheduler
+    from stratamodels.store import Store
+
+    # a model another model asks (image-kind's reader, vectorise's drawer) goes through the service too: the card stays the service's, and
+    # cloud spend lands in its ledger, against its budget, not in this run's own database
+    os.environ.setdefault("STRATAMODELS_DELEGATE_VIA", "service")
+    reg.seed(engine, log=lambda m: None)
+    registry = reg.Registry.from_db(engine)
+    sch = Scheduler(Store(engine), registry, settings.models_dir(), probe=lambda: None, reserve_gb=0.0)
+    sch.start()
+
+    class Local(C.SchedulerExecutor):
+        def submit(self, role, params, model, options):
+            key = model or registry.roles[role].model
+            m = registry.models.get(key)
+            if m is not None and m.vram_gb > 0:
+                raise SystemExit(f"model {key} needs the GPU ({m.vram_gb} GB): run it through the service, not --local")
+            return super().submit(role, params, model, options)
+
+    return Local(sch)
 
 
 def _eval_judge(spec, engine, args):
@@ -382,6 +424,11 @@ def main(argv=None):
     e.add_argument("name", nargs="?")
     e.add_argument("--candidate", action="append", help="only this candidate (repeatable)")
     e.add_argument("--limit", type=int, help="only the first N items (a trial run); judge: at most N pairs per judge")
+    e.add_argument(
+        "--local",
+        action="store_true",
+        help="run: jobs in this process, not the service's queue (CPU and cloud models only; give it a database of its own)",
+    )
     e.add_argument(
         "--recover",
         action="store_true",

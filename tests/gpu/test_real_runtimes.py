@@ -753,3 +753,20 @@ def test_text_embed_on_the_gpu(key):
     vecs, _ = measure(model, dict(texts=docs))
     v = np.asarray(vecs["vectors"], dtype=np.float32)
     assert v.shape == (3, out["dim"]) and np.allclose(np.linalg.norm(v, axis=1), 1.0, atol=1e-3)
+
+
+@pytest.mark.skipif(bool(runtimes.available()["face-kind"]), reason="needs open_clip and torch (uv sync --group gpu)")
+def test_image_kind_clip_on_a_drawn_engraving(tmp_path):
+    """The `clip` engine of image-kind on the CPU: hatching on cream paper is an illustration, a smooth gradient is not."""
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGB", (400, 300), (236, 226, 200))
+    d = ImageDraw.Draw(im)
+    for x in range(0, 400, 5):
+        d.line((x, 0, x + 60, 300), fill=(15, 15, 15), width=1)
+    d.ellipse((120, 60, 280, 240), fill=(236, 226, 200), outline=(10, 10, 10), width=4)
+    p = str(tmp_path / "e.png")
+    im.save(p)
+    model = Registry.load().models["image-kind-clip"]
+    out, again = measure(model, {"image": p})
+    assert out["group"] in ("illustration", "other") and len(out["scores"]) == 5 and out["kind"] == again["kind"]
