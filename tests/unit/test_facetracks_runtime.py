@@ -242,7 +242,9 @@ def fake_video(monkeypatch, frames, width=640, height=360):
     monkeypatch.setattr(
         facetracks, "probe", lambda exe, path: dict(width=width, height=height, duration=len(frames) / 5)
     )
-    return dict(exe="ffmpeg", pack={}, detect=detect, key="buffalo_l-tracks", options=dict(fps=5)), seen
+    return dict(
+        exe="ffmpeg", pack={}, detect=detect, key="buffalo_l-tracks", embedding_model="buffalo_l", options=dict(fps=5)
+    ), seen
 
 
 @pytest.fixture
@@ -270,6 +272,7 @@ def test_run_answers_tracks_with_stills_saved(monkeypatch, video, tmp_path):
         and out["duration"] == 2.0
         and out["tracker"] == "iou-emb"
         and out["model"] == "buffalo_l-tracks"
+        and out["embedding_model"] == "buffalo_l"
     )
     first = out["tracks"][0]
     assert len(first["boxes"]) == 5 and first["boxes"][0] == [0.0, 10.0, 40.0, 130.0, 160.0, 0.9]
@@ -377,6 +380,7 @@ def test_load_and_unload_use_the_faces_pack(monkeypatch):
         h["exe"] == "/usr/bin/ffmpeg"
         and h["pack"] == {"fa": "pack"}
         and h["options"] == dict(fps=10)
+        and h["embedding_model"] == "buffalo_l"
         and h["detect"] is faces.detect
     )
     facetracks.unload(h)

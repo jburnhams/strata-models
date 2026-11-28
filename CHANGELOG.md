@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**group-tracks: suggestions from one read of the named faces; face-tracks says its embeddings' model (branch `faster-group-tracks`)**
+Jonathan: strata-reels' People tab is very slow to load. Of its 15 s, 14 were `group-tracks`: a `search(named=True)` per group, and each search is an exact scan of all 225,000 faces (the scope's filters keep Postgres off the vector index; EXPLAIN: 0.47 s).
+- `faces/store.py`: `_named_nearest` (**new**) reads the confirmed faces in scope once (vectors, through the scope, the bar, sharing tags and the newest decision not undone, in chunks) and answers every group's nearest in numpy; `group_tracks` uses it. On omarchy's store, 31 groups: 1.9 s against 7.9 s for 31 searches, the same faces for all 31.
+- `runtimes/facetracks.py`: the answer carries `embedding_model`, the face pack's name (`buffalo_l`): the face store keys embeddings by it, and strata-reels had indexed a tape's stills under `buffalo_l-tracks` (the registry name, the answer's `model`), where no other app's search could find them.
+- `tests/unit/test_faces_store.py`: `_named_nearest` answers as `search(named=True)` does (scope, bar, undone decisions, opt-in). `tests/unit/test_facetracks_runtime.py`: `embedding_model`.
+
 **A picture eval asking Claude goes as one batch, not one batch per picture; pictures sent as the type they are (branch `claude/project-thread-sxtvfs`)**
 After the deploy, image-kind's Sonnet and Opus runs on the 100 hard pictures went at about one answer a minute: the CPU lane runs one job per model at a time, so each picture's delegated Claude call was queued alone and waited out a 2-minute batch of its own (about 3 hours for the run). One picture also failed both models: "The image was specified using the image/png media type" for an export whose bytes are a JPEG. Corrects the earlier entry's claim that a candidate's jobs "go as one batch" for image-kind and vectorise: that held only for models with a batch API themselves.
 - `scheduler.py`: a wait lane beside the CPU lane for jobs whose runtime says they only wait on another model (`waits(options)`), up to `wait_jobs` (`WAIT_JOBS`, 128) at once and many per model, so their delegated calls reach the batcher in the same tick; the model is busy (never evicted) while any runs, loads once (`_loads`, a lock per model) and waits for a load asked from the Models page; `/api/status` `slots.wait`.

@@ -577,6 +577,36 @@ def test_group_apart_never_joins_tracks_seen_together():
     assert group_apart(E, [], 0.0) == [[0], [1], [2], [3]]
 
 
+def test_group_tracks_reads_the_named_faces_once_and_answers_as_search_does(fs):
+    """group_tracks' suggestions come from one read of the confirmed faces (a search per group was an exact scan each): for any query,
+    the same faces at the same distances, in scope, under the bar, through undone decisions, as search(named=True)."""
+    faces = [face(k % 4, x=i * 50, seed=i) for i, k in enumerate(range(12))]
+    ids = [f["id"] for f in index(fs, "stills", "p1", faces)["faces"]]
+    hidden = [
+        f["id"] for f in index(fs, "kids", "k1", [face(1, seed=40), face(2, x=50, seed=41)], tags=["nursery"])["faces"]
+    ]
+    tiny = index(fs, "stills", "p2", [face(1, score=0.3, seed=42)])["faces"][0]["id"]
+    ann, bob = (fs.create_identity(name=n)["id"] for n in ("Ann", "Bob"))
+    fs.assign(ids[0::2] + hidden[:1] + [tiny], ann, "stills")
+    undone = fs.assign(ids[1::4], bob, "stills")
+    fs.assign(ids[3::4], bob, "stills")
+    fs.undo(undone)
+    fs.set_tag("nursery", True)
+    queries = np.array([person(k, 0.05, 100 + k) for k in range(4)], dtype=np.float32)
+    for include in ((), ("nursery",)):
+        got = fs._named_nearest("buffalo_l", queries, k=3, max_distance=0.5, include=include)
+        for q, hits in zip(queries, got, strict=True):
+            want = fs.search(
+                [float(x) for x in q], "buffalo_l", k=3, named=True, max_distance=0.5, include=list(include)
+            )
+            assert [(h["face"]["id"], h["face"]["identity_id"]) for h in hits] == [
+                (h["face"]["id"], h["face"]["identity_id"]) for h in want
+            ]
+            assert [h["distance"] for h in hits] == pytest.approx([h["distance"] for h in want], abs=1e-5)
+    assert fs._named_nearest("buffalo_l", queries[:0], k=3) == []
+    assert fs._named_nearest("other-model", queries, k=3) == [[], [], [], []]
+
+
 def test_group_tracks_suggests_a_known_person_only_when_most_nearest_faces_agree(fs):
     ids = [
         f["id"]

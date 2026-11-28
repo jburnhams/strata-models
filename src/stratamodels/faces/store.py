@@ -582,16 +582,69 @@ class FaceStore:
         pairs = [(index[str(a)], index[str(b)]) for a, b in apart if str(a) in index and str(b) in index]
         t = CLUSTER_THRESHOLD if threshold is None else float(threshold)
         k, max_distance, share = suggest
+        groups = group_apart(E, pairs, t)
+        means = np.array([E[m].mean(axis=0) for m in groups], dtype=np.float32).reshape(len(groups), E.shape[1])
+        means /= np.maximum(np.linalg.norm(means, axis=1, keepdims=True), 1e-9)
+        nearest_named = self._named_nearest(model, means, k=k, max_distance=max_distance, tags=tags, include=include)
         out = []
-        for members in group_apart(E, pairs, t):
-            mean = E[members].mean(axis=0)
-            mean /= max(float(np.linalg.norm(mean)), 1e-9)
-            hits = self.search(
-                [float(x) for x in mean], model, k=k, tags=tags, include=include, named=True, max_distance=max_distance
-            )
+        for members, hits in zip(groups, nearest_named, strict=True):
             out.append(dict(tracks=[keys[i] for i in members], size=len(members), suggested=self._vote(hits, share)))
         out.sort(key=lambda g: (-g["size"], index[g["tracks"][0]]))
         return dict(groups=out, hidden=hidden)
+
+    def _named_nearest(self, model, queries, *, k, max_distance=None, tags=None, include=()):
+        """For each row of `queries` (unit vectors), what `search(..., named=True)` answers (the `k` nearest confirmed faces in scope, as
+        hits with `face.identity_id`), from one read of the confirmed faces' vectors instead of a search each: a search here is an exact
+        scan of every face (the scope's filters keep Postgres off the vector index), about 0.4 s on omarchy's 225,000 faces, so a tape's
+        31 groups took 14 s (2026-11-28). Confirmed faces are a few tens of thousands at most, read once and compared in numpy."""
+        if not len(queries):
+            return []
+        with self.session() as s:
+            ever = sa.select(FaceAssignment.face_id).where(FaceAssignment.status == "confirmed")
+            stmt = (
+                sa.select(FaceEmbedding.face_id, FaceEmbedding.vector)
+                .join(Face, Face.id == FaceEmbedding.face_id)
+                .join(FaceImage, FaceImage.id == Face.image_id)
+                .where(
+                    FaceEmbedding.model == model,
+                    FaceEmbedding.face_id.in_(ever),
+                    FaceEmbedding.vector.is_not(None),
+                    self._scope(s, tags, include, named_too=True),
+                    self.usable(),
+                )
+            )
+            lent = self._shared_named(s, tags, include)
+            if lent is not None:
+                stmt = stmt.where(lent)
+            rows = s.execute(stmt).all()
+            state = {}
+            for part in _chunks([int(f) for f, _ in rows]):
+                state.update(
+                    self._current(s, part)
+                )  # the newest decision not undone: confirmed still, and for whom (through merges)
+            keep = [
+                (int(f), v)
+                for f, v in rows
+                if (st := state.get(int(f))) and st.status == "confirmed" and st.identity_id is not None
+            ]
+            if not keep:
+                return [[] for _ in range(len(queries))]
+            V = np.array([list(v) for _, v in keep], dtype=np.float32)
+            V /= np.maximum(np.linalg.norm(V, axis=1, keepdims=True), 1e-9)
+            D = 1.0 - np.asarray(queries, dtype=np.float32) @ V.T  # cosine distance, as pgvector's <=>
+            out = []
+            for row in D:
+                order = np.argsort(row, kind="stable")[:k]
+                out.append(
+                    [
+                        dict(
+                            face=face_row(s.get(Face, keep[i][0]), state[keep[i][0]]), distance=round(float(row[i]), 6)
+                        )
+                        for i in order
+                        if max_distance is None or row[i] <= max_distance
+                    ]
+                )
+            return out
 
     def _vote(self, hits, share):
         """The person most of `hits` (confirmed faces) are, with their name and share, or None when no one holds `share` of them (and two)."""
