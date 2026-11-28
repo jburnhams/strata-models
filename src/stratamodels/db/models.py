@@ -375,13 +375,16 @@ class FaceImageTag(Base):
 
 class FaceTag(Base):
     """A tag's own settings: `opt_in` leaves its pictures out of every search and clustering that does not name it (other people's
-    children)."""
+    children). `named_count` lets back in, of those, each picture with a face a person has confirmed for someone: a face somebody named
+    is a decision about a known person, which every app's recognition may learn from, while the unnamed faces stay out (a family
+    video's passers-by)."""
 
     __tablename__ = "face_tags"
     tag: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
     updated_at: Mapped[float]
     opt_in: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
     note: Mapped[str] = mapped_column(sa.String(500), default="")
+    named_count: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
 
 
 class Face(Base):

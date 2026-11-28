@@ -129,14 +129,29 @@ class FaceStore:
     # ---- tags --------------------------------------------------------------------------------------------------------------------------
     def _scope(self, s, tags=None, include=()):
         """A condition on FaceImage.id: pictures with any of `tags` (when given), never one with an opt-in tag that is not in `include` or
-        `tags` (naming a tag in `tags` counts as asking for it)."""
+        `tags` (naming a tag in `tags` counts as asking for it), unless that tag lets named faces count and one of the picture's faces is
+        confirmed for a person."""
         conds = []
         if tags:
             conds.append(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(list(tags)))))
         allowed = set(include or ()) | set(tags or ())
-        hidden = [t for t in s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True))) if t not in allowed]
+        opt = [t for t in s.scalars(sa.select(FaceTag).where(FaceTag.opt_in.is_(True))) if t.tag not in allowed]
+        hidden = [t.tag for t in opt if not t.named_count]
         if hidden:
             conds.append(FaceImage.id.not_in(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(hidden))))
+        if soft := [t.tag for t in opt if t.named_count]:
+            # these tags' pictures stay out unless one of their faces is confirmed for a person (the newest decision not undone)
+            pictures = set(s.scalars(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(soft))))
+            faces = (
+                dict(s.execute(sa.select(Face.id, Face.image_id).where(Face.image_id.in_(pictures))).all())
+                if pictures
+                else {}
+            )
+            current = self._current(s, list(faces)) if faces else {}
+            named = {faces[f] for f, a in current.items() if a.status == "confirmed" and a.identity_id is not None}
+            out = pictures - named
+            if out:
+                conds.append(FaceImage.id.not_in(sorted(out)))
         return sa.and_(sa.true(), *conds)
 
     def tags(self):
@@ -148,12 +163,14 @@ class FaceStore:
                     tag=t,
                     images=counts.get(t, 0),
                     opt_in=bool(opt[t].opt_in) if t in opt else False,
+                    named_count=bool(opt[t].named_count) if t in opt else False,
                     note=opt[t].note if t in opt else "",
                 )
                 for t in sorted(set(counts) | set(opt))
             ]
 
-    def set_tag(self, tag, opt_in, note=None):
+    def set_tag(self, tag, opt_in, note=None, named_count=None):
+        """A tag's settings; `note` and `named_count` left as they are when None (an app that only says opt-in keeps a person's choice)."""
         tag = str(tag).strip()
         if not tag:
             raise ValueError("a tag needs a name")
@@ -165,8 +182,10 @@ class FaceStore:
             row.opt_in, row.updated_at = bool(opt_in), self.clock()
             if note is not None:
                 row.note = str(note)[:500]
+            if named_count is not None:
+                row.named_count = bool(named_count)
             s.commit()
-        return dict(tag=tag, opt_in=bool(opt_in))
+            return dict(tag=tag, opt_in=bool(opt_in), named_count=bool(row.named_count))
 
     # ---- pictures and faces --------------------------------------------------------------------------------------------------------------
     def _current(self, s, face_ids=None):

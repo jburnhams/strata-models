@@ -88,6 +88,28 @@ def test_reindexing_with_another_model_keeps_faces_people_decided_about(fs):
         fs.embedding(f1, "unknown")
 
 
+def test_an_opt_in_tag_can_let_its_named_faces_count(fs):
+    """A family video's faces stay out of other apps' searches, but those a person named help recognise them everywhere."""
+    named = index(fs, "strata-reels", "r1", [face(1, seed=1)], tags=["tape"])
+    index(fs, "strata-reels", "r2", [face(1, seed=4)], tags=["tape"])  # the same look, nobody named it
+    index(fs, "strata-stills", "s1", [face(5, seed=2)])
+    ann = fs.create_identity(name="Ann")["id"]
+    batch = fs.assign([named["faces"][0]["id"]], ann, "strata-reels")
+    q = person(1)
+    fs.set_tag("tape", True)
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["s1"]
+    assert fs.set_tag("tape", True, named_count=True) == dict(tag="tape", opt_in=True, named_count=True)
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["r1", "s1"]  # the named one counts; r2 stays out
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5, named=True)] == ["r1"]
+    assert [i["ref"] for i in fs.images()] == ["s1", "r1"]
+    assert {h["ref"] for h in fs.search(q, "buffalo_l", k=5, include=["tape"])} == {"r1", "r2", "s1"}
+    assert fs.set_tag("tape", True)["named_count"] is True  # an app saying opt-in again keeps the person's choice
+    assert {t["tag"]: t["named_count"] for t in fs.tags()}["tape"] is True
+    fs.undo(batch)  # the name taken back: out again
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["s1"]
+    assert fs.cluster("buffalo_l", min_size=1) == fs.cluster("buffalo_l", min_size=1, tags=["strata-stills"])
+
+
 def test_search_by_tag_and_opt_in(fs):
     index(fs, "bright-horizons", "n1", [face(1, seed=1)], tags=["nursery"])
     index(fs, "strata-stills", "s1", [face(1, seed=2)])

@@ -25,7 +25,7 @@
   POST /api/faces/propose                {app, dry_run?, groups?, tags?, include?, limit?, model?, min_seeds?, min_purity?, max_distance?, margin?,
                                          min_score?, group_share?, group_min?} turn the app's hints into suggested faces (dry_run, the default,
                                          only counts); nothing is ever confirmed here
-  GET  /api/faces/tags; PUT /api/faces/tags/{tag} {opt_in, note?}
+  GET  /api/faces/tags; PUT /api/faces/tags/{tag} {opt_in, note?, named_count?}
   GET  /api/identities?app=&q=&app_ref=&limit=&tag=   people (as `app` sees them; `faces` confirmed, `suggested` waiting; `tag`: only
                                          people with faces in pictures carrying it, counting those); POST /api/identities {name?, fields?, app?, app_fields?, app_ref?}
   GET/PATCH /api/identities/{id}         one person (?app=); {name?, fields?} change the global ones
@@ -158,6 +158,7 @@ class DeleteIn(BaseModel):
 class TagIn(BaseModel):
     opt_in: bool
     note: str | None = None
+    named_count: bool | None = None  # None: as it was
 
 
 class IdentityIn(BaseModel):
@@ -361,7 +362,7 @@ def mount(app, scheduler, store: FaceStore | None = None):
     @app.put("/api/faces/tags/{tag}")
     def put_tag(tag: str, b: TagIn):
         try:
-            return fs.set_tag(tag, b.opt_in, b.note)
+            return fs.set_tag(tag, b.opt_in, b.note, b.named_count)
         except ValueError as e:
             bad(e)
 

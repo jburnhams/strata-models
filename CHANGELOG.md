@@ -4,6 +4,13 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**Face tags: an opt-in tag can let its named faces count everywhere (branch `opt-in-named-count`)**
+Jonathan: let named tape faces help elsewhere. strata-reels keeps a tape's stills under its opt-in app tag, so faces he names on a tape never reached other apps' searches or suggestions.
+- `db/models.py`, `migrations/20261128_e4a6f0f37f26_face_tags_named_faces_count.py` (**new**): `face_tags.named_count` (default false).
+- `faces/store.py`: `_scope` leaves out a `named_count` tag's pictures only while none of their faces is confirmed for a person (the newest decision not undone), so search, `named=True` lookups (group-tracks' suggestions) and picture lists see the named ones; clustering, review and propose only ever take undecided faces, so nothing unnamed comes in. `set_tag(..., named_count=None)` leaves it as it was, so an app that says opt-in again on each run keeps the person's choice; `tags()` reports it.
+- `faces/api.py`: `PUT /api/faces/tags/{tag}` takes `named_count`. `docs/database.md`: Tags.
+- `tests/unit/test_faces_store.py`, `tests/unit/test_faces_api.py`: named in, unnamed out, undone out again, kept on a PUT without it.
+
 **font-match: four times faster, and a fit kept for the same call (branch `faster-fits`)**
 Jonathan: reuse model work where possible; see if the GPU can help, or optimise any other way. A page's fit took about two minutes of CPU, one face after another, and strata-scan sets pages one at a time: a book's rebuild took hours.
 - Profile of one page (36 lines, 5 faces): 79 s, of which a third was PIL's MaxFilter (the ink measure's dilation) and two fifths rendering words (FreeType, through Pillow, which holds Python's lock: threads made it no faster, measured). Neither is GPU work worth moving: the glyphs are drawn by FreeType one word at a time.
