@@ -43,6 +43,7 @@ the outline's length, both sides), 0 when the print is lighter, since a stroke c
 
 import collections
 import difflib
+import functools
 import json
 import os
 import re
@@ -623,6 +624,35 @@ MARGIN = {
 }  # bold must win clearly: a heavy impression otherwise reads as bold words in roman lines
 
 
+WORKERS = 4  # processes a fit spreads its faces over: rendering words holds Python's lock, so threads do not help (measured: none faster)
+_POOL: Any = None
+
+
+def _pool() -> Any:
+    """The processes faces are fitted in, made once (spawned: the service's threads are not forked with them)."""
+    global _POOL
+    if _POOL is None:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+
+        _POOL = ProcessPoolExecutor(max_workers=WORKERS, mp_context=multiprocessing.get_context("spawn"))
+    return _POOL
+
+
+def fit_faces(scan, faces, quick=False):
+    """`fit_face` for each face, in WORKERS processes at once (each face's fit is independent): a page's fit took two minutes one face
+    after another (2026-11-28). In this process when there is one face, or when the processes cannot be had."""
+    if len(faces) < 2 or WORKERS < 2:
+        return [fit_face(scan, f, quick=quick) for f in faces]
+    try:
+        pool = _pool()
+        return list(pool.map(functools.partial(fit_face, scan, quick=quick), faces))
+    except Exception:  # a broken pool (a worker killed): the faces one after another, and a new pool next time
+        global _POOL
+        _POOL = None
+        return [fit_face(scan, f, quick=quick) for f in faces]
+
+
 def word_styles(scan, ln, face, lfit, margin=0.04):
     """Each word's style: the line's own unless another of the face's styles fits that word better by `margin` (F1; more for bold), with the
     line's size, width and weight (small capitals made from capitals get their own width)."""
@@ -895,7 +925,70 @@ def _compose(scan, face, lines, faces=None):
     return canvas
 
 
+def _code_key() -> str:
+    """What a kept fit was made by: this module, the face catalogue and the ink measure, so a fix to any of them fits again."""
+    import hashlib
+
+    from stratamodels.evals import ink as INK
+
+    h = hashlib.sha256()
+    for path in (__file__, os.path.join(os.path.dirname(__file__), "fonts.toml"), INK.__file__):
+        with open(path, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:16]
+
+
+def _kept_path(handle, params) -> str | None:
+    """Where the fit of these params is kept (by the params, the picture's bytes and `_code_key`), or None for a call that is not kept (no
+    picture)."""
+    import hashlib
+
+    from stratamodels import settings
+
+    path = params.get("image") or params.get("path")
+    if not isinstance(path, str) or not os.path.isfile(path):
+        return None
+
+    def contents(p: object) -> str | None:
+        # the file's bytes, not its size and time: a picture rewritten within a second, an OCR file corrected in place (review)
+        if not isinstance(p, str) or not os.path.isfile(p):
+            return None
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    what = json.dumps(
+        [params, contents(path), contents(params.get("ocr")), _code_key(), handle.get("top"), handle.get("propose")],
+        sort_keys=True,
+        default=str,
+    )
+    folder = os.path.join(str(settings.data_dir()), "cache", "fontfit")
+    return os.path.join(folder, hashlib.sha256(what.encode()).hexdigest()[:32] + ".json")
+
+
 def run(handle, params):
+    """A page's fit, kept and given again for the same params, picture and code: an app setting a page again (only its pictures changed,
+    say) waits seconds, not minutes (Jonathan, 2026-11-28: reuse all model work). `out`'s picture and the face files must still be there."""
+    kept = None if params.get("out") else _kept_path(handle, params)
+    if kept and os.path.isfile(kept):
+        try:
+            with open(kept, encoding="utf-8") as f:
+                got = json.load(f)
+            files = [p for v in got.get("fonts", {}).values() for p in v.get("files", {}).values()] + [got.get("path")]
+            if all(isinstance(p, str) and os.path.isfile(p) for p in files if p):
+                return dict(got, cached=True)
+        except (OSError, ValueError):
+            pass
+    got = _run(handle, params)
+    if kept:
+        os.makedirs(os.path.dirname(kept), exist_ok=True)
+        part = f"{kept}.{os.getpid()}.part"
+        with open(part, "w", encoding="utf-8") as f:
+            json.dump(got, f)
+        os.replace(part, kept)
+    return got
+
+
+def _run(handle, params):
     from stratamodels.evals import ink as INK
 
     t0 = time.monotonic()
@@ -953,12 +1046,12 @@ def run(handle, params):
     if mode == "fit":
         top = int(params.get("top") or handle.get("top", 6))
         screen = (
-            sorted((fit_face(scan, f, quick=True) for f in faces.values()), key=lambda r: -r["f1"])
+            sorted(fit_faces(scan, list(faces.values()), quick=True), key=lambda r: -r["f1"])
             if len(faces) > top
             else []
         )
         keep = [r["face"] for r in screen[:top]] if screen else list(faces)
-        fits = sorted((fit_face(scan, faces[fid]) for fid in keep), key=lambda r: -r["f1"])
+        fits = sorted(fit_faces(scan, [faces[fid] for fid in keep]), key=lambda r: -r["f1"])
         ranked = fits + screen[top:]
         best = faces[fits[0]["face"]]
         if params.get("mix", not params.get("face")) and is_mixed(

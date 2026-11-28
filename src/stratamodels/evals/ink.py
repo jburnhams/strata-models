@@ -94,17 +94,31 @@ def binarise(img, dpi=None, deskew=True, flatten=True, angle=None):
 
 
 def dilate(mask, r):
+    """`mask` grown by `r` pixels each way (a square of 2r+1). OpenCV's, a twentieth of the time of PIL's MaxFilter, which was a third
+    of a font fit (2026-11-28); the same result but at the picture's edge, where PIL's filter takes the edge pixel as repeated."""
     if r <= 0:
         return mask
-    im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * r + 1))
-    return np.asarray(im) > 127
+    try:
+        import cv2
+    except (
+        ImportError
+    ):  # OpenCV is in the dev and gpu groups only: an install without it measures as before, slower (review)
+        im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * r + 1))
+        return np.asarray(im) > 127
+    k = np.ones((2 * r + 1, 2 * r + 1), np.uint8)
+    return cv2.dilate(mask.astype(np.uint8), k, borderType=cv2.BORDER_REPLICATE) > 0
 
 
 def erode(mask, r):
     if r <= 0:
         return mask
-    im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MinFilter(2 * r + 1))
-    return np.asarray(im) > 127
+    try:
+        import cv2
+    except ImportError:
+        im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MinFilter(2 * r + 1))
+        return np.asarray(im) > 127
+    k = np.ones((2 * r + 1, 2 * r + 1), np.uint8)
+    return cv2.erode(mask.astype(np.uint8), k, borderType=cv2.BORDER_REPLICATE) > 0
 
 
 def box_mask(shape, box):

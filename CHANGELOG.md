@@ -4,6 +4,15 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**font-match: four times faster, and a fit kept for the same call (branch `faster-fits`)**
+Jonathan: reuse model work where possible; see if the GPU can help, or optimise any other way. A page's fit took about two minutes of CPU, one face after another, and strata-scan sets pages one at a time: a book's rebuild took hours.
+- Profile of one page (36 lines, 5 faces): 79 s, of which a third was PIL's MaxFilter (the ink measure's dilation) and two fifths rendering words (FreeType, through Pillow, which holds Python's lock: threads made it no faster, measured). Neither is GPU work worth moving: the glyphs are drawn by FreeType one word at a time.
+- `evals/ink.py` `dilate`, `erode`: OpenCV's (the same result but at the picture's edge): 79 s to 59 s.
+- `runtimes/fontfit.py`: **new** `fit_faces` fits a page's faces in `WORKERS` (4) spawned processes, each face independent: 51 s to 22 s, the same faces and scores. `run` keeps each fit (data dir `cache/fontfit/`, named by the params, the picture's size and time and `_code_key`: this module, fonts.toml and the ink measure) and gives it again for the same call, while its files are there; a call with its own `out` is never kept.
+- `__main__.py`: the CLI only when run as the main module, not when a worker process imports it as its parent's.
+- Review: a kept fit is named by its picture's and OCR file's bytes, not the picture's size and time (a picture rewritten within a second, an OCR file corrected in place, are fitted again); `dilate` and `erode` fall back to PIL's filters where OpenCV is not installed (it is in the dev and gpu groups only).
+- `tests/unit/test_fontfit.py`.
+
 **page-build: a stray word put back on its line (branch `stray-words`)**
 Jonathan, on strata-scan's third book (page 14): "secretly," was set at two thirds size and started over the word after it. The fit word by word had matched it to a patch of the scan beside it.
 - `runtimes/pagebuild.py`: **new** `steady`, used by `line_maker` on a line set word by word: in a line of 4 words or more of one size of type, a word fitted more than `STRAY` (20 %) from the line's median size, or with its left edge more than half its width from Tesseract's box, takes the line's median size and baseline and starts at its box; in a line of several sizes on purpose (an advert's) only where it starts is put right.
