@@ -326,6 +326,35 @@ def _shrink(
     return [max(f * LEAST, min(f, OVERRUN / r)) if r * f > OVERRUN else f for r in ratios]
 
 
+STRAY = 0.2  # a word fitted at a size this far (as a share) from its line's median, in a line of 4 words or more, was fitted to something else
+
+
+def steady(fitted: Sequence[Mapping[str, Any]], boxes: Sequence[Any]) -> list[Mapping[str, Any]]:
+    """The fit's words, a stray one put back on its line: one fitted at a size far from its line's (STRAY), or with its left edge more than half
+    its width from Tesseract's box, takes the line's median size and baseline and starts at its box. A fit word by word can match a word to
+    a patch of the scan beside it: the third book's page 14 set "secretly," at two thirds size over the word after it."""
+    if len(fitted) < 4:
+        return list(fitted)
+    size = statistics.median(float(w["size_pt"]) for w in fitted)
+    px = statistics.median(float(w.get("size_px") or 0.0) for w in fitted)
+    base = statistics.median(float(w["baseline_y"]) for w in fitted)
+    near = sum(size > 0 and abs(float(w["size_pt"]) / size - 1) <= STRAY for w in fitted)
+    one_size = near >= 0.75 * len(
+        fitted
+    )  # a line of one size of type; an advert's line of several sizes is left as fitted
+    out: list[Mapping[str, Any]] = []
+    for wd, box in zip(fitted, boxes, strict=True):
+        b = [float(v) for v in cast("Sequence[Any]", box)]
+        off = abs(float(wd.get("x", b[0])) - b[0]) > 0.5 * max(b[2], px)
+        odd = one_size and abs(float(wd["size_pt"]) / size - 1) > STRAY
+        if odd or (off and one_size):
+            wd = {**wd, "x": b[0], "size_pt": size, "size_px": px, "baseline_y": base}
+        elif off:  # a line of several sizes: only where the word starts
+            wd = {**wd, "x": b[0]}
+        out.append(wd)
+    return out
+
+
 def line_maker(
     texts: Mapping[int, str] | None = None,
     fit: tuple[str, Mapping[tuple[int, ...], Mapping[str, Any]], Mapping[str, str]] | None = None,
@@ -350,6 +379,7 @@ def line_maker(
             return Line(box=box, spans=[Span(text)])
         parts = text.split()
         if len(parts) == len(own) and len(known) == len(got):
+            known = steady(known, [w["box"] for w in own])
             spans: list[Span] = []
             styled = [_styled(str(wd.get("face") or face), fonts, wd, keep) for wd in known]
             shrink = _shrink(parts, known, [fonts.get(key, "") for _st, key in styled], [w["box"] for w in own])

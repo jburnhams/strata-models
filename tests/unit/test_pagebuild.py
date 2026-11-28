@@ -853,3 +853,24 @@ def test_a_figure_given_its_picture_is_drawn_from_it_and_not_cut_again(tmp_path)
     doc.close()
     assert red > 150
     assert green < 100  # in colour: the given picture, not the scan cut in grey
+
+
+def test_a_stray_word_is_put_back_on_its_line():
+    """A word the fit matched beside itself (two thirds size, its left edge well right of its box) takes its line's size and baseline and
+    starts at its box; a line of several sizes on purpose (an advert's) keeps them; a short line is left alone."""
+    boxes = [[269, 1017, 184, 48], [475, 1029, 117, 36], [612, 1017, 106, 36], [738, 1016, 71, 37], [829, 1029, 93, 35]]
+    fitted = [
+        {"x": 440.0, "size_pt": 7.0, "size_px": 30.0, "baseline_y": 1050.0},
+        {"x": 476.0, "size_pt": 11.0, "size_px": 46.0, "baseline_y": 1053.0},
+        {"x": 613.0, "size_pt": 11.0, "size_px": 46.0, "baseline_y": 1053.0},
+        {"x": 739.0, "size_pt": 11.2, "size_px": 46.0, "baseline_y": 1053.0},
+        {"x": 830.0, "size_pt": 10.9, "size_px": 46.0, "baseline_y": 1054.0},
+    ]
+    got = pagebuild.steady(fitted, boxes)
+    assert (got[0]["x"], got[0]["size_pt"], got[0]["baseline_y"]) == (269.0, 11.0, 1053.0)
+    assert got[1:] == fitted[1:]
+    advert = [dict(w, size_pt=s) for w, s in zip(fitted, [24.0, 11.0, 18.0, 11.0, 30.0], strict=True)]
+    kept = pagebuild.steady(advert, boxes)
+    assert [w["size_pt"] for w in kept] == [24.0, 11.0, 18.0, 11.0, 30.0]
+    assert kept[0]["x"] == 269.0
+    assert pagebuild.steady(fitted[:3], boxes[:3]) == fitted[:3]
