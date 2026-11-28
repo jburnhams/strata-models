@@ -131,7 +131,9 @@ def run(handle: dict[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
         d = os.path.join(settings.data_dir(), "vectorise")
         os.makedirs(d, exist_ok=True)
         dest = os.path.join(d, hashlib.sha256(svg.encode()).hexdigest()[:20] + ".svg")
-    with open(str(dest), "w", encoding="utf8") as f:
+    with open(
+        str(dest), "w", encoding="utf8", newline=""
+    ) as f:  # as written: on Windows text mode would make each \n a \r\n, and `bytes` would not be the file's size
         f.write(svg)
     # the SVG drawn at the picture's size beside it: what people and model judges compare (evals.similarity reads `path` as a picture)
     preview = str(dest)[:-4] + ".png"
