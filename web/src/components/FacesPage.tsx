@@ -192,10 +192,25 @@ function OptIn({ t }: { t: Tag }) {
   )
 }
 
+// An opt-in tag can still lend the faces a person named to every search (owner, 2026-11-28): a family tape's named faces help
+// recognise those people in other apps, while its unnamed faces (other people's children) stay out. Meaningless for a tag searched anyway.
+function ShareNamed({ t }: { t: Tag }) {
+  const qc = useQueryClient()
+  const set = useAsyncAction(async (on: boolean) => { await facesApi.setTag(t.tag, t.opt_in, on); await qc.invalidateQueries({ queryKey: ['faces'] }) })
+  if (!t.opt_in) return <span className="type-body-sm text-muted-foreground">Searched anyway</span>
+  return (
+    <span className="grid gap-1">
+      <Switch label={`Named faces searched everywhere: ${t.tag}`} on={t.share_named} disabled={set.phase === 'pending'} onChange={on => set.run(on)} />
+      {set.error && <span role="alert" className="type-caption text-danger">{set.error}</span>}
+    </span>
+  )
+}
+
 const tagColumns: Column<Tag>[] = [
   { key: 'tag', header: 'Tag', cell: t => <span className="font-mono">{t.tag}</span>, sort: (a, b) => a.tag.localeCompare(b.tag) },
   { key: 'images', header: 'Pictures', numeric: true, cell: t => format.integer(t.images), sort: (a, b) => a.images - b.images },
   { key: 'opt', header: 'Searched', cell: t => <OptIn t={t} /> },
+  { key: 'shared', header: 'Named faces', cell: t => <ShareNamed t={t} /> },
 ]
 
 function Tags() {

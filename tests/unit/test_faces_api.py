@@ -244,6 +244,9 @@ def test_search_cluster_people_decisions_and_merges(client, scheduler, tmp_path)
 def test_tags(client):
     assert client.put("/api/faces/tags/nursery", json=dict(opt_in=True, note="children")).json()["opt_in"] is True
     assert [t["tag"] for t in client.get("/api/faces/tags").json()["items"]] == ["nursery"]
+    shared = client.put("/api/faces/tags/nursery", json=dict(opt_in=True, share_named=True)).json()
+    assert (shared["opt_in"], shared["share_named"]) == (True, True)
+    assert client.get("/api/faces/tags").json()["items"][0]["share_named"] is True
     assert client.put("/api/faces/tags/%20", json=dict(opt_in=True)).status_code == 400
 
 
