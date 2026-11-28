@@ -537,3 +537,34 @@ def test_body_type_of_one_size_is_no_mixed_page():
     assert not F.is_mixed(Page(31, 30, 31, 46, 31, 30, 32, 31, 31, 30))
     assert F.is_mixed(Page(60, 20, 24, 90, 33, 20, 70, 40, 25, 22))
     assert not F.is_mixed(Page(20, 90))
+
+
+def test_a_fit_is_kept_and_given_again_for_the_same_call(tmp_path, ttf, models):
+    """The same call on the same picture is answered from what was kept (seconds, not minutes); another picture, or the same picture
+    changed, is fitted again; a call with its own `out` is never kept."""
+    p, lines = block(tmp_path, ttf, size=40.0)
+    first = F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"]))
+    again = F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"]))
+    assert "cached" not in first
+    assert again.pop("cached") is True
+    assert again == first
+    os.utime(p, (1, 1))  # the picture changed
+    assert "cached" not in F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"]))
+    out = dict(image=p, lines=lines, candidates=["tinos"], out=str(tmp_path / "o.png"))
+    F.run(handle(models), out)
+    assert "cached" not in F.run(handle(models), out)
+
+
+def test_faces_are_fitted_in_processes_with_the_same_result(tmp_path, ttf, models, monkeypatch):
+    p, lines = block(tmp_path, ttf, size=40.0)
+    scan_faces = [F.Face("tinos", {"roman": ttf}), F.Face("tinos", {"roman": ttf})]
+    from PIL import Image
+
+    from stratamodels.evals import ink as INK
+
+    full, _ = INK.binarise(Image.open(p), 300, deskew=False)
+    scan = F.Scan(full, F._lines_of(dict(lines=lines), p, 300), 300)
+    serial = [F.fit_face(scan, f, quick=True) for f in scan_faces]
+    assert [r["f1"] for r in F.fit_faces(scan, scan_faces, quick=True)] == [r["f1"] for r in serial]
+    monkeypatch.setattr(F, "WORKERS", 1)
+    assert [r["f1"] for r in F.fit_faces(scan, scan_faces, quick=True)] == [r["f1"] for r in serial]
