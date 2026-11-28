@@ -770,3 +770,13 @@ def test_image_kind_clip_on_a_drawn_engraving(tmp_path):
     model = Registry.load().models["image-kind-clip"]
     out, again = measure(model, {"image": p})
     assert out["group"] in ("illustration", "other") and len(out["scores"]) == 5 and out["kind"] == again["kind"]
+
+
+@pytest.mark.skipif(
+    not IMAGE or bool(runtimes.available()["nsfw"]),
+    reason="needs STRATAMODELS_TEST_IMAGE, timm and torch (uv sync --group gpu)",
+)
+def test_nsfw_scores_a_picture_on_the_gpu():
+    out, _ = measure(Registry.load().resolve("nsfw"), dict(paths=[IMAGE]))
+    (ok,) = out["items"]
+    assert 0.0 <= ok["sensitive"] <= 1.0 and "error" not in ok

@@ -4,6 +4,11 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**`nsfw` role: a 0-1 sensitive score per picture (branch `nsfw-sensitive-role`)**
+The role was listed with NudeNet but had no runtime, so no app could ask the service. Chosen by looking at 341 real photos (see docs/progress.md): NudeNet's box score is not a fraction (0.45-0.7 on everyday pictures, 0.38-0.44 on explicit ones), Marqo's classifier is near 0 or 1.
+- `runtimes/nsfw.py`: **new**, runtime `nsfw` (timm and torch, the gpu group): `paths` or `path` in, `sensitive` per picture out; the model's own 384 px centre crop (squeezing the whole picture was measurably worse); a corrupt file fails its own item, not the job. `models.toml`: model `nsfw-marqo-384` (Apache-2.0, 0.3 GB), now the `nsfw` role's default; `nudenet-320n` stays listed for strata-stills, which runs it itself.
+- Tests: `tests/unit/test_nsfw_runtime.py`; real run: `tests/gpu`.
+
 **A picture eval asking Claude goes as one batch, not one batch per picture; pictures sent as the type they are (branch `claude/project-thread-sxtvfs`)**
 After the deploy, image-kind's Sonnet and Opus runs on the 100 hard pictures went at about one answer a minute: the CPU lane runs one job per model at a time, so each picture's delegated Claude call was queued alone and waited out a 2-minute batch of its own (about 3 hours for the run). One picture also failed both models: "The image was specified using the image/png media type" for an export whose bytes are a JPEG. Corrects the earlier entry's claim that a candidate's jobs "go as one batch" for image-kind and vectorise: that held only for models with a batch API themselves.
 - `scheduler.py`: a wait lane beside the CPU lane for jobs whose runtime says they only wait on another model (`waits(options)`), up to `wait_jobs` (`WAIT_JOBS`, 128) at once and many per model, so their delegated calls reach the batcher in the same tick; the model is busy (never evicted) while any runs, loads once (`_loads`, a lock per model) and waits for a load asked from the Models page; `/api/status` `slots.wait`.

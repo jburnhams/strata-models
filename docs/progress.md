@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-28: nsfw role, chosen on real photos
+Question: filecat wants a `sensitive` 0-1 score for every image, and possibly gore and violence too. The role existed (NudeNet 320n) but nothing served it. Compared on 341 photos from a personal library (250 that NudeNet had scored 0.3 or more, 91 under it; ordinary family and travel pictures plus some real nudity): NudeNet's stored score, Falconsai/nsfw_image_detection (ViT), Marqo/nsfw-image-detection-384 (ViT-tiny, timm) and zero-shot CLIP ViT-L/14 with prompts per category. No labels existed, so the groups where they disagreed were looked at as contact sheets.
+- NudeNet only (34 pictures at 0.45-0.7, the others under 0.2): all ordinary (a shirtless swimmer, a baby, a cake, a mug, a face). Classifiers only (12): explicit pictures NudeNet gave 0.38-0.44, under the 0.45 cut-off strata-stills uses, plus babies in a bath and an art print. Both (34): real nudity, and a few statues. So NudeNet's score is not a fraction and its threshold both passes explicit pictures and flags innocent ones.
+- Marqo found every real positive in the sample, none of the 34 false NudeNet positives went above 0.17 and the real ones were at 0.81 or more; Falconsai missed about two thirds of the real ones; CLIP found them but flagged about 60 ordinary pictures at 0.2.
+- Preprocessing: the model's centre crop beat squeezing the whole picture (ordinary pictures up to 0.70, explicit down to 0.48 when squeezed); a far edge of a wide photo is outside the crop.
+- Speed: 10 pictures a second end to end on one decode thread (decode dominates), the model alone about 40 a second on the 3060.
+- Gore and violence: zero-shot CLIP prompts were useless (the 40 most "violent" pictures were a child with a stick, a balloon, a cake); the sample has no real gore, so recall of nothing here can be measured. Next: a vision-language reader asked per category, evaluated on a small labelled sample (spec `evals/specs/sensitive-categories.toml`, to be written when there are examples).
+
 ## 2026-11-26: possible labels and proposing people from them
 Google Photos (Takeout) puts names on photos, not on faces, and bright-horizons has its own named children. The owner wants these as
 possible labels that become proposed people once enough of them agree, waiting for a person to confirm; one global layer of
