@@ -856,3 +856,81 @@ def test_freed_memory_is_given_back_at_most_once_a_minute(scheduler, clock):
     scheduler._tidy()
     scheduler._tidy()
     assert calls == [False, True]  # a model went: what only cycles hold is collected too
+
+
+def _waiter(scheduler, key="asker"):
+    """A zero-VRAM model whose jobs only wait on another model (image-kind asking Claude): it runs in the wait lane."""
+    from stratamodels.registry import Model
+
+    scheduler.registry.models[key] = Model(
+        key=key, runtime="fake", name="", roles=("echo",), vram_gb=0.0, options={"waits": True}
+    )
+
+
+def test_jobs_that_wait_on_another_model_run_many_at_once_so_their_calls_share_one_batch(scheduler):
+    _waiter(scheduler)
+    _cloud(scheduler)
+    jobs = [scheduler.submit("echo", {}, "evals", priority="low", model="asker") for _ in range(6)]
+    tickets = [scheduler.dispatch() for _ in range(6)]  # more than cpu_jobs (4), all on one model
+    assert [t["job"]["id"] for t in tickets] == [j["id"] for j in jobs] and {t["lane"] for t in tickets} == {"wait"}
+    assert scheduler.waiters["asker"] == 6 and "asker" in scheduler.busy  # never evicted while any runs
+    c = scheduler.submit("echo", {}, "app", model="cloud")
+    assert scheduler.dispatch()["job"]["id"] == c["id"]  # the CPU lane's own slots are untouched
+    for t in tickets[:-1]:
+        scheduler.execute(t)
+    assert "asker" in scheduler.busy and scheduler.waiters["asker"] == 1
+    assert scheduler.execute(tickets[-1])["status"] == "done"
+    assert "asker" not in scheduler.busy and "asker" not in scheduler.waiters
+    assert sum(1 for h in fake.LOADED if h["model"] == "asker") == 1  # loaded once, the handle shared
+    assert scheduler.status()["slots"]["wait"] == scheduler.wait_jobs
+
+
+def test_the_wait_lane_has_its_own_cap_and_waits_for_a_load_asked_from_the_models_page(scheduler):
+    from stratamodels.scheduler import Scheduler
+
+    s = Scheduler(scheduler.store, scheduler.registry, "/m", wait_jobs=2, probe=scheduler.probe, clock=scheduler.clock)
+    _waiter(s)
+    for _ in range(3):
+        s.submit("echo", {}, "evals", priority="low", model="asker")
+    a, b = s.dispatch(), s.dispatch()
+    assert (a["lane"], b["lane"]) == ("wait", "wait") and s.dispatch() is None
+    s.execute(a)
+    s.execute(b)
+    s.busy["asker"] = "load"  # a load from the Models page holds the model: its waiting jobs do not start beside it
+    assert s.dispatch() is None
+    s.busy.pop("asker")
+    assert s.dispatch()["lane"] == "wait"
+
+
+def test_waiting_jobs_that_start_together_load_their_model_once(scheduler, monkeypatch):
+    _waiter(scheduler)
+    gate, real, loads = threading.Event(), fake.load, []
+
+    def slow_load(m, d):
+        loads.append(m.key)
+        gate.wait(5)
+        return real(m, d)
+
+    monkeypatch.setattr(fake, "load", slow_load)
+    for _ in range(3):
+        scheduler.submit("echo", {}, "evals", priority="low", model="asker")
+    tickets = [scheduler.dispatch() for _ in range(3)]
+    threads = [threading.Thread(target=scheduler.execute, args=(t,)) for t in tickets]
+    for t in threads:
+        t.start()
+    time.sleep(0.2)
+    gate.set()
+    for t in threads:
+        t.join(5)
+    assert loads == ["asker"] and all(scheduler.store.get(t["job"]["id"])["status"] == "done" for t in tickets)
+
+
+def test_a_runtime_without_waits_or_a_gpu_model_is_never_in_the_wait_lane(scheduler, monkeypatch):
+    from stratamodels.registry import Model
+
+    assert not scheduler._waits(None) and not scheduler._waits(scheduler.registry.models["small"])
+    m = Model(key="gpuw", runtime="fake", name="", roles=("echo",), vram_gb=2.0, options={"waits": True})
+    assert not scheduler._waits(m)
+    m0 = Model(key="nort", runtime="nope", name="", roles=("echo",), vram_gb=0.0)
+    monkeypatch.setattr(scheduler, "get_runtime", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    assert not scheduler._waits(m0)

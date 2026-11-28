@@ -1267,12 +1267,16 @@ def _batchable(role, model):
     """Whether jobs on `model` (or the role's own) go through a batch API, read from this process's registry (models.toml or the database
     the CLI was given): the service answers the same, as it runs the same registry."""
     try:
-        from stratamodels import registry, runtimes
+        from stratamodels import batches, registry, runtimes
 
         eng = settings.engine()
         reg = registry.Registry.from_db(eng) if eng is not None else registry.Registry.load()
         m = reg.resolve(role, model)
-        return m.served and callable(getattr(runtimes.get(m.runtime), "batch_submit", None))
+        if m.served and callable(getattr(runtimes.get(m.runtime), "batch_submit", None)):
+            return True
+        return batches.asks_batched(
+            m, reg.models, runtimes.get
+        )  # waits on one (image-kind asking Claude): the wait lane runs them together
     except Exception:
         return False
 
@@ -1329,7 +1333,7 @@ class SchedulerExecutor:
 
     def batchable(self, role, model):
         try:
-            return self.s.batcher.batchable(self.s.registry.resolve(role, model, self.app))
+            return self.s.batcher.one_lot(self.s.registry.resolve(role, model, self.app))
         except Exception:  # an unknown role or model: the submit says why
             return False
 
