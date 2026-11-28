@@ -47,3 +47,12 @@ def test_via_service_expands_the_preset_and_queues_a_vision_job(monkeypatch):
     assert q["image"] == "/x.png"
     run({"prompt": "as it is"})
     assert sent[1][1] == {"prompt": "as it is"}
+
+
+def test_a_gpu_model_is_never_loaded_in_a_runtime(monkeypatch):
+    from stratamodels import settings
+
+    monkeypatch.delenv("STRATAMODELS_DELEGATE_VIA", raising=False)
+    monkeypatch.setattr(settings, "engine", lambda: None)
+    with pytest.raises(RunError, match="needs the GPU .* only as a job on the service"):
+        delegate.caller("qwen3.5-9b-vl", "")

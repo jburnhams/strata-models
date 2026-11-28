@@ -396,7 +396,8 @@ def _fit(svg: str, w: int, h: int) -> str:
     head = re.match(r"<svg\b[^>]*>", svg, re.S)
     if not head:
         return svg
-    tag = re.sub(r'\s(width|height)="[^"]*"', "", head.group(0))
+    # every sizing attribute the model wrote goes, in either quote style, so the root never holds one twice (and a fitted SVG fits again)
+    tag = re.sub(r"""\s(width|height|preserveAspectRatio)\s*=\s*("[^"]*"|'[^']*')""", "", head.group(0))
     if "viewBox" not in tag:
         tag = tag.replace("<svg", f'<svg viewBox="0 0 {w} {h}"', 1)
     tag = tag.replace("<svg", f'<svg width="{w}" height="{h}" preserveAspectRatio="none"', 1)
@@ -439,9 +440,10 @@ def _llm_engine(
             for i in range(int(o.get("refine", 0))):
                 cmp = _side_by_side(rgb, svg, d)
                 r = _ask(h, "vectorise-refine-v1", size + "\n\nYour SVG:\n" + svg, [cmp], tokens, cost)
-                try:
-                    svg = _fit(svg_of(str(r.get("text") or "")), W, H)
-                    render(svg, 64, 64)
+                try:  # drawn before it replaces the drawing: a revision that does not render must not end the job
+                    revised = _fit(svg_of(str(r.get("text") or "")), W, H)
+                    render(revised, 64, 64)
+                    svg = revised
                     steps.append(dict(step=f"refine {i + 1}", bytes=len(svg)))
                 except RunError as e:  # a broken revision keeps the drawing before it
                     steps.append(dict(step=f"refine {i + 1}", error=str(e)[:200]))

@@ -293,3 +293,20 @@ def test_the_drawing_model_is_asked_through_the_delegate(tmp_path, monkeypatch):
     h, _ = handle(engine="llm", llm="claude-opus-5-5-api")
     out = vectorise.run(h, {"image": plate(tmp_path / "p.png")})
     assert got == [("claude-opus-5-5-api", None)] and 'r="51"' in out["svg"]
+
+
+def test_a_refinement_that_does_not_render_keeps_the_drawing_before_it(tmp_path):
+    h, _ = handle(
+        [CIRCLE, "<svg><path d='M0 0'></svg>"], engine="llm", llm="m", refine=1
+    )  # an <svg> block, but not XML
+    out = vectorise.run(h, {"image": plate(tmp_path / "p.png")})
+    assert 'r="51"' in out["svg"] and "error" in out["steps"][1]
+
+
+def test_fit_replaces_sizing_in_either_quote_style_and_fits_again():
+    svg = "<svg viewBox='0 0 24 18' width='5' height=\"6\" preserveAspectRatio='xMidYMid'><path d='M0 0'/></svg>"
+    once = vectorise._fit(svg, 240, 180)
+    head = once[: once.index(">")]
+    assert head.count("width=") == head.count("height=") == head.count("preserveAspectRatio=") == 1
+    assert vectorise._fit(once, 240, 180) == once
+    vectorise.render(once, 24, 18)

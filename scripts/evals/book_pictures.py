@@ -10,10 +10,15 @@ no label are listed, so they can be labelled (`--extra`, the same format) or lef
   image-kind        every labelled file: input {image}, reference {kind}, tags {book, kind, group, line_art, hard (a note says why)}
   vectorise-plates  the labels marked `vectorise = true`, one file each (the figure when there is one): input {image}, tags {book, kind}
 
-    uv run python scripts/evals/book_pictures.py --pictures ~/code/_plates-export [--extra more-labels.toml]
+    uv run python scripts/evals/book_pictures.py --pictures ~/code/_plates-export [--extra more-labels.toml] [--other others.toml]
+
+`--other` adds pictures from anywhere, so the kinds are not only a book's (photographs, screenshots, drawings, documents from a photo
+library or a Takeout): `[[pictures]]` with `path`, `kind` (optional `also`, `note`, `vectorise`) and `source` (a word, the item's `book`
+tag). Those files are personal: keep that label file out of git (it names local paths) and the pictures in the data folder.
 """
 
 import argparse
+import hashlib
 import math
 import os
 import random
@@ -72,23 +77,45 @@ def match(files, labs):
     return got, unmatched
 
 
+def others(paths):
+    """[(file, label, name)] of `--other` label files: each picture named <source>-<hash of its path> in the data folder."""
+    out = []
+    for p in paths:
+        with open(p, "rb") as f:
+            for lab in tomllib.load(f)["pictures"]:
+                if lab["kind"] not in KINDS:
+                    raise SystemExit(f"{p}: unknown kind {lab['kind']!r}")
+                src = os.path.expanduser(lab["path"])
+                if not os.path.isfile(src):
+                    raise SystemExit(f"{p}: no such picture {lab['path']!r}")
+                ext = os.path.splitext(src)[1].lower() or ".jpg"
+                tag = re.sub(r"[^a-z0-9]+", "-", str(lab.get("source", "other")).lower()).strip("-") or "other"
+                name = f"{tag}-{hashlib.sha256(src.encode()).hexdigest()[:12]}{ext}"
+                out.append((src, dict(lab, book=tag), name))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--pictures", required=True, help="folder of <book>-p<page>-f<id>.jpg files")
     ap.add_argument(
         "--extra", nargs="*", default=[], help="more label files, the same format as image_kind/labels.toml"
     )
+    ap.add_argument(
+        "--other", nargs="*", default=[], help="label files of pictures by path (not from the books; kept out of git)"
+    )
     a = ap.parse_args()
     files = sorted(os.path.join(a.pictures, f) for f in os.listdir(a.pictures))
     got, unmatched = match(files, labels([os.path.join(HERE, "labels.toml"), *a.extra]))
+    got = [(f, lab, os.path.basename(f)) for f, lab in got] + others(a.other)
     dest = os.path.join(settings.data_dir(), "evals", "book-pictures")
     os.makedirs(dest, exist_ok=True)
     kinds, plates, chosen = [], [], {}
-    for f, lab in got:
-        to = os.path.join(dest, os.path.basename(f))
+    for f, lab, name in got:
+        to = os.path.join(dest, name)
         if not os.path.isfile(to) or os.path.getsize(to) != os.path.getsize(f):
             shutil.copyfile(f, to)
-        stem = os.path.splitext(os.path.basename(f))[0]
+        stem = os.path.splitext(name)[0]
         k = kind_of(lab["kind"])
         kinds.append(
             dict(
@@ -105,7 +132,7 @@ def main():
             )
         )
         if lab.get("vectorise"):
-            key = (lab["book"], lab["page"], lab["shape"])
+            key = (lab["book"], lab.get("page", stem), lab.get("shape"))
             if key not in chosen or chosen[key][0].endswith(
                 "-fpage"
             ):  # the figure, not the whole page, when strata-scan cut one
@@ -119,7 +146,7 @@ def main():
     C.write_dataset(
         "image-kind",
         kinds,
-        description=f"{len(kinds)} pictures of three scanned books, kinds labelled by eye (scripts/evals/image_kind/labels.toml)",
+        description=f"{len(kinds)} pictures of three scanned books (and any --other), kinds labelled by eye (scripts/evals/image_kind/labels.toml)",
     )
     C.write_dataset(
         "vectorise-plates",

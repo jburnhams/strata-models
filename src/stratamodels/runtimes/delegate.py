@@ -48,6 +48,13 @@ def caller(
     m = reg.models.get(key)
     if m is None:
         raise RunError(f"the model {key!r} is not in the registry")
+    if (m.vram_gb or 0) > 0:
+        # loaded here it would hold the card outside the scheduler's budget (a second llama-server beside OCR's, or one during an
+        # exclusive lease): a GPU model is asked only as its own job, through the queue
+        raise RunError(
+            f"the model {key!r} needs the GPU ({m.vram_gb} GB) and is asked only as a job on the service: run the eval with --local, "
+            "which sends it there"
+        )
     rt = runtimes.get(m.runtime)
     h = rt.load(m, models_dir)
     return (lambda p: rt.run(h, p)), (lambda: rt.unload(h))
