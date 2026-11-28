@@ -10,7 +10,7 @@ cleaned scan). numpy and Pillow only, like runtimes/pageclean.py, whose flatten 
 
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 from stratamodels.runtimes import pageclean
 
@@ -98,8 +98,13 @@ def dilate(mask, r):
     of a font fit (2026-11-28); the same result but at the picture's edge, where PIL's filter takes the edge pixel as repeated."""
     if r <= 0:
         return mask
-    import cv2
-
+    try:
+        import cv2
+    except (
+        ImportError
+    ):  # OpenCV is in the dev and gpu groups only: an install without it measures as before, slower (review)
+        im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * r + 1))
+        return np.asarray(im) > 127
     k = np.ones((2 * r + 1, 2 * r + 1), np.uint8)
     return cv2.dilate(mask.astype(np.uint8), k, borderType=cv2.BORDER_REPLICATE) > 0
 
@@ -107,8 +112,11 @@ def dilate(mask, r):
 def erode(mask, r):
     if r <= 0:
         return mask
-    import cv2
-
+    try:
+        import cv2
+    except ImportError:
+        im = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).filter(ImageFilter.MinFilter(2 * r + 1))
+        return np.asarray(im) > 127
     k = np.ones((2 * r + 1, 2 * r + 1), np.uint8)
     return cv2.erode(mask.astype(np.uint8), k, borderType=cv2.BORDER_REPLICATE) > 0
 

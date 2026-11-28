@@ -548,8 +548,17 @@ def test_a_fit_is_kept_and_given_again_for_the_same_call(tmp_path, ttf, models):
     assert "cached" not in first
     assert again.pop("cached") is True
     assert again == first
-    os.utime(p, (1, 1))  # the picture changed
+    os.utime(p, (1, 1))  # touched, its bytes the same: still kept
+    assert F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"])).get("cached") is True
+    changed = Image.open(p).convert("L")
+    changed.putpixel((0, 0), 0)
+    changed.save(p)  # the picture changed (a speck in its corner)
     assert "cached" not in F.run(handle(models), dict(image=p, lines=lines, candidates=["tinos"]))
+    ocr = tmp_path / "ocr.json"
+    ocr.write_text(json.dumps(dict(lines=lines)))
+    F.run(handle(models), dict(image=p, ocr=str(ocr), candidates=["tinos"]))
+    ocr.write_text(json.dumps(dict(lines=lines[:1])))  # the OCR corrected in place
+    assert "cached" not in F.run(handle(models), dict(image=p, ocr=str(ocr), candidates=["tinos"]))
     out = dict(image=p, lines=lines, candidates=["tinos"], out=str(tmp_path / "o.png"))
     F.run(handle(models), out)
     assert "cached" not in F.run(handle(models), out)

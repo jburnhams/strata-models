@@ -10,6 +10,7 @@ Jonathan: reuse model work where possible; see if the GPU can help, or optimise 
 - `evals/ink.py` `dilate`, `erode`: OpenCV's (the same result but at the picture's edge): 79 s to 59 s.
 - `runtimes/fontfit.py`: **new** `fit_faces` fits a page's faces in `WORKERS` (4) spawned processes, each face independent: 51 s to 22 s, the same faces and scores. `run` keeps each fit (data dir `cache/fontfit/`, named by the params, the picture's size and time and `_code_key`: this module, fonts.toml and the ink measure) and gives it again for the same call, while its files are there; a call with its own `out` is never kept.
 - `__main__.py`: the CLI only when run as the main module, not when a worker process imports it as its parent's.
+- Review: a kept fit is named by its picture's and OCR file's bytes, not the picture's size and time (a picture rewritten within a second, an OCR file corrected in place, are fitted again); `dilate` and `erode` fall back to PIL's filters where OpenCV is not installed (it is in the dev and gpu groups only).
 - `tests/unit/test_fontfit.py`.
 
 **page-build: a stray word put back on its line (branch `stray-words`)**

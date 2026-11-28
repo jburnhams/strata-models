@@ -948,9 +948,16 @@ def _kept_path(handle, params) -> str | None:
     path = params.get("image") or params.get("path")
     if not isinstance(path, str) or not os.path.isfile(path):
         return None
-    st = os.stat(path)
+
+    def contents(p: object) -> str | None:
+        # the file's bytes, not its size and time: a picture rewritten within a second, an OCR file corrected in place (review)
+        if not isinstance(p, str) or not os.path.isfile(p):
+            return None
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
     what = json.dumps(
-        [params, [st.st_size, int(st.st_mtime)], _code_key(), handle.get("top"), handle.get("propose")],
+        [params, contents(path), contents(params.get("ocr")), _code_key(), handle.get("top"), handle.get("propose")],
         sort_keys=True,
         default=str,
     )
