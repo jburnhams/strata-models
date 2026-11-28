@@ -773,12 +773,12 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
         )
         if run_:
             log(f"{spec.name}: stage {level + 1}: {len(want) - len(run_)} of {len(want)} cached, {len(run_)} to run")
-        for i in range(0, len(run_), batch):
-            chunk = run_[i : i + batch]
-            ids = [
-                executor.submit(want[sk][0]["role"], want[sk][1], want[sk][0]["model"], want[sk][0]["options"])
-                for sk in chunk
-            ]
+        done_n = 0
+        for chunk in _chunks(executor, run_, batch, lambda sk, w=want: (w[sk][0]["role"], w[sk][0]["model"])):
+            ids = _send(
+                executor,
+                [(want[sk][0]["role"], want[sk][1], want[sk][0]["model"], want[sk][0]["options"]) for sk in chunk],
+            )
             rows = []
             for sk, jid in zip(chunk, ids):
                 j = executor.wait(jid)
@@ -800,7 +800,8 @@ def _run_stages(spec, engine, executor, todo, ds, log, batch):
                 )
             save(engine, rows)
             have.update(cached(engine, chunk))
-            log(f"  stage {level + 1}: {min(i + batch, len(run_))} of {len(run_)} run")
+            done_n += len(chunk)
+            log(f"  stage {level + 1}: {done_n} of {len(run_)} run")
         for sk, (_first, p, _it, keys) in want.items():
             r = have.get(sk)
             for k, stage in keys:
@@ -927,8 +928,8 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
 
     def go(todo):
         nonlocal failed, recovered
-        for i in range(0, len(todo), batch):
-            chunk = todo[i : i + batch]
+        done_n = 0
+        for chunk in _chunks(executor, todo, batch, lambda t: (spec.role, t[0].model)):
             sent = [
                 (
                     with_sources(
@@ -947,16 +948,20 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
             # a job that already ran with exactly these params (the service restarted before its run saved it) is taken from the jobs table,
             # not run again; the rest are all queued at once, so the queue stays full while this waits on them one by one
             ids = [
-                (
-                    recover
-                    and (
-                        done_job(engine, spec.role, c.model, params, c.options)
-                        or pending_job(engine, spec.role, c.model, params, c.options)
-                    )
+                recover
+                and (
+                    done_job(engine, spec.role, c.model, params, c.options)
+                    or pending_job(engine, spec.role, c.model, params, c.options)
                 )
-                or executor.submit(spec.role, params, c.model, c.options)
                 for params, c, it, k in sent
             ]  # recover: a finished job's output is taken; a queued or running one (left by a run a restart cut short) is waited on, not queued again
+            new = [n for n, j in enumerate(ids) if not j]
+            for n, jid in zip(
+                new,
+                _send(executor, [(spec.role, sent[n][0], sent[n][1].model, sent[n][1].options) for n in new]),
+                strict=True,
+            ):
+                ids[n] = jid  # the rest queued together: on a Claude model one batch
             recovered += sum(isinstance(j, dict) for j in ids)
             for (_params, c, it, k), jid in zip(sent, ids, strict=True):
                 j = (
@@ -966,7 +971,8 @@ def run(spec, engine, executor, dataset=None, candidates=None, limit=None, log=p
                 save(
                     engine, [_result_row(spec, ds, c, it, k, j, staged)]
                 )  # each as it comes: a restart loses only the job running then
-            log(f"  {min(i + batch, len(todo))} of {len(todo)} run")
+            done_n += len(chunk)
+            log(f"  {done_n} of {len(todo)} run")
 
     # candidates made from others' outputs run after them, once those are saved; one whose sources are missing or failed waits for a later run
     made = [t for t in todo if t[0].sources]
@@ -1257,6 +1263,57 @@ def explicit(params):
     return params if "upsample" in params else {**params, "upsample": False}
 
 
+def _batchable(role, model):
+    """Whether jobs on `model` (or the role's own) go through a batch API, read from this process's registry (models.toml or the database
+    the CLI was given): the service answers the same, as it runs the same registry."""
+    try:
+        from stratamodels import registry, runtimes
+
+        eng = settings.engine()
+        reg = registry.Registry.from_db(eng) if eng is not None else registry.Registry.load()
+        m = reg.resolve(role, model)
+        return m.served and callable(getattr(runtimes.get(m.runtime), "batch_submit", None))
+    except Exception:
+        return False
+
+
+def _send(executor, jobs):
+    """Queue [(role, params, model, options)] and return their ids in order: each run of jobs on the same role, model and options in one
+    bulk call (one batch on a model with a batch API), one by one on an executor without submit_many (a test's stand-in)."""
+    many = getattr(executor, "submit_many", None)
+    if many is None:
+        return [executor.submit(r, p, m, o) for r, p, m, o in jobs]
+    ids, i = [], 0
+    while i < len(jobs):
+        r, _, m, o = jobs[i]
+        j = i
+        while j < len(jobs) and jobs[j][0] == r and jobs[j][2] == m and jobs[j][3] == o:
+            j += 1
+        ids += many(r, [p for _, p, _, _ in jobs[i:j]], m, o)
+        i = j
+    return ids
+
+
+def _chunks(executor, todo, size, role_model):
+    """`todo` cut into the lots queued together: every job on a model with a batch API in one lot (one batch, waited on together: a batch
+    answers in minutes, 32 of them one after another would take an hour), the rest `size` at a time, so the GPU queue holds a chunk, not an
+    eval (Jonathan, 2026-11-28: all evals batch)."""
+    test = getattr(executor, "batchable", None)
+    seen = {}
+
+    def batched(t):
+        rm = role_model(t)
+        if rm not in seen:
+            seen[rm] = bool(test and test(*rm))
+        return seen[rm]
+
+    bulk = [t for t in todo if batched(t)]
+    rest = [t for t in todo if not batched(t)]
+    out = [bulk] if bulk else []
+    out += [rest[i : i + size] for i in range(0, len(rest), size)]
+    return out
+
+
 class SchedulerExecutor:
     """Runs eval jobs in this process's scheduler (the service, and tests)."""
 
@@ -1264,8 +1321,17 @@ class SchedulerExecutor:
         self.s, self.app = scheduler, app
 
     def submit(self, role, params, model, options):
-        # low priority work is queued in bulk; never batched: an eval waits on each chunk (and a judge on each verdict) before the next
-        return self.s.submit_many(role, [explicit(params)], self.app, "low", model, options or None, batch=False)[0]
+        return self.submit_many(role, [params], model, options)[0]
+
+    def submit_many(self, role, items, model, options):
+        # low priority, in one call: on a model with a batch API the lot goes as one batch (half price; batches.py)
+        return self.s.submit_many(role, [explicit(p) for p in items], self.app, "low", model, options or None)
+
+    def batchable(self, role, model):
+        try:
+            return self.s.batcher.batchable(self.s.registry.resolve(role, model, self.app))
+        except Exception:  # an unknown role or model: the submit says why
+            return False
 
     def wait(self, job_id):
         while True:
@@ -1281,7 +1347,13 @@ class ClientExecutor:
         self.sm, self.app = client, app
 
     def submit(self, role, params, model, options):
-        return self.sm.submit_many(role, [explicit(params)], self.app, "low", model, options or None, batch=False)[0]
+        return self.submit_many(role, [params], model, options)[0]
+
+    def submit_many(self, role, items, model, options):
+        return self.sm.submit_many(role, [explicit(p) for p in items], self.app, "low", model, options or None)
+
+    def batchable(self, role, model):
+        return _batchable(role, model)
 
     def wait(self, job_id):
         return self.sm.wait_job(job_id)

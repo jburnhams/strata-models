@@ -369,32 +369,30 @@ def test_batch_prices_and_reserving_many(ledger):  # noqa: F811
     assert spend.state("claude")["left"] == 0.0
 
 
-def test_a_bulk_call_of_min_jobs_or_more_is_batched_and_fewer_run_at_once(sch, clock):
-    sch.batcher.min_jobs = 3
+def test_every_claude_job_is_batched_but_one_at_high_priority(sch, clock):
+    """Jonathan, 2026-11-28: all models and evals use batch; only an individual high-priority call runs at once."""
     items = [
         dict(prompt=f"describe {i}", max_tokens=100, batch=False) for i in range(3)
     ]  # an item's own flag is not read
-    many = bulk(sch, "caption", items, batch=None)
-    assert [j["params"] for j in many] == [dict(prompt=f"describe {i}", max_tokens=100, batch=True) for i in range(3)]
+    for b in (None, False, True):  # nor the call's
+        many = bulk(sch, "caption", items, batch=b)
+        assert [j["params"] for j in many] == [
+            dict(prompt=f"describe {i}", max_tokens=100, batch=True) for i in range(3)
+        ]
+    (one,) = bulk(sch, "caption", [dict(prompt="c")], batch=False)  # one, at normal priority: still batched
+    low = sch.submit("caption", dict(prompt="x"), "app", priority="low")  # queued on its own, not high: batched
+    assert sch.batcher.takes(one) and sch.batcher.takes(low)
+    two_high = bulk(sch, "caption", [dict(prompt="a"), dict(prompt="b")], priority="high")
+    assert all(sch.batcher.takes(j) for j in two_high)  # high, but more than one: batched
     (row,) = sch.batcher.step()
-    assert sorted(int(k) for k in row["jobs"]) == [j["id"] for j in many]
-    few = bulk(sch, "caption", [dict(prompt="a"), dict(prompt="b", batch=True)], batch=None)
-    never = bulk(sch, "caption", items, batch=False)
-    assert not any(sch.batcher.takes(j) or "batch" in j["params"] for j in few + never)
-    assert sch.batcher.step() == []
+    assert len(row["jobs"]) == 3 * 3 + 1 + 1 + 2
+    high = sch.submit("caption", dict(prompt="now", batch=True), "app", priority="high")
+    (high_bulk,) = bulk(sch, "caption", [dict(prompt="now too")], priority="high")
+    assert "batch" not in high["params"] and not sch.batcher.takes(high) and not sch.batcher.takes(high_bulk)
     sch.client.messages.reply = claude_reply("now")
     sch.client.messages.count = 50
     r = sch.step()["result"]
-    assert r["text"] == "now" and "batch" not in r  # the CPU lane runs them as calls made at once
-    (one,) = bulk(sch, "caption", [dict(prompt="c")], batch=True)  # true: however few
-    assert sch.batcher.takes(one)
-
-
-def test_a_job_queued_on_its_own_is_never_batched(sch):
-    j = sch.submit("caption", dict(prompt="x", batch=True), "app", priority="high")
-    assert "batch" not in j["params"] and not sch.batcher.takes(j)
-    n = sch.submit("caption", dict(prompt="x", batch=True), "app")
-    assert not sch.batcher.takes(n)
+    assert r["text"] == "now" and "batch" not in r  # the CPU lane runs it as a call made at once
 
 
 def test_a_bulk_submission_is_checked_before_anything_is_queued(sch):

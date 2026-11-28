@@ -1,0 +1,70 @@
+name = "image-kind"
+question = "What kind of picture is each one strata-scan cuts from a book (20 kinds: engraving, woodcut, halftone, hand-coloured plate, marbled pattern...), and is it broadly an illustration, a photo or neither? Which reader says so best: rules, CLIP or a vision-language model?"
+role = "image-kind"
+dataset = "image-kind"           # scripts/evals/book_pictures.py: the figures and picture pages of Ward 1874, Collier 1828 and Speaight's history, kinds labelled by eye
+metrics = ["group_right", "kind_right", "line_right", "group_f1", "kind_f1", "latency_s", "cost_usd", "failed"]
+judge = false                    # every item has a label
+
+[decision]
+primary = "group_right"
+baseline = "rules"
+min_effect = 0.05
+guards = { failed = 1.0 }
+# The group (illustration, photo, other) is what Jonathan asked to rely on; kind_right and kind_f1 say how far the fine kinds can be trusted,
+# and line_right is the one strata-scan would act on (vectorise or keep the picture). The books are mostly engravings (Cruikshank's 24 plates
+# are near copies of each other), so read the macro F1s beside the shares: a reader that calls everything an engraving scores well on shares.
+
+[[candidates]]
+name = "rules"
+model = "image-kind-rules"
+note = "tone, colour, a halftone screen's spectral peak and edges, thresholds set by eye"
+
+[[candidates]]
+name = "clip-b32"
+model = "image-kind-clip"
+note = "zero-shot CLIP ViT-B/32 on the CPU, three prompts a kind"
+
+[[candidates]]
+name = "clip-l14"
+model = "image-kind-clip"
+options = { arch = "ViT-L-14:laion2b_s32b_b82k" }
+
+[[candidates]]
+name = "clip-h14"
+model = "image-kind-clip"
+options = { arch = "ViT-H-14:laion2b_s32b_b79k" }
+
+[[candidates]]
+name = "qwen"
+model = "image-kind-vlm"
+options = { vlm = "qwen3.5-9b-vl" }
+note = "the local Qwen 3.5 9B through the service's queue (it is loaded for strata-scan's OCR correction anyway)"
+
+[[candidates]]
+name = "haiku"
+model = "image-kind-vlm"
+options = { vlm = "claude-haiku-5-5-api" }
+
+[[candidates]]
+name = "sonnet"
+model = "image-kind-vlm"
+options = { vlm = "claude-sonnet-5-5-api" }
+items = "image-kind-hard"  # Jonathan, 2026-11-28: Haiku on all, Sonnet and Opus only where Haiku struggles (that dataset: Haiku's misses and a few it got right)
+
+[[candidates]]
+name = "opus"
+model = "image-kind-vlm"
+options = { vlm = "claude-opus-5-5-api" }
+items = "image-kind-hard"  # Jonathan, 2026-11-28: Haiku on all, Sonnet and Opus only where Haiku struggles (that dataset: Haiku's misses and a few it got right)
+
+[[candidates]]
+name = "flash-lite"
+model = "image-kind-vlm"
+options = { vlm = "gemini-3.5-flash-lite-api" }
+note = "the free key"
+
+[[candidates]]
+name = "nemotron"
+model = "image-kind-vlm"
+options = { vlm = "nim-nemotron-3.5-super-vl" }
+note = "NVIDIA NIM's free tier"

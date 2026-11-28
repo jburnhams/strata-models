@@ -22,6 +22,8 @@ dependencies = [
     "anthropic>=2.8.0",
     "scipy>=1.17.1",   # page-build: the scan's ruled lines (rules = true), min/max filters and labelling
     "fonttools>=4.68.0",
+    "vtracer>=0.6.15",  # vectorise: VTracer (MIT), colour and black-and-white tracing in-process
+    "resvg-py>=0.5.0",  # vectorise and its eval: an SVG drawn back to pixels (resvg, in-process), to score it and to show it
 ]
 
 [project.scripts]
@@ -73,7 +75,7 @@ markers = [
 [tool.coverage.run]
 source = ["src/stratamodels"]
 branch = true
-omit = ["*/__main__.py", "*/runtimes/faces.py", "*/runtimes/whisper.py"]       # the real runtimes need the GPU stack; they are covered by tests/gpu (run on omarchy: pytest tests/gpu)
+omit = ["*/__main__.py", "*/runtimes/faces.py", "*/runtimes/whisper.py", "*/runtimes/imagekind_clip.py"]       # the real runtimes need the GPU stack; they are covered by tests/gpu (run on omarchy: pytest tests/gpu)
 
 [tool.coverage.report]
 skip_empty = true

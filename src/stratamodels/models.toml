@@ -107,6 +107,14 @@ model = "buffalo_l-tracks"                   # for strata-360 and strata-reels; 
 description = "A scanned page rebuilt as a PDF with real text, from a page description (layout, text, styles, fonts, figures) or a plain OCR answer"
 model = "pagebuild-opus-layout"              # Tesseract's lines regrouped into blocks by Claude Opus (eval page-layout, 2026-11-15: block_f1 96.5 % on 20 pages against Tesseract's 64 %, about 3 cents a page); `pagebuild` draws only, for the evals
 
+[roles.image-kind]
+description = "What kind of picture this is (engraving, woodcut, halftone, hand-coloured plate, marbled pattern... 20 kinds) and its group: illustration, photo or other; and whether it is line art to vectorise (for strata-scan)"
+model = "image-kind-rules"                   # placeholder until eval image-kind decides (2026-11-28)
+
+[roles.vectorise]
+description = "A picture redrawn as an SVG over its own pixels: book illustrations (engravings, woodcuts, line drawings, ornaments, coloured plates) printed sharp at any size"
+model = "vectorise-potrace"                  # placeholder until eval vectorise-plates decides (2026-11-28)
+
 [models.buffalo_l]
 runtime = "insightface"
 name = "buffalo_l"
@@ -946,6 +954,69 @@ licence = "Apache-2.0"
 source = "https://github.com/OpenImagingLab/FlashVSR_Plus"
 used_by = []
 options = { worker = "video", venv = "flashvsr-plus", engine = "flashvsr", timeout_s = 10800, memory_max_gb = 16, args = { mode = "base", serial-tiny-decoder = true, cache-offload-mode = "auto", cf = true, decode-every = 28 } }   # in segments: "auto" held the whole clip in and out in RAM (20.6 GB for one 8 s clip; systemd-oomd killed the service)
+
+
+# ---- Pictures in books: what kind each is, and line art redrawn as SVG (runtimes/imagekind.py, runtimes/vectorise.py) ------------------------
+# One model per engine; an eval's candidates vary the settings (`options` over these). Evals image-kind and vectorise-plates (2026-11-28).
+[models.image-kind-rules]
+runtime = "image-kind"
+name = "Rules on tone, colour, halftone screen and edges"
+roles = ["image-kind"]
+vram_gb = 0.0
+licence = "this repository"
+source = "src/stratamodels/runtimes/imagekind.py"
+used_by = []
+options = { engine = "rules" }
+
+[models.image-kind-clip]
+runtime = "image-kind"
+name = "CLIP zero-shot (ViT-B-32:laion2b_s34b_b79k), on the CPU"
+roles = ["image-kind"]
+vram_gb = 0.0
+licence = "MIT (weights: LAION)"
+source = "https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+used_by = []
+options = { engine = "clip", arch = "ViT-B-32:laion2b_s34b_b79k", device = "cpu" }
+
+[models.image-kind-vlm]
+runtime = "image-kind"
+name = "A vision-language model answering preset image-kind-v1"
+roles = ["image-kind"]
+vram_gb = 0.0                                # the cloud model named in `vlm` holds no card; a local one is named by a candidate with its own vram
+licence = "the vision-language model's"
+source = "src/stratamodels/runtimes/presets/image-kind-v1.md"
+used_by = []
+options = { engine = "vlm", vlm = "claude-haiku-5-5-api" }
+
+[models.vectorise-potrace]
+runtime = "vectorise"
+name = "potrace 1.16 on the flattened picture, enlarged twice, Otsu's cut"
+roles = ["vectorise"]
+vram_gb = 0.0
+licence = "GPL-2.0 (potrace, run as a separate program)"
+source = "https://potrace.sourceforge.net/"
+used_by = []
+options = { engine = "potrace", scale = 2 }
+
+[models.vectorise-vtracer]
+runtime = "vectorise"
+name = "VTracer 0.6 (colour clustering, splines)"
+roles = ["vectorise"]
+vram_gb = 0.0
+licence = "MIT"
+source = "https://github.com/visioncortex/vtracer"
+used_by = []
+options = { engine = "vtracer" }
+
+[models.vectorise-llm]
+runtime = "vectorise"
+name = "A vision-language model writing the SVG (preset vectorise-llm-v1), or steering a tracer"
+roles = ["vectorise"]
+vram_gb = 0.0
+licence = "the vision-language model's; potrace GPL-2.0 for the hybrids"
+source = "src/stratamodels/runtimes/presets/vectorise-llm-v1.md"
+used_by = []
+options = { engine = "llm", llm = "claude-opus-5-5-api", max_tokens = 24000 }
 
 # ---- Cloud APIs -------------------------------------------------------------------------------------------------------------------------
 # Models served by a vendor's API with a key of Jonathan's (keys.py: ~/.config/strata-models/secrets.env, chmod 600). Every call is written to

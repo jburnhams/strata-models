@@ -577,3 +577,20 @@ def test_disagreements_list_both_outputs_and_borderline_marks_leave_them_out(ran
             J.mark_borderline(engine, ran.name, bad)
     with pytest.raises(KeyError):
         J.mark_borderline(engine, "other", d[0]["judgment_id"])
+
+
+def test_a_judge_whose_model_batches_asks_its_verdicts_together(ran, scheduler):
+    """Jonathan, 2026-11-28: every eval batches. A judge on a batch API asks many verdicts at once, so they go out as one batch; the verdicts
+    are the same, and are stored in the same order."""
+    engine = scheduler.store.engine
+    person(engine, ran, "better", "base", "better", 6)
+    ex = C.SchedulerExecutor(scheduler)
+    assert (
+        J.asker_for(dict(ran.judges[0], cli=None, resolved=None), ex).parallel == 1
+    )  # the fake model has no batch API
+    ex.batchable = lambda role, model: True
+    ask = J.asker_for(dict(ran.judges[0], cli=None, resolved=None), ex)
+    assert ask.parallel == J.PARALLEL
+    ask.parallel = 4
+    assert J.run_judge(ran, engine, "j", ask) == dict(judged=6, failed=0, left=0, stopped=None)
+    assert C.analyse(ran, engine)["judges"]["j"]["agree"]["k"] == 6

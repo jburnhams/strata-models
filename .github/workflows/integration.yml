@@ -28,12 +28,12 @@ jobs:
         with:
           python-version: '3.13'
           enable-cache: true
-      - name: Install Tesseract and ffmpeg (the ocr and shot-boundaries runtimes run the real commands in the tests)
+      - name: Install Tesseract, ffmpeg and potrace (the ocr, shot-boundaries and vectorise runtimes run the real commands in the tests)
         shell: bash
         run: |
           case "$RUNNER_OS" in
-            Linux) sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr ffmpeg ;;
-            macOS) brew install tesseract ffmpeg ;;
+            Linux) sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr ffmpeg potrace ;;
+            macOS) brew install tesseract ffmpeg potrace ;;
             # winget, not Chocolatey: its manifests point at the projects' own GitHub releases (UB Mannheim's Tesseract
             # build, Gyan's ffmpeg), so a community.chocolatey.org outage (504s on 2026-11-25) no longer fails the job.
             # winget changes the machine PATH, which later steps do not see, so the folders go on GITHUB_PATH.
@@ -46,7 +46,11 @@ jobs:
               ff=$(dirname "$(find "$(cygpath "$LOCALAPPDATA")/Microsoft/WinGet/Packages" -name ffmpeg.exe | head -1)")
               "/c/Program Files/Tesseract-OCR/tesseract.exe" --version && "$ff/ffmpeg.exe" -version | head -1 || exit 1
               echo "C:\Program Files\Tesseract-OCR" >> "$GITHUB_PATH"
-              cygpath -w "$ff" >> "$GITHUB_PATH" ;;
+              cygpath -w "$ff" >> "$GITHUB_PATH"
+              # potrace has no winget package: its author's own Windows build (a zip of potrace.exe), from SourceForge's mirrors
+              curl -fsSL --retry 4 -o "$RUNNER_TEMP/potrace.zip" "https://potrace.sourceforge.net/download/1.16/potrace-1.16.win64.zip" || exit 1
+              unzip -q "$RUNNER_TEMP/potrace.zip" -d "$RUNNER_TEMP" && "$RUNNER_TEMP/potrace-1.16.win64/potrace.exe" --version | head -1 || exit 1
+              cygpath -w "$RUNNER_TEMP/potrace-1.16.win64" >> "$GITHUB_PATH" ;;
           esac
       - run: uv sync --locked
       - name: Integration tests (CLI and HTTP API end-to-end)

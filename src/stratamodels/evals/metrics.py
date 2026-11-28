@@ -21,6 +21,7 @@ import unicodedata
 import numpy as np
 
 from stratamodels.evals import stats as S
+from stratamodels.evals import vector as _vec
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1287,6 +1288,61 @@ def _quality(key):
     return score
 
 
+# ---- image-kind and vectorise ---------------------------------------------------------------------------------------------------------------
+def _kind_ref(item):
+    return (item.get("reference") or {}).get("kind")
+
+
+def _kind_got(output):
+    return output.get("kind") if isinstance(output, dict) else None
+
+
+def _kind_right(item, output, error):
+    """The answer's kind is the labelled one (a kind the label also accepts, `reference.also`, counts: a print can fairly be two)."""
+    if error:
+        return False
+    ref = item.get("reference") or {}
+    return _kind_got(output) in [ref.get("kind"), *(ref.get("also") or [])]
+
+
+def _group_right(item, output, error):
+    """The answer's broad group (illustration, photo, other) is the labelled kind's."""
+    from stratamodels.runtimes.imagekind import kind_of
+
+    if error or _kind_ref(item) is None:
+        return False
+    return isinstance(output, dict) and output.get("group") == kind_of(str(_kind_ref(item)))["group"]
+
+
+def _line_right(item, output, error):
+    """The answer says line art exactly when the labelled kind is: the decision strata-scan makes on it (vectorise or keep the picture)."""
+    from stratamodels.runtimes.imagekind import kind_of
+
+    if error or _kind_ref(item) is None:
+        return False
+    return isinstance(output, dict) and bool(output.get("line_art")) == kind_of(str(_kind_ref(item)))["line_art"]
+
+
+def _macro_f1(items, outputs, key):
+    """Mean F1 over the labelled classes (kind or group): a rare class counts as much as the 56 engravings."""
+    from stratamodels.runtimes.imagekind import kind_of
+
+    def lab(k):
+        return None if k is None else (k if key == "kind" else kind_of(str(k))["group"])
+
+    pairs = [
+        (lab(_kind_ref(it)), lab(_kind_got(o[0])) if o and o[1] is None else None) for it, o in zip(items, outputs)
+    ]
+    classes = sorted({r for r, _ in pairs if r is not None})
+    f1s = []
+    for c in classes:
+        tp = sum(1 for r, g in pairs if r == c and g == c)
+        fp = sum(1 for r, g in pairs if r != c and g == c)
+        fn = sum(1 for r, g in pairs if r == c and g != c)
+        f1s.append(2 * tp / (2 * tp + fp + fn) if tp else 0.0)
+    return sum(f1s) / len(f1s) if f1s else None
+
+
 METRICS = {
     m.name: m
     for m in [
@@ -1712,6 +1768,82 @@ METRICS = {
             "dB",
             _removed_db,
         ),
+        Metric(
+            "kind_right",
+            "binary",
+            "higher",
+            "The picture's kind (engraving, woodcut, halftone...) is the labelled one",
+            "%",
+            _kind_right,
+        ),
+        Metric(
+            "group_right",
+            "binary",
+            "higher",
+            "The picture's group (illustration, photo, other) is the labelled kind's",
+            "%",
+            _group_right,
+        ),
+        Metric(
+            "line_right",
+            "binary",
+            "higher",
+            "Line art (vectorise it) or not, as the labelled kind is",
+            "%",
+            _line_right,
+        ),
+        Metric(
+            "kind_f1",
+            "dataset",
+            "higher",
+            "Mean F1 over the labelled kinds: a rare kind counts as much as a common one",
+            "%",
+            None,
+            lambda it, out: _macro_f1(it, out, "kind"),
+        ),
+        Metric(
+            "group_f1",
+            "dataset",
+            "higher",
+            "Mean F1 over the three groups (illustration, photo, other)",
+            "%",
+            None,
+            lambda it, out: _macro_f1(it, out, "group"),
+        ),
+        Metric(
+            "vec_ink_f1",
+            "mean",
+            "higher",
+            "The drawing's ink against the picture's, F1 within 1 px at 1600 px (evals/vector.py)",
+            "",
+            _vec.reader("ink_f1"),
+        ),
+        Metric(
+            "vec_ssim",
+            "mean",
+            "higher",
+            "Structural similarity of drawing and picture in grey at 1024 px, slightly blurred: alike at reading size",
+            "",
+            _vec.reader("ssim"),
+        ),
+        Metric(
+            "vec_tone",
+            "mean",
+            "lower",
+            "Mean grey difference at an eighth of the size (0..1): light and dark where they were",
+            "",
+            _vec.reader("tone"),
+        ),
+        Metric(
+            "vec_colour",
+            "mean",
+            "lower",
+            "Mean colour difference (CIE76 delta E) at an eighth of the size",
+            "",
+            _vec.reader("colour"),
+        ),
+        Metric("vec_kb", "mean", "lower", "Size of the SVG", "KB", _vec.size_kb),
+        Metric("vec_nodes", "mean", "lower", "Path commands in the SVG: what an editor would move", "", _vec.nodes),
         Metric(
             "judged",
             "judged",

@@ -150,10 +150,10 @@ class Scheduler:
             self._dirty = True
             self.cv.notify_all()
 
-    def submit(self, role, params, app, priority="normal", model=None, options=None, _batch=False):
+    def submit(self, role, params, app, priority="normal", model=None, options=None, _batch=None):
         """Queue a model job; returns its row. `options` changes the model's load options (a variant, see Registry.variant). Raises RegistryError
-        for an unknown role or a model that does not serve it. A job queued on its own is never batched (`batch` in its params is dropped):
-        only submit_many marks jobs for the batch API (`_batch`)."""
+        for an unknown role or a model that does not serve it. On a model with a batch API it is marked for the batcher unless it is high
+        priority (batches.py; `batch` in its params is not read). `_batch`: submit_many's decision for the lot it belongs to."""
         app = str(app or "unknown")[:64]
         pref = self.registry.preference(app, role)
         m = self.registry.resolve(role, model, app)
@@ -162,6 +162,8 @@ class Scheduler:
             **(params or {}),
         }  # the app's default params (preferences), its job's own over them
         params.pop(batches.BATCH, None)
+        if _batch is None:
+            _batch = self.batcher.decide(m, 1, self._priority(priority))
         if _batch:
             params[batches.BATCH] = True
         if options:
@@ -178,9 +180,9 @@ class Scheduler:
 
     def submit_many(self, role, items, app, priority="normal", model=None, options=None, batch=None):
         """Queue one job per params dict in `items` (all on the same role, model and priority); returns their ids, in order. The role and model
-        are checked before any is queued, so a refused call queues nothing. `batch` (batches.py): on a model with a batch API, None batches
-        a call of Batcher.min_jobs or more, True always, False never; the jobs it batches are marked (`batch = true`) and sent at the batcher's
-        next step. An item's own `batch` key is not read: the call decides."""
+        are checked before any is queued, so a refused call queues nothing. On a model with a batch API every job is marked (`batch = true`)
+        and sent at the batcher's next step, unless the call is one job at high priority (batches.py). `batch`, the call's old flag, and an
+        item's own `batch` key are accepted and not read."""
         if not isinstance(items, list) or not all(isinstance(p, dict) for p in items):
             raise QueueError("items is a list of params objects")
         if len(items) > MAX_BULK:
@@ -188,7 +190,7 @@ class Scheduler:
         priority = self._priority(priority)
         app = str(app or "unknown")[:64]
         m = self.registry.resolve(role, model, app)
-        mark = self.batcher.decide(m, len(items), batch)
+        mark = self.batcher.decide(m, len(items), priority)
         items = [{k: v for k, v in p.items() if k != batches.BATCH} for p in items]
         extra = {batches.BATCH: True} if mark else {}
         if isinstance(m.options.get("upsample"), dict):  # each job may need its own upsampling step: one at a time
