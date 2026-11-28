@@ -28,6 +28,7 @@ RUNTIMES = {
     "gemini-api": "stratamodels.runtimes.gemini",
     "nvidia-nim": "stratamodels.runtimes.nim",
     "image-kind": "stratamodels.runtimes.imagekind",
+    "nsfw": "stratamodels.runtimes.nsfw",
     "vectorise": "stratamodels.runtimes.vectorise",
 }
 NEEDS = {
@@ -49,6 +50,7 @@ NEEDS = {
     "claude-api": ("anthropic",),
     "gemini-api": (),
     "nvidia-nim": (),
+    "nsfw": ("timm", "torch"),
     "image-kind": (),  # engine clip loads open_clip and torch (the gpu group) when a model asks for it
     "vectorise": ("vtracer", "resvg_py"),
 }  # venv-worker: its libraries are in the model's own venv (checked when it loads)

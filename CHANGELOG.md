@@ -4,6 +4,12 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 
 ## 2026-11-28
 
+**`nsfw` role: a 0-1 sensitive score per picture (branch `nsfw-sensitive-role`)**
+The role was listed with NudeNet but had no runtime, so no app could ask the service. Chosen by looking at 341 real photos (see docs/progress.md): NudeNet's box score is not a fraction (0.45-0.7 on everyday pictures, 0.38-0.44 on explicit ones), Marqo's classifier is near 0 or 1.
+- `runtimes/nsfw.py`: **new**, runtime `nsfw` (timm and torch, the gpu group): `paths` or `path` in, `sensitive` per picture out; the model's own 384 px centre crop (squeezing the whole picture was measurably worse); a corrupt file fails its own item, not the job. `models.toml`: model `nsfw-marqo-384` (Apache-2.0, 0.3 GB), now the `nsfw` role's default; `nudenet-320n` stays listed for strata-stills, which runs it itself.
+- Tests: `tests/unit/test_nsfw_runtime.py`; real run: `tests/gpu`.
+
+
 **Every Claude call batched, evals included; Haiku first; Codex and Gemini judges (branch `claude/project-thread-sxtvfs`)**
 Jonathan, on hearing that the picture evals' $8.49 of Claude calls went at full price: "that's really bad. it often only takes a few minutes for bulk" and "fix so all models and evals use batch. only thing allow single run is individual high priority calls". Evals had turned batching off (`batch=False`, waiting on 32 jobs at a time), a bulk call under 20 jobs and any job queued on its own ran at once, and a runtime's own Claude call (image-kind's reader) never reached the batcher.
 - `batches.py`, `scheduler.py`: every job on a model with a batch API is marked for the batcher, however it was queued (`submit`, `submit_many`), except one job at high priority; `Batcher.decide(model, n, priority)`; `min_jobs` and the call's `batch` flag are gone (the flag is accepted and not read). `server/app.py`, `client/strata_models_client`, `README.md`: say so. **Correction**: the README said a bulk call of fewer than 20 ran at once and `batch=False` never batched.

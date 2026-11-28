@@ -88,8 +88,8 @@ description = "Make old video look better: deinterlace, then upscale and restore
 model = "video-lanczos"                      # the classical baseline until eval video-enhance-vhs decides (judged blind, on crops and whole frames)
 
 [roles.nsfw]
-description = "Flag pictures that should not be shown"
-model = "nudenet-320n"
+description = "How sensitive a picture is (nudity, sexual content): a 0-1 probability per picture, for filters and for cataloguing"
+model = "nsfw-marqo-384"          # 2026-11-28: hand-checked on 341 real photos, beat NudeNet (false positives at 0.45-0.7, explicit pictures at 0.38-0.44); see docs/progress.md
 
 [roles.ocr]
 description = "Printed text from a page picture: lines and words with boxes and confidences (scanned books)"
@@ -401,6 +401,15 @@ vram_gb = 1.5
 licence = "Apache-2.0"
 source = "https://github.com/cszn/KAIR/releases/tag/v1.0"
 used_by = ["strata-stills"]
+
+[models.nsfw-marqo-384]
+runtime = "nsfw"
+name = "Marqo/nsfw-image-detection-384"
+roles = ["nsfw"]
+vram_gb = 0.3
+licence = "Apache-2.0"
+source = "https://huggingface.co/Marqo/nsfw-image-detection-384"
+used_by = ["strata-filecat"]
 
 [models.nudenet-320n]
 runtime = "nudenet"
