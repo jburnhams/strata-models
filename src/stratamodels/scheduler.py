@@ -2,7 +2,9 @@
 threads of their own (several at once), and lends the GPU, or part of it, to an app that holds a lease.
 
 Two lanes. A job whose model needs no VRAM (vram_gb = 0: recorded outputs, a CPU model, a cloud CLI) runs in the CPU lane, up to `cpu_jobs` at
-once, and never waits for the GPU or a lease: a 30 s cloud call does not hold up the card. Every other job, and every lease, is in the GPU
+once, and never waits for the GPU or a lease: a 30 s cloud call does not hold up the card. A CPU job that mostly waits on another model (its
+runtime's `waits(options)`: image-kind or vectorise asking Claude) is in a wait lane beside it, up to `wait_jobs` at once and many per model,
+so the calls a whole eval's jobs delegate are queued together and the batcher sends them as one batch, not one 2-minute batch each. Every other job, and every lease, is in the GPU
 lane: up to `gpu_jobs` run at once, as long as their models fit in the budget together. One job per model at a time (a worker process or a
 llama-server answers one request at a time anyway); a model that is running or loading is never evicted.
 
@@ -62,6 +64,7 @@ AFTER = "__after__"  # a job's params key: the step job (a prompt upsampler) who
 MB = 1024.0
 MAX_BULK = 100_000  # jobs in one submit_many (the Claude batch API takes 100 000 requests in a batch)
 TIDY_S = 60.0  # at most this often memory is given back to the system (memory.trim)
+WAIT_JOBS = 128  # waiting jobs (Scheduler._waits) running at once: each holds a thread and little else; a 100-picture eval goes in one batch
 BATCH_TICK_S = 5.0  # how often the batcher looks (it polls each open batch every Batcher.poll_s)
 
 
@@ -112,12 +115,14 @@ class Scheduler:
         max_skip_s=120.0,
         gpu_jobs=2,
         cpu_jobs=4,
+        wait_jobs=WAIT_JOBS,
         whole_card_gb=10.0,
         idle_unload_min=0.0,
     ):
         self.store, self.registry, self.models_dir, self.probe = store, registry, models_dir, probe
         self.reserve_mb, self.clock, self.get_runtime, self.max_skip_s = reserve_gb * MB, clock, get_runtime, max_skip_s
         self.gpu_jobs, self.cpu_jobs = max(int(gpu_jobs), 1), max(int(cpu_jobs), 1)
+        self.wait_jobs = max(int(wait_jobs), 1)
         self.whole_card_mb = whole_card_gb * MB
         self.idle_unload_s = idle_unload_min * 60.0  # 0: a model stays loaded until the room is needed
         self.trim = memory.trim
@@ -129,6 +134,10 @@ class Scheduler:
         self._waiting = None
         self.held = []
         self.busy = {}  # model key -> what holds it (a job id, or "load"): never evicted, one job per model at a time
+        self.waiters = collections.Counter()  # model key -> its waiting jobs running now (`waits`): busy while any is
+        self._loads = collections.defaultdict(
+            threading.Lock
+        )  # model key -> held while it loads: waiting jobs of one model start together
         self.loading = {}  # model key -> MB promised to a load in progress
         self.running = {}  # job id -> (row, lane) of every job running now
         self._epoch = 0  # moves whenever GPU work starts or ends, so a load can tell whether its measurement overlapped other work
@@ -396,7 +405,7 @@ class Scheduler:
             resident=res,
             current=running[0] if running else None,
             running=running,
-            slots=dict(gpu=self.gpu_jobs, cpu=self.cpu_jobs),
+            slots=dict(gpu=self.gpu_jobs, cpu=self.cpu_jobs, wait=self.wait_jobs),
             whole_card_mb=self.whole_card_mb,
             lease=exclusive or (leases[0] if leases else None),
             leases=leases,
@@ -571,6 +580,16 @@ class Scheduler:
             with self.cv:
                 self.resident.move_to_end(model.key)
             return r, 0.0
+        with self._loads[
+            model.key
+        ]:  # waiting jobs of one model start at once: the first loads it, the rest use that handle
+            with self.cv:
+                r = self.resident.get(model.key)
+            if r is not None and self._same(r, model):
+                return r, 0.0
+            return self._load(model)
+
+    def _load(self, model):
         with self.cv:
             alone, epoch = not self._gpu_busy(but=model.key), self._epoch
         before = gpu.own_used_mb(self.probe())
@@ -601,6 +620,17 @@ class Scheduler:
 
     def _lane(self, j):
         return "gpu" if j["kind"] == "lease" or self._on_gpu(self._model_of(j)) else "cpu"
+
+    def _waits(self, model):
+        """Whether `model`'s jobs mostly wait on another model (image-kind or vectorise asking Claude): they run in the wait lane, many at once
+        and several per model, so their delegated calls are queued together and go as one batch instead of one batch (2 minutes) each."""
+        if model is None or self._on_gpu(model):
+            return False
+        try:
+            w = getattr(self.get_runtime(model.runtime), "waits", None)
+        except Exception:
+            return False
+        return bool(callable(w) and w(model.options or {}))
 
     # ---- dispatching (one thread) -----------------------------------------------------------------------------------------------------
     def _do_control(self):
@@ -787,18 +817,31 @@ class Scheduler:
         return j
 
     def _pick_cpu(self, queued):
-        if self._lane_jobs("cpu") >= self.cpu_jobs:
-            return None
+        cpu_full, wait_full = self._lane_jobs("cpu") >= self.cpu_jobs, self._lane_jobs("wait") >= self.wait_jobs
         with self.cv:
             busy = set(self.busy)
-        cands = [q for q in queued if q["model"] not in busy]
+            waiting = set(self.waiters)
+        cands = []
+        for q in queued:
+            if self._waits(
+                self._model_of(q)
+            ):  # beside the model's other waiting jobs, never beside its load from the Models page
+                ok = not wait_full and (q["model"] not in busy or q["model"] in waiting)
+            else:
+                ok = not cpu_full and q["model"] not in busy
+            if ok:
+                cands.append(q)
         return min(cands, key=lambda q: (rank(q["priority"]), q["id"]), default=None)
 
     def _take(self, j, model, lane):
         """Mark `model` busy for job `j` (None: a load asked from the Models page) and return the ticket its thread runs."""
         with self.cv:
             key = model.key if model is not None else j["model"]
-            self.busy[key] = j["id"] if j else "load"
+            if lane == "wait":
+                self.waiters[key] += 1
+                self.busy.setdefault(key, j["id"] if j else "load")
+            else:
+                self.busy[key] = j["id"] if j else "load"
             if model is not None and not self._same(self.resident.get(key), model) and self._on_gpu(model):
                 self.loading[key] = model.vram_gb * MB
             if model is not None and lane == "gpu" and self._whole_model(model):
@@ -837,7 +880,8 @@ class Scheduler:
                 if r is not None:
                     return r
                 continue  # it waits; nothing on the GPU passes it, the CPU lane may
-            model, lane = self._model_of(j), ("gpu" if j is g else "cpu")
+            model = self._model_of(j)
+            lane = "gpu" if j is g else ("wait" if self._waits(model) else "cpu")
             if lane == "gpu" and model is not None and self._whole_model(model):
                 self._make_room(None, keep=model.key, why=f"{model.key} takes the whole GPU")
                 self._event(
@@ -869,7 +913,12 @@ class Scheduler:
         finally:
             self._tidy_due = self._tidy_due or "jobs"
             with self.cv:
-                if t["key"] is not None:
+                if t["key"] is not None and t["lane"] == "wait":
+                    self.waiters[t["key"]] -= 1
+                    if self.waiters[t["key"]] <= 0:
+                        del self.waiters[t["key"]]
+                        self.busy.pop(t["key"], None)
+                elif t["key"] is not None:
                     self.busy.pop(t["key"], None)
                     self.loading.pop(t["key"], None)
                     self.alone.discard(t["key"])

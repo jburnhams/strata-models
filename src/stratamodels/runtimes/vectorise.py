@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -65,6 +66,12 @@ def binary() -> str | None:
     return shutil.which("potrace")
 
 
+def waits(options: Mapping[str, Any]) -> bool:
+    """An engine that asks a model spends its time waiting for the answer: the scheduler runs many at once (its wait lane), so a cloud
+    model's calls go as one batch."""
+    return str(options.get("engine", "potrace")).startswith("llm") and bool(options.get("llm"))
+
+
 def load(model: Any, models_dir: str) -> dict[str, Any]:
     o = dict(model.options or {})
     engine = str(o.get("engine", "potrace"))
@@ -72,7 +79,7 @@ def load(model: Any, models_dir: str) -> dict[str, Any]:
         raise RunError(f"model {model.key}: engine is one of {', '.join(ENGINES)}, not {engine!r}")
     if engine.startswith("llm") and not o.get("llm"):
         raise RunError(f"model {model.key}: engine {engine} names no vision-language model (options.llm)")
-    return dict(key=model.key, options=o, models_dir=models_dir)
+    return dict(key=model.key, options=o, models_dir=models_dir, lock=threading.Lock())
 
 
 def unload(handle: dict[str, Any]) -> None:
@@ -358,6 +365,13 @@ def lines_colour_svg(rgb: np.ndarray, o: Mapping[str, Any]) -> str:
 # ---- the engines that ask a model ---------------------------------------------------------------------------------------------------------
 def _llm(h: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
     """The vision-language model of options `llm` (runtimes/delegate.py: in this process, or `via = "service"`)."""
+    with h.setdefault(
+        "lock", threading.Lock()
+    ):  # several jobs share the handle (the wait lane): one caller for them all
+        return _llm_once(h)
+
+
+def _llm_once(h: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
     if "llm" not in h:
         from stratamodels.runtimes import delegate
 

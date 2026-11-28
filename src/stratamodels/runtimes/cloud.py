@@ -45,13 +45,35 @@ MAX_B64 = (
 LONG_EDGE = 2576  # a bigger picture is scaled to this on its long side: the APIs scale it down anyway, so nothing they would read is lost
 
 
+SENDABLE = (
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+)  # what every vendor takes as it is; anything else is redrawn as PNG
+MAGIC = ((b"\xff\xd8\xff", "image/jpeg"), (b"\x89PNG\r\n\x1a\n", "image/png"), (b"GIF8", "image/gif"))
+
+
+def sniff(data):
+    """The picture's type from its first bytes, or None: the name can lie (an export named .png that holds a JPEG), and the Claude API
+    refuses a picture whose bytes are not the type it was sent as ("The image was specified using the image/png media type...")."""
+    for head, mime in MAGIC:
+        if data.startswith(head):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def encode(path):
     """(mime, base64) of a picture to send: as it is when it fits under MAX_B64, else a copy no longer than LONG_EDGE (a strata-scan page at
     full size is about 16 MB), as PNG, or JPEG when the PNG is still too big."""
-    mime = mimetypes.guess_type(path)[0] or "image/jpeg"
     if os.path.getsize(path) * 4 / 3 < MAX_B64:
         with open(path, "rb") as f:
-            return mime, base64.b64encode(f.read()).decode()
+            data = f.read()
+        mime = sniff(data) or mimetypes.guess_type(path)[0] or "image/jpeg"
+        if mime in SENDABLE:
+            return mime, base64.b64encode(data).decode()
     import io
 
     from PIL import Image

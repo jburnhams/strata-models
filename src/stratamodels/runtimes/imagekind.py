@@ -13,6 +13,7 @@ Three engines (model options `engine`), measured against each other by eval imag
 params: image (a path; required); vlm also takes `context` (what the app knows: the book, the page's caption) and `max_tokens`.
 Answer: {kind, group, line_art, colour, scores?: {kind: score} (rules, clip), why?: (vlm), seconds, cost_usd? (a cloud vlm)}."""
 
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -76,12 +77,19 @@ def kind_of(kind: str) -> dict[str, Any]:
     return dict(kind=kind if kind in KINDS else "unknown", group=g, line_art=line)
 
 
+def waits(options: Mapping[str, Any]) -> bool:
+    """A vlm engine's job only waits for its model's answer: the scheduler runs many at once (its wait lane), so a cloud model's go as one batch."""
+    return str(options.get("engine", "rules")) == "vlm" and bool(options.get("vlm"))
+
+
 def load(model: Any, models_dir: str) -> dict[str, Any]:
     o = cast("Mapping[str, Any]", model.options or {})
     engine = str(o.get("engine", "rules"))
     if engine not in ("rules", "clip", "vlm"):
         raise RunError(f"model {model.key}: engine is rules, clip or vlm, not {engine!r}")
-    h: dict[str, Any] = dict(key=model.key, engine=engine, options=dict(o), models_dir=models_dir)
+    h: dict[str, Any] = dict(
+        key=model.key, engine=engine, options=dict(o), models_dir=models_dir, lock=threading.Lock()
+    )
     if engine == "clip":
         from stratamodels.runtimes import imagekind_clip
 
@@ -189,6 +197,13 @@ def rules(rgb: np.ndarray) -> dict[str, Any]:
 
 # ---- vlm ----------------------------------------------------------------------------------------------------------------------------------
 def _delegate(h: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
+    with h.setdefault(
+        "lock", threading.Lock()
+    ):  # several jobs share the handle (the wait lane): one caller for them all
+        return _delegate_once(h)
+
+
+def _delegate_once(h: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
     if "vlm" not in h:
         from stratamodels.runtimes import delegate
 

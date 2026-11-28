@@ -511,3 +511,25 @@ def test_schemas_sent_to_a_vendor_lose_their_bounds_but_keep_their_shape():
         cloud.portable(llama.preset("photo-describe-v1")[1])
     )  # the schema the cloud describe-photos candidates failed on
     assert '"minimum"' not in photo and '"maxItems"' not in photo and '"additionalProperties": false' in photo
+
+
+def test_a_picture_is_sent_as_the_type_its_bytes_are_not_its_name(tmp_path):
+    """The Claude API refused a book export named .png that held a JPEG ("specified using the image/png media type"); a TIFF or BMP,
+    which no vendor takes as it is, is redrawn as PNG."""
+    import base64
+
+    from PIL import Image
+
+    from stratamodels.runtimes import cloud
+
+    liar = tmp_path / "plate.png"
+    Image.new("RGB", (40, 30), (200, 10, 10)).save(liar, "JPEG")
+    assert cloud.encode(str(liar)) == ("image/jpeg", base64.b64encode(liar.read_bytes()).decode())
+    for fmt, name in (("GIF", "a.jpg"), ("WEBP", "b.jpg"), ("PNG", "c.jpg")):
+        Image.new("RGB", (8, 8)).save(tmp_path / name, fmt)
+        assert cloud.encode(str(tmp_path / name))[0] == f"image/{fmt.lower()}"
+    tif = tmp_path / "scan.tif"
+    Image.new("L", (20, 20), 128).save(tif)
+    mime, b64 = cloud.encode(str(tif))
+    assert mime == "image/png" and base64.b64decode(b64).startswith(b"\x89PNG")
+    assert cloud.sniff(b"nothing") is None
