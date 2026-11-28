@@ -38,7 +38,9 @@ One face store for every app (design, survey and decisions: the face database pr
   Any format strata-python's `images` reads is a picture: JPEG, PNG, WebP, AVIF, TIFF, HEIC/HEIF, JPEG XL and camera raw files
   (developed by LibRaw), always turned by their EXIF orientation, so `width` and `height` and every box are in the upright picture's pixels.
 - **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
-  set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`.
+  set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`. With `share_named` (owner,
+  2026-11-28) its faces a person confirmed for someone are still searched everywhere, so a family tape's named faces help recognise those
+  people in other apps; its other faces stay out.
 - **The bar** (owner, 2026-11-27): every face the detector finds is stored, but only faces at least `faces_min_score` (detector score,
   default 0.7) and `faces_min_px` (the shorter side of the box in the picture's pixels, default 40) are ever searched, clustered, reviewed,
   proposed or used for merge suggestions. Both are service settings (Settings page), read on every query, so a change applies at once and

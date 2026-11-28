@@ -13,7 +13,7 @@ export interface Person { id: number; name: string | null; fields: Record<string
 export interface Review { basis: 'confirmed' | 'group' | null; basis_faces: number; suggested: number; confirmed: number; near: Record<string, number>; counts: Record<string, number>; left_out?: number; items: (Face & { distance: number })[] }
 export interface Group { faces: number[]; size: number }
 export interface Suggestion { a: number; b: number; distance: number; apps_a: string[]; apps_b: string[] }
-export interface Tag { tag: string; images: number; opt_in: boolean; note: string }
+export interface Tag { tag: string; images: number; opt_in: boolean; share_named: boolean; note: string }
 
 async function call<T>(method: string, u: string, body?: unknown): Promise<T> {
   const r = await fetch(withBase(u), { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
@@ -54,7 +54,8 @@ export const facesApi = {
   merge: (id: number, into: number) => call<Person>('POST', `/api/identities/${id}/merge`, { into, app: APP }),
   notSame: (a: number, b: number) => call<unknown>('POST', '/api/identities/not-same', { a, b }),
   tags: () => call<{ items: Tag[] }>('GET', '/api/faces/tags').then(r => r.items),
-  setTag: (tag: string, optIn: boolean) => call<unknown>('PUT', `/api/faces/tags/${encodeURIComponent(tag)}`, { opt_in: optIn }),
+  setTag: (tag: string, optIn: boolean, shareNamed?: boolean) =>
+    call<unknown>('PUT', `/api/faces/tags/${encodeURIComponent(tag)}`, shareNamed === undefined ? { opt_in: optIn } : { opt_in: optIn, share_named: shareNamed }),
   cropUrl: (faceId: number, px = 192) => withBase(`/api/faces/${faceId}/crop?px=${px}`),
   pictureUrl: (imageId: number) => withBase(`/api/faces/images/${imageId}/picture`),
 }

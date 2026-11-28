@@ -362,16 +362,29 @@ describe('Faces: tags', () => {
   it('lists the tags and keeps one out of searches until asked for', async () => {
     const { user } = setup(<App />, { route: '/faces?tab=tags' })
     const table = await screen.findByRole('grid', { name: 'Tags' })
-    expect(within(table).getByRole('switch', { name: /nursery/ })).toBeChecked()
-    await user.click(within(table).getByRole('switch', { name: /bright-horizons/ }))
+    expect(within(table).getByRole('switch', { name: 'Only when asked for: nursery' })).toBeChecked()
+    await user.click(within(table).getByRole('switch', { name: 'Only when asked for: bright-horizons' }))
     await waitFor(() => expect(faceMock.calls).toContain('tag bright-horizons true'))
-    await waitFor(() => expect(within(table).getByRole('switch', { name: /bright-horizons/ })).toBeChecked())
+    await waitFor(() => expect(within(table).getByRole('switch', { name: 'Only when asked for: bright-horizons' })).toBeChecked())
+  })
+  it('lets an opt-in tag lend its named faces to every search', async () => {
+    const { user } = setup(<App />, { route: '/faces?tab=tags' })
+    const table = await screen.findByRole('grid', { name: 'Tags' })
+    expect(within(table).getAllByText('Searched anyway')).toHaveLength(2) // the two tags searched anyway have nothing to share
+    const share = within(table).getByRole('switch', { name: 'Named faces searched everywhere: nursery' })
+    expect(share).not.toBeChecked()
+    await user.click(share)
+    await waitFor(() => expect(faceMock.calls).toContain('tag nursery true share true'))
+    await waitFor(() => expect(within(table).getByRole('switch', { name: 'Named faces searched everywhere: nursery' })).toBeChecked())
   })
   it("says the service's reason when a tag cannot be changed, and when there are none", async () => {
     faceMock.fail = 'tag'
     const { user, unmount } = setup(<App />, { route: '/faces?tab=tags' })
-    await user.click(within(await screen.findByRole('grid', { name: 'Tags' })).getByRole('switch', { name: /nursery/ }))
+    const table = await screen.findByRole('grid', { name: 'Tags' })
+    await user.click(within(table).getByRole('switch', { name: 'Only when asked for: nursery' }))
     expect(await screen.findByText('the face store is busy')).toBeInTheDocument()
+    await user.click(within(table).getByRole('switch', { name: 'Named faces searched everywhere: nursery' }))
+    await waitFor(() => expect(within(table).getAllByText('the face store is busy')).toHaveLength(2))
     unmount()
     faceMock.tags = []
     setup(<App />, { route: '/faces?tab=tags' })

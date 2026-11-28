@@ -28,6 +28,15 @@ Jonathan: "detect which images are drawings (not photos) and then vectorise; bot
 - `pyproject.toml`, `uv.lock`: vtracer and resvg-py (wheels for Linux, macOS and Windows). `integration.yml`: potrace installed on all three runners (apt, brew, the author's Windows build).
 - `docs/evals.md`, `README.md`: the two roles and evals, and the options left out with why (autotrace centreline, StarVector, OmniSVG, InternSVG, VectorArk, LIVE/DiffVG).
 - Tests: `tests/unit/test_imagekind_runtime.py`, `test_vectorise_runtime.py`, `test_vector_metrics.py`, `test_delegate.py`, `test_book_pictures_builder.py` (**new**; potrace's part played by a box per mask, the real command in integration), `test_cli.py` (`--local`), `tests/integration/test_vectorise_runtime.py` (**new**, the real potrace), `tests/gpu/test_real_runtimes.py` (the CLIP engine).
+**Face store: an opt-in tag can lend its named faces to every search (branch `claude/project-thread-l890x5`)**
+Jonathan, after naming the faces on a family tape in strata-reels: "let named tape faces help elsewhere". Reels keeps its tapes' faces under the opt-in tag `strata-reels` (other people's children are on them), so a face confirmed there as Hannah did not help find Hannah in strata-stills. The person page's review and the merge suggestions already used every confirmed face; `search` (and with it `group-tracks` suggestions and apps' own lookups) did not.
+- `db/models.py`, `migrations/20261128_e8c2206d9638_face_tags_share_named.py` (**new**): `face_tags.share_named`, false by default.
+- `faces/store.py`: `search` lets in the pictures of opt-in tags that share, and answers only their confirmed faces (never their unnamed or suggested ones), asking the index for more so the answer is still `k` long; asking for the tag still gives all of it. `set_tag(..., share_named=)` (left as it was when not given) and `tags()` report it.
+- Review (Codex): a sharing tag's unnamed faces are left out before the index's nearest-neighbour limit, not after it, so many of them close to the query never crowd out a face that can be answered (`_shared_named`, its faces' decisions read in chunks).
+- `faces/api.py`: `PUT /api/faces/tags/{tag}` takes `share_named`.
+- `web/src/components/FacesPage.tsx`, `web/src/faces.ts`: the Tags table's "Named faces" switch, on an opt-in tag only; `src/stratamodels/server/static/` rebuilt.
+- `docs/database.md`: Tags.
+- `tests/unit/test_faces_store.py`, `tests/unit/test_faces_api.py`, `web/tests/integration/Faces.test.tsx`, `web/tests/utils/faces.ts`.
 
 **font-match: four times faster, and a fit kept for the same call (branch `faster-fits`)**
 Jonathan: reuse model work where possible; see if the GPU can help, or optimise any other way. A page's fit took about two minutes of CPU, one face after another, and strata-scan sets pages one at a time: a book's rebuild took hours.

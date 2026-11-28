@@ -375,12 +375,14 @@ class FaceImageTag(Base):
 
 class FaceTag(Base):
     """A tag's own settings: `opt_in` leaves its pictures out of every search and clustering that does not name it (other people's
-    children)."""
+    children); `share_named` (owner, 2026-11-28) lets its faces a person confirmed for someone count in every search all the same, so a
+    family tape's named faces help recognise those people elsewhere while its unnamed faces stay out."""
 
     __tablename__ = "face_tags"
     tag: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
     updated_at: Mapped[float]
     opt_in: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    share_named: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
     note: Mapped[str] = mapped_column(sa.String(500), default="")
 
 

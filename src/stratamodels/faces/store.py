@@ -4,7 +4,8 @@ What lives here is record keeping and search; what a match means stays in the ca
 consent). Decided with the owner 2026-11-25:
   - one global identity per person; each app may add its own fields (identity_app_metadata), which win when that app reads the person;
   - every picture carries its app as a tag; search and clustering cover every tag except opt-in ones (face_tags.opt_in, e.g. other people's
-    children), which count only when the caller names them;
+    children), which count only when the caller names them; an opt-in tag with share_named (2026-11-28) still lends its faces a person
+    confirmed for someone to every search, so naming a face on a family tape helps recognise that person in other apps;
   - merges across apps are suggested here and made by a person, never automatically; undone by clearing `merged_into`;
   - decisions about faces are append-only (face_assignments), the newest not undone wins, and a batch undoes as one;
   - one global layer of decisions (2026-11-26): a confirmation counts for every app, its app kept as the source. An app's possible labels
@@ -127,17 +128,42 @@ class FaceStore:
         return Session(self.engine, expire_on_commit=False)
 
     # ---- tags --------------------------------------------------------------------------------------------------------------------------
-    def _scope(self, s, tags=None, include=()):
+    def _scope(self, s, tags=None, include=(), named_too=False):
         """A condition on FaceImage.id: pictures with any of `tags` (when given), never one with an opt-in tag that is not in `include` or
-        `tags` (naming a tag in `tags` counts as asking for it)."""
+        `tags` (naming a tag in `tags` counts as asking for it). `named_too` lets in the pictures of opt-in tags that share their named
+        faces; the caller must then keep only their confirmed faces (`_shared_named`)."""
         conds = []
         if tags:
             conds.append(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(list(tags)))))
-        allowed = set(include or ()) | set(tags or ())
-        hidden = [t for t in s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True))) if t not in allowed]
+        hidden = self._hidden(s, tags, include)
+        if named_too:
+            hidden = [t for t in hidden if t not in self._sharing(s)]
         if hidden:
             conds.append(FaceImage.id.not_in(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(hidden))))
         return sa.and_(sa.true(), *conds)
+
+    def _hidden(self, s, tags=None, include=()):
+        """The opt-in tags the caller did not ask for."""
+        allowed = set(include or ()) | set(tags or ())
+        return [t for t in s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True))) if t not in allowed]
+
+    def _sharing(self, s):
+        """The opt-in tags whose named faces count everywhere."""
+        return set(s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True), FaceTag.share_named.is_(True))))
+
+    def _shared_named(self, s, tags=None, include=()):
+        """With `_scope(named_too=True)`: a condition on Face.id that keeps, of the pictures in scope only through a sharing tag, just the
+        faces confirmed for someone, so the nearest-neighbour limit counts only faces that can be answered. None when no tag shares."""
+        partial = [t for t in self._hidden(s, tags, include) if t in self._sharing(s)]
+        if not partial:
+            return None
+        lent = sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(partial))
+        named = []
+        for part in _chunks(list(s.scalars(sa.select(Face.id).where(Face.image_id.in_(lent)).order_by(Face.id)))):
+            named += [
+                f for f, a in self._current(s, part).items() if a.status == "confirmed" and a.identity_id is not None
+            ]
+        return sa.or_(Face.image_id.not_in(lent), Face.id.in_(named)) if named else Face.image_id.not_in(lent)
 
     def tags(self):
         with self.session() as s:
@@ -148,12 +174,14 @@ class FaceStore:
                     tag=t,
                     images=counts.get(t, 0),
                     opt_in=bool(opt[t].opt_in) if t in opt else False,
+                    share_named=bool(opt[t].share_named) if t in opt else False,
                     note=opt[t].note if t in opt else "",
                 )
                 for t in sorted(set(counts) | set(opt))
             ]
 
-    def set_tag(self, tag, opt_in, note=None):
+    def set_tag(self, tag, opt_in, note=None, share_named=None):
+        """Sets a tag's opt-in (and, when given, whether its named faces count everywhere; left as it was when None)."""
         tag = str(tag).strip()
         if not tag:
             raise ValueError("a tag needs a name")
@@ -163,10 +191,12 @@ class FaceStore:
                 row = FaceTag(tag=tag, updated_at=self.clock())
                 s.add(row)
             row.opt_in, row.updated_at = bool(opt_in), self.clock()
+            if share_named is not None:
+                row.share_named = bool(share_named)
             if note is not None:
                 row.note = str(note)[:500]
             s.commit()
-        return dict(tag=tag, opt_in=bool(opt_in))
+            return dict(tag=tag, opt_in=bool(opt_in), share_named=bool(row.share_named))
 
     # ---- pictures and faces --------------------------------------------------------------------------------------------------------------
     def _current(self, s, face_ids=None):
@@ -431,17 +461,26 @@ class FaceStore:
     # ---- search and clustering -----------------------------------------------------------------------------------------------------------
     def search(self, vector, model, *, k=20, tags=None, include=(), named=None, max_distance=None, exclude=()):
         """The faces nearest `vector` among `model`'s embeddings, in scope (tags, opt-in), closest first. `named` True/False keeps faces with or
-        without a confirmed person. Asks the index for more than `k` when it must filter after it (named), so the answer is still k long."""
+        without a confirmed person. The confirmed faces of an opt-in tag that shares them are in scope too (never its other faces, which are
+        left out before the index's limit, so they never crowd out a face that can be answered). Asks the index for more than `k` when it
+        must filter after it (named), so the answer is still k long."""
         k = max(1, min(int(k), 500))
         with self.session() as s:
             stmt = (
                 sa.select(FaceEmbedding)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable())
+                .where(
+                    FaceEmbedding.model == model,
+                    self._scope(s, tags, include, named_too=named is not False),
+                    self.usable(),
+                )
             )
             if exclude:
                 stmt = stmt.where(FaceEmbedding.face_id.not_in([int(x) for x in exclude]))
+            lent = self._shared_named(s, tags, include) if named is not False else None
+            if lent is not None:
+                stmt = stmt.where(lent)
             want = k if named is None else k * 5 + 50
             hits = nearest(s, FaceEmbedding.vector, vector, k=want, select=stmt, max_distance=max_distance)
             state = self._current(s, [e.face_id for e, _ in hits])
