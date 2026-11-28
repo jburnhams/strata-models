@@ -90,7 +90,9 @@ def test_reindexing_with_another_model_keeps_faces_people_decided_about(fs):
 
 def test_an_opt_in_tag_can_let_its_named_faces_count(fs):
     """A family video's faces stay out of other apps' searches, but those a person named help recognise them everywhere."""
-    named = index(fs, "strata-reels", "r1", [face(1, seed=1)], tags=["tape"])
+    named = index(
+        fs, "strata-reels", "r1", [face(1, seed=1), face(1, seed=5, x=100)], tags=["tape"]
+    )  # Ann and someone beside her
     index(fs, "strata-reels", "r2", [face(1, seed=4)], tags=["tape"])  # the same look, nobody named it
     index(fs, "strata-stills", "s1", [face(5, seed=2)])
     ann = fs.create_identity(name="Ann")["id"]
@@ -99,15 +101,21 @@ def test_an_opt_in_tag_can_let_its_named_faces_count(fs):
     fs.set_tag("tape", True)
     assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["s1"]
     assert fs.set_tag("tape", True, named_count=True) == dict(tag="tape", opt_in=True, named_count=True)
-    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["r1", "s1"]  # the named one counts; r2 stays out
+    hits = fs.search(q, "buffalo_l", k=5)  # the named face counts; the one beside her and r2 stay out
+    assert [(h["ref"], h["face"]["id"]) for h in hits] == [
+        ("r1", named["faces"][0]["id"]),
+        ("s1", hits[1]["face"]["id"]),
+    ]
     assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5, named=True)] == ["r1"]
-    assert [i["ref"] for i in fs.images()] == ["s1", "r1"]
-    assert {h["ref"] for h in fs.search(q, "buffalo_l", k=5, include=["tape"])} == {"r1", "r2", "s1"}
+    assert fs.cluster("buffalo_l", min_size=1) == fs.cluster(
+        "buffalo_l", min_size=1, tags=["strata-stills"]
+    )  # nothing unnamed
+    assert [i["ref"] for i in fs.images()] == ["s1"]  # a picture holds other faces too: listed only when asked for
+    assert len(fs.search(q, "buffalo_l", k=5, include=["tape"])) == 4
     assert fs.set_tag("tape", True)["named_count"] is True  # an app saying opt-in again keeps the person's choice
     assert {t["tag"]: t["named_count"] for t in fs.tags()}["tape"] is True
     fs.undo(batch)  # the name taken back: out again
     assert [h["ref"] for h in fs.search(q, "buffalo_l", k=5)] == ["s1"]
-    assert fs.cluster("buffalo_l", min_size=1) == fs.cluster("buffalo_l", min_size=1, tags=["strata-stills"])
 
 
 def test_search_by_tag_and_opt_in(fs):

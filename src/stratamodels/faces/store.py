@@ -127,31 +127,27 @@ class FaceStore:
         return Session(self.engine, expire_on_commit=False)
 
     # ---- tags --------------------------------------------------------------------------------------------------------------------------
-    def _scope(self, s, tags=None, include=()):
+    def _scope(self, s, tags=None, include=(), faces=False):
         """A condition on FaceImage.id: pictures with any of `tags` (when given), never one with an opt-in tag that is not in `include` or
-        `tags` (naming a tag in `tags` counts as asking for it), unless that tag lets named faces count and one of the picture's faces is
-        confirmed for a person."""
+        `tags` (naming a tag in `tags` counts as asking for it). With `faces` (a query joined to Face), a tag that lets named faces count
+        lets in its faces confirmed for a person, and only those: the other faces of the same picture stay out (a group photo)."""
         conds = []
         if tags:
             conds.append(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(list(tags)))))
         allowed = set(include or ()) | set(tags or ())
         opt = [t for t in s.scalars(sa.select(FaceTag).where(FaceTag.opt_in.is_(True))) if t.tag not in allowed]
-        hidden = [t.tag for t in opt if not t.named_count]
+        hidden = [t.tag for t in opt if not (faces and t.named_count)]
         if hidden:
             conds.append(FaceImage.id.not_in(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(hidden))))
-        if soft := [t.tag for t in opt if t.named_count]:
-            # these tags' pictures stay out unless one of their faces is confirmed for a person (the newest decision not undone)
-            pictures = set(s.scalars(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(soft))))
-            faces = (
-                dict(s.execute(sa.select(Face.id, Face.image_id).where(Face.image_id.in_(pictures))).all())
-                if pictures
-                else {}
+        if soft := [t.tag for t in opt if faces and t.named_count]:
+            # the newest decision not undone: a confirmation for a person lets the face in; undone, it is out again
+            pictures = sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(soft))
+            ids = list(s.scalars(sa.select(Face.id).where(Face.image_id.in_(pictures))))
+            current = self._current(s, ids) if ids else {}
+            named = sorted(f for f, a in current.items() if a.status == "confirmed" and a.identity_id is not None)
+            conds.append(
+                sa.or_(FaceImage.id.not_in(pictures), Face.id.in_(named)) if named else FaceImage.id.not_in(pictures)
             )
-            current = self._current(s, list(faces)) if faces else {}
-            named = {faces[f] for f, a in current.items() if a.status == "confirmed" and a.identity_id is not None}
-            out = pictures - named
-            if out:
-                conds.append(FaceImage.id.not_in(sorted(out)))
         return sa.and_(sa.true(), *conds)
 
     def tags(self):
@@ -457,7 +453,7 @@ class FaceStore:
                 sa.select(FaceEmbedding)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable())
+                .where(FaceEmbedding.model == model, self._scope(s, tags, include, faces=True), self.usable())
             )
             if exclude:
                 stmt = stmt.where(FaceEmbedding.face_id.not_in([int(x) for x in exclude]))
@@ -501,7 +497,7 @@ class FaceStore:
                 sa.select(FaceEmbedding.face_id)
                 .join(Face, Face.id == FaceEmbedding.face_id)
                 .join(FaceImage, FaceImage.id == Face.image_id)
-                .where(FaceEmbedding.model == model, self._scope(s, tags, include), self.usable(min_score))
+                .where(FaceEmbedding.model == model, self._scope(s, tags, include, faces=True), self.usable(min_score))
                 .order_by(Face.id.desc())
             )
             state = self._current(s)

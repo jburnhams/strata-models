@@ -39,9 +39,10 @@ One face store for every app (design, survey and decisions: the face database pr
   (developed by LibRaw), always turned by their EXIF orientation, so `width` and `height` and every box are in the upright picture's pixels.
 - **Tags** (`face_image_tags`): every picture carries its app's name and any tags the app gave. A tag marked `opt_in` in `face_tags` (a sensitive
   set, such as a nursery's) is left out of every search and clustering unless the caller names it in `include`. With `named_count` as well
-  (2026-11-28, set with `PUT /api/faces/tags/{tag} {opt_in, named_count}`; an app's PUT without it leaves it as it was), a picture of
-  that tag counts everywhere once one of its faces is confirmed for a person, and drops out again if that decision is undone: a family
-  video's faces named by the person help every app recognise them, while the unnamed ones stay out.
+  (2026-11-28, set with `PUT /api/faces/tags/{tag} {opt_in, named_count}`; an app's PUT without it leaves it as it was), each face of
+  that tag confirmed for a person counts in every search and clustering, and drops out again if that decision is undone: a family video's
+  faces named by the person help every app recognise them, while the unnamed ones (even beside a named one in the same picture) stay out.
+  Picture lists still leave the tag's pictures out unless asked for.
 - **The bar** (owner, 2026-11-27): every face the detector finds is stored, but only faces at least `faces_min_score` (detector score,
   default 0.7) and `faces_min_px` (the shorter side of the box in the picture's pixels, default 40) are ever searched, clustered, reviewed,
   proposed or used for merge suggestions. Both are service settings (Settings page), read on every query, so a change applies at once and
