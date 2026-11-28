@@ -56,9 +56,10 @@ Weights live in `~/models` (`./strata-models set models_dir ...`). The launcher 
 | `speaker-embedding` | ECAPA-TDNN on VoxCeleb (SpeechBrain, `workers/speaker.py`, venv `speaker`): one normalised 192-number vector per stretch of speech (`items: [{path, clip?}]`), for strata-voice to keep only the speaker's own sentences from a found recording | not yet measured |
 | `image-kind` | What kind a picture from a book is (20 kinds: engraving, wood engraving, woodcut, halftone, hand-coloured, marbled pattern, binding, handwriting...) and its group (illustration, photo or other), and whether it is line art to vectorise: `rules` (numpy), `clip` (zero-shot, CPU) or any vision-language model with preset `image-kind-v1` (`runtimes/imagekind.py`); eval `image-kind` decides which, for strata-scan | rules and CLIP on the CPU |
 | `vectorise` | A picture redrawn as an SVG over its own pixels (`runtimes/vectorise.py`): potrace (the command, GPL, as a separate program), stacked potrace tones, VTracer, VTracer's colour under potrace's ink, or a vision-language model drawing, steering, colouring or tidying; answers the SVG file and its rendering. Eval `vectorise-plates` decides which, for strata-scan's illustrations | CPU, under a second to a few seconds a plate (tracers) |
+| `nsfw` | how sensitive a picture is: the probability (0-1) of nudity or sexual content, from Marqo's NSFW ViT classifier at 384 px (about 40 pictures a second); `paths` in, `{items: [{path, sensitive}]}` out | GPU, 0.3 GB |
 | `audio-quality` | DNSMOS P.835 and torchaudio SQUIM (and SI-SDR, PESQ, STOI against a reference), on the CPU: an eval's `[score]` | CPU |
 
-The other roles in `models.toml` (vision-language, sound events, people detection, upscale, denoise, NSFW) are listed with the apps that still load them themselves; the Models page shows that list.
+The other roles in `models.toml` (vision-language, sound events, people detection, upscale, denoise) are listed with the apps that still load them themselves; the Models page shows that list.
 
 ## Tests
 
