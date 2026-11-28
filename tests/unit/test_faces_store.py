@@ -131,6 +131,11 @@ def test_an_opt_in_tag_can_share_its_named_faces(fs):
     assert {t["tag"]: t for t in fs.tags()}["strata-reels"]["share_named"] is True
     assert fs.set_tag("strata-reels", True, share_named=False)["share_named"] is False
     assert [h["ref"] for h in fs.search(q, "buffalo_l", k=3)] == ["s1"]
+    # many unnamed tape faces nearer than the public one never crowd it out of a short answer, with nothing named to lend
+    fs.set_tag("strata-reels", True, share_named=True)
+    index(fs, "strata-reels", "t2", [face(1, x=10 * i, seed=10 + i) for i in range(60)], tags=["strata-reels"])
+    fs.assign([named], None, "strata-reels", status="rejected")
+    assert [h["ref"] for h in fs.search(q, "buffalo_l", k=1)] == ["s1"]
 
 
 def test_search_named_or_not(fs):

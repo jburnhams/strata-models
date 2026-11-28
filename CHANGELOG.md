@@ -8,6 +8,7 @@ Newest first, grouped by day. One entry per change, in the same commit or PR as 
 Jonathan, after naming the faces on a family tape in strata-reels: "let named tape faces help elsewhere". Reels keeps its tapes' faces under the opt-in tag `strata-reels` (other people's children are on them), so a face confirmed there as Hannah did not help find Hannah in strata-stills. The person page's review and the merge suggestions already used every confirmed face; `search` (and with it `group-tracks` suggestions and apps' own lookups) did not.
 - `db/models.py`, `migrations/20261128_e8c2206d9638_face_tags_share_named.py` (**new**): `face_tags.share_named`, false by default.
 - `faces/store.py`: `search` lets in the pictures of opt-in tags that share, and answers only their confirmed faces (never their unnamed or suggested ones), asking the index for more so the answer is still `k` long; asking for the tag still gives all of it. `set_tag(..., share_named=)` (left as it was when not given) and `tags()` report it.
+- Review (Codex): a sharing tag's unnamed faces are left out before the index's nearest-neighbour limit, not after it, so many of them close to the query never crowd out a face that can be answered (`_shared_named`, its faces' decisions read in chunks).
 - `faces/api.py`: `PUT /api/faces/tags/{tag}` takes `share_named`.
 - `web/src/components/FacesPage.tsx`, `web/src/faces.ts`: the Tags table's "Named faces" switch, on an opt-in tag only; `src/stratamodels/server/static/` rebuilt.
 - `docs/database.md`: Tags.

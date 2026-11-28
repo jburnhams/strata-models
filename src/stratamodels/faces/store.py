@@ -131,7 +131,7 @@ class FaceStore:
     def _scope(self, s, tags=None, include=(), named_too=False):
         """A condition on FaceImage.id: pictures with any of `tags` (when given), never one with an opt-in tag that is not in `include` or
         `tags` (naming a tag in `tags` counts as asking for it). `named_too` lets in the pictures of opt-in tags that share their named
-        faces; the caller must then keep only the confirmed faces of the pictures `_shared_only` names."""
+        faces; the caller must then keep only their confirmed faces (`_shared_named`)."""
         conds = []
         if tags:
             conds.append(FaceImage.id.in_(sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(list(tags)))))
@@ -151,21 +151,19 @@ class FaceStore:
         """The opt-in tags whose named faces count everywhere."""
         return set(s.scalars(sa.select(FaceTag.tag).where(FaceTag.opt_in.is_(True), FaceTag.share_named.is_(True))))
 
-    def _shared_only(self, s, image_ids, tags=None, include=()):
-        """Of these pictures, the ones in scope only through a sharing tag: only their confirmed faces may be answered."""
+    def _shared_named(self, s, tags=None, include=()):
+        """With `_scope(named_too=True)`: a condition on Face.id that keeps, of the pictures in scope only through a sharing tag, just the
+        faces confirmed for someone, so the nearest-neighbour limit counts only faces that can be answered. None when no tag shares."""
         partial = [t for t in self._hidden(s, tags, include) if t in self._sharing(s)]
-        if not partial or not image_ids:
-            return set()
-        out = set()
-        for part in _chunks(sorted(set(image_ids))):
-            out.update(
-                s.scalars(
-                    sa.select(FaceImageTag.image_id).where(
-                        FaceImageTag.image_id.in_(part), FaceImageTag.tag.in_(partial)
-                    )
-                )
-            )
-        return out
+        if not partial:
+            return None
+        lent = sa.select(FaceImageTag.image_id).where(FaceImageTag.tag.in_(partial))
+        named = []
+        for part in _chunks(list(s.scalars(sa.select(Face.id).where(Face.image_id.in_(lent)).order_by(Face.id)))):
+            named += [
+                f for f, a in self._current(s, part).items() if a.status == "confirmed" and a.identity_id is not None
+            ]
+        return sa.or_(Face.image_id.not_in(lent), Face.id.in_(named)) if named else Face.image_id.not_in(lent)
 
     def tags(self):
         with self.session() as s:
@@ -463,8 +461,9 @@ class FaceStore:
     # ---- search and clustering -----------------------------------------------------------------------------------------------------------
     def search(self, vector, model, *, k=20, tags=None, include=(), named=None, max_distance=None, exclude=()):
         """The faces nearest `vector` among `model`'s embeddings, in scope (tags, opt-in), closest first. `named` True/False keeps faces with or
-        without a confirmed person. The confirmed faces of an opt-in tag that shares them are in scope too (never its other faces). Asks the
-        index for more than `k` when it must filter after it (named, or a sharing tag), so the answer is still k long."""
+        without a confirmed person. The confirmed faces of an opt-in tag that shares them are in scope too (never its other faces, which are
+        left out before the index's limit, so they never crowd out a face that can be answered). Asks the index for more than `k` when it
+        must filter after it (named), so the answer is still k long."""
         k = max(1, min(int(k), 500))
         with self.session() as s:
             stmt = (
@@ -479,23 +478,19 @@ class FaceStore:
             )
             if exclude:
                 stmt = stmt.where(FaceEmbedding.face_id.not_in([int(x) for x in exclude]))
-            sharing = named is not False and any(t in self._sharing(s) for t in self._hidden(s, tags, include))
-            want = k if named is None and not sharing else k * 5 + 50
+            lent = self._shared_named(s, tags, include) if named is not False else None
+            if lent is not None:
+                stmt = stmt.where(lent)
+            want = k if named is None else k * 5 + 50
             hits = nearest(s, FaceEmbedding.vector, vector, k=want, select=stmt, max_distance=max_distance)
             state = self._current(s, [e.face_id for e, _ in hits])
-            faces = {e.face_id: s.get(Face, e.face_id) for e, _ in hits}
-            shared_only = (
-                self._shared_only(s, [f.image_id for f in faces.values()], tags, include) if sharing else set()
-            )
             out = []
             for e, d in hits:
                 st = state.get(e.face_id)
                 is_named = st is not None and st.status == "confirmed" and st.identity_id is not None
                 if named is not None and bool(named) != is_named:
                     continue
-                f = faces[e.face_id]
-                if f.image_id in shared_only and not is_named:
-                    continue  # an opt-in picture lends only its named faces
+                f = s.get(Face, e.face_id)
                 img = s.get(FaceImage, f.image_id)
                 out.append(dict(face=face_row(f, st), distance=round(float(d), 6), app=img.app, ref=img.ref))
                 if len(out) >= k:
