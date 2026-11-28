@@ -2,6 +2,13 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-28
+
+**page-build: a stray word put back on its line (branch `stray-words`)**
+Jonathan, on strata-scan's third book (page 14): "secretly," was set at two thirds size and started over the word after it. The fit word by word had matched it to a patch of the scan beside it.
+- `runtimes/pagebuild.py`: **new** `steady`, used by `line_maker` on a line set word by word: in a line of 4 words or more of one size of type, a word fitted more than `STRAY` (20 %) from the line's median size, or with its left edge more than half its width from Tesseract's box, takes the line's median size and baseline and starts at its box; in a line of several sizes on purpose (an advert's) only where it starts is put right.
+- `tests/unit/test_pagebuild.py`.
+
 ## 2026-11-27
 
 **Faces: group a video's tracks into people; scene-describe-v3 names them (branch `claude/project-thread-l890x5`)**
