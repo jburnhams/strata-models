@@ -49,11 +49,13 @@ options = { vlm = "claude-haiku-5-5-api" }
 name = "sonnet"
 model = "image-kind-vlm"
 options = { vlm = "claude-sonnet-5-5-api" }
+items = "image-kind-hard"  # Jonathan, 2026-11-28: Haiku on all, Sonnet and Opus only where Haiku struggles (that dataset: Haiku's misses and a few it got right)
 
 [[candidates]]
 name = "opus"
 model = "image-kind-vlm"
 options = { vlm = "claude-opus-5-5-api" }
+items = "image-kind-hard"  # Jonathan, 2026-11-28: Haiku on all, Sonnet and Opus only where Haiku struggles (that dataset: Haiku's misses and a few it got right)
 
 [[candidates]]
 name = "flash-lite"

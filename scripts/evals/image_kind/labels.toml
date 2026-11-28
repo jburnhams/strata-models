@@ -789,3 +789,348 @@ page = 168
 shape = 0.921
 kind = "engraving"
 note = "hard: the back of the jacket, with its title"
+
+# ---- 2026-11-28, labelled on the full-size export (omarchy): the files left unmatched above, and corrections where a page labelled as a
+# whole gave its kind to a figure of another kind. Each shape is the exported file's own, so it wins the nearest-shape match.
+[[pictures]]
+book = "c1828"
+page = 10
+shape = 0.610
+kind = "blank"
+note = "faint show-through of a half-title"
+
+[[pictures]]
+book = "c1828"
+page = 114
+shape = 0.637
+kind = "blank"
+
+[[pictures]]
+book = "c1828"
+page = 125
+shape = 0.580
+kind = "blank"
+
+[[pictures]]
+book = "c1828"
+page = 138
+shape = 0.638
+kind = "engraving"
+note = "the whole page: a small plate on blank paper"
+
+[[pictures]]
+book = "c1828"
+page = 184
+shape = 0.650
+kind = "blank"
+
+[[pictures]]
+book = "c1828"
+page = 199
+shape = 0.580
+kind = "blank"
+
+[[pictures]]
+book = "c1828"
+page = 204
+shape = 0.629
+kind = "blank"
+note = "plain yellow endpaper"
+
+[[pictures]]
+book = "hist"
+page = 4
+shape = 0.729
+kind = "blank"
+
+[[pictures]]
+book = "hist"
+page = 16
+shape = 1.465
+kind = "engraving"
+note = "Callot etching, printed in halftone"
+vectorise = true
+
+[[pictures]]
+book = "hist"
+page = 17
+shape = 0.682
+kind = "engraving"
+vectorise = true
+
+[[pictures]]
+book = "hist"
+page = 17
+shape = 0.711
+kind = "woodcut"
+note = "coarse cut, heavy black areas"
+
+[[pictures]]
+book = "hist"
+page = 81
+shape = 0.794
+kind = "wood-engraving"
+vectorise = true
+
+[[pictures]]
+book = "hist"
+page = 81
+shape = 0.694
+kind = "woodcut"
+
+[[pictures]]
+book = "hist"
+page = 102
+shape = 0.852
+kind = "halftone"
+
+[[pictures]]
+book = "hist"
+page = 103
+shape = 0.722
+kind = "line-drawing"
+note = "whole page of two manuscript drawings, printed in halftone (its figures are f220 and f221)"
+
+[[pictures]]
+book = "hist"
+page = 106
+shape = 0.533
+kind = "tonal-drawing"
+
+[[pictures]]
+book = "hist"
+page = 106
+shape = 0.535
+kind = "engraving"
+note = "printed in halftone"
+
+[[pictures]]
+book = "hist"
+page = 124
+shape = 1.554
+kind = "diagram"
+note = "an engraved diagram of a ring"
+vectorise = true
+
+[[pictures]]
+book = "w1874"
+page = 4
+shape = 0.660
+kind = "blank"
+
+[[pictures]]
+book = "w1874"
+page = 5
+shape = 0.656
+kind = "blank"
+
+[[pictures]]
+book = "w1874"
+page = 18
+shape = 0.833
+kind = "text"
+
+[[pictures]]
+book = "w1874"
+page = 18
+shape = 1.115
+kind = "text"
+
+[[pictures]]
+book = "w1874"
+page = 21
+shape = 1.342
+kind = "text"
+
+[[pictures]]
+book = "w1874"
+page = 23
+shape = 1.290
+kind = "text"
+
+[[pictures]]
+book = "w1874"
+page = 29
+shape = 2.444
+kind = "text"
+note = "display type"
+
+[[pictures]]
+book = "w1874"
+page = 29
+shape = 2.319
+kind = "text"
+note = "display type"
+
+[[pictures]]
+book = "w1874"
+page = 34
+shape = 1.399
+kind = "text"
+note = "display type"
+
+[[pictures]]
+book = "w1874"
+page = 36
+shape = 2.479
+kind = "text"
+note = "display type"
+
+[[pictures]]
+book = "w1874"
+page = 36
+shape = 1.262
+kind = "text"
+note = "an advertisement"
+
+[[pictures]]
+book = "c1828"
+page = 6
+shape = 0.773
+kind = "stamp"
+note = "the red library stamp cut from the handwriting page"
+
+[[pictures]]
+book = "hist"
+page = 1
+shape = 2.790
+kind = "text"
+note = "red display lettering of the jacket"
+
+[[pictures]]
+book = "hist"
+page = 1
+shape = 3.259
+kind = "text"
+note = "red display lettering of the jacket"
+
+[[pictures]]
+book = "hist"
+page = 2
+shape = 0.405
+kind = "engraving"
+note = "printed in orange on the endpaper, with a library stamp"
+
+[[pictures]]
+book = "hist"
+page = 43
+shape = 0.825
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 61
+shape = 2.262
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 76
+shape = 2.086
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 79
+shape = 1.478
+kind = "engraving"
+note = "bold, could be a wood engraving"
+
+[[pictures]]
+book = "hist"
+page = 90
+shape = 1.258
+kind = "engraving"
+note = "bold etching, could be a woodcut"
+
+[[pictures]]
+book = "hist"
+page = 96
+shape = 1.642
+kind = "wood-engraving"
+
+[[pictures]]
+book = "hist"
+page = 97
+shape = 1.362
+kind = "line-drawing"
+vectorise = true
+
+[[pictures]]
+book = "hist"
+page = 109
+shape = 1.328
+kind = "hand-coloured"
+note = "an oval coloured print, not a painting"
+
+[[pictures]]
+book = "hist"
+page = 126
+shape = 1.473
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 134
+shape = 0.822
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 146
+shape = 1.072
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 150
+shape = 1.051
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 160
+shape = 1.075
+kind = "engraving"
+
+[[pictures]]
+book = "hist"
+page = 168
+shape = 3.148
+kind = "text"
+note = "red display lettering of the jacket"
+
+[[pictures]]
+book = "hist"
+page = 168
+shape = 3.251
+kind = "text"
+note = "red display lettering of the jacket"
+
+[[pictures]]
+book = "w1874"
+page = 44
+shape = 2.137
+kind = "stamp"
+note = "a library barcode label"
+
+[[pictures]]
+book = "c1828"
+page = 6
+shape = 0.536
+kind = "handwriting"
+note = "the signature beside the stamp"
+
+[[pictures]]
+book = "hist"
+page = 1
+shape = 1.174
+kind = "photograph"
+note = "colour photograph of puppets in a drawn frame, on the jacket"
+
+[[pictures]]
+book = "w1874"
+page = 44
+shape = 0.380
+kind = "binding"
+note = "a scrap of the red cloth cover"

@@ -159,7 +159,7 @@ def test_the_reader_is_asked_through_the_delegate(tmp_path, monkeypatch):
     monkeypatch.setattr(
         delegate,
         "caller",
-        lambda key, d, via: got.append(key) or ((lambda p: {"json": {"kind": "woodcut"}}), lambda: None),
+        lambda key, d, via, opts=None: got.append(key) or ((lambda p: {"json": {"kind": "woodcut"}}), lambda: None),
     )
     h = imagekind.load(M(engine="vlm", vlm="claude-haiku-5-5-api"), "")
     assert imagekind.run(h, {"image": save(tmp_path, "x.png", paper())})["kind"] == "woodcut"

@@ -223,7 +223,10 @@ def test_executors_pass_through(scheduler):
     assert (
         ex.submit("r", {}, "m", {}) == 7
         and ex.wait(7)["status"] == "done"
-        and calls == [("r", "evals", "low", "m", None, False, 1)]
+        and calls
+        == [
+            ("r", "evals", "low", "m", None, None, 1)
+        ]  # no batch flag: the service batches every low job on a batch API
     )
     j = C.SchedulerExecutor(scheduler).submit("echo", dict(x=1), "small", None)
     scheduler.step()
@@ -732,3 +735,29 @@ def test_sending_a_candidate_as_a_batch_keeps_its_result_keys(setup):
     batched = copy.copy(c)
     batched.params = {**(c.params or {}), "batch": True}
     assert C.result_key(s, batched, it) == C.result_key(s, c, it)
+
+
+def test_jobs_on_a_batch_api_go_in_one_bulk_call_and_the_rest_in_chunks():
+    """Jonathan, 2026-11-28: every eval batches. A Claude candidate's items are queued in one call (one batch), not 32 at a time."""
+    sent = []
+
+    class Ex:
+        def submit_many(self, role, items, model, options):
+            sent.append((model, len(items)))
+            return list(range(len(items)))
+
+        def batchable(self, role, model):
+            return model == "claude"
+
+    todo = [("claude", i) for i in range(70)] + [("gpu", i) for i in range(70)]
+    chunks = C._chunks(Ex(), todo, 32, lambda t: ("r", t[0]))
+    assert [len(c) for c in chunks] == [70, 32, 32, 6]
+    ids = C._send(Ex(), [("r", {}, m, None) for m, _ in chunks[0]] + [("r", {}, "gpu", None)] * 2)
+    assert ids == list(range(70)) + [0, 1] and sent == [("claude", 70), ("gpu", 2)]
+
+    class Old:  # an executor with no submit_many: one by one
+        def submit(self, role, params, model, options):
+            return model
+
+    assert C._send(Old(), [("r", {}, "a", None), ("r", {}, "b", None)]) == ["a", "b"]
+    assert C._chunks(Old(), todo[:3], 2, lambda t: ("r", t[0])) == [todo[:2], todo[2:3]]

@@ -288,7 +288,7 @@ def test_the_drawing_model_is_asked_through_the_delegate(tmp_path, monkeypatch):
 
     got = []
     monkeypatch.setattr(
-        delegate, "caller", lambda key, d, via: got.append((key, via)) or ((lambda p: CIRCLE), lambda: None)
+        delegate, "caller", lambda key, d, via, opts=None: got.append((key, via)) or ((lambda p: CIRCLE), lambda: None)
     )
     h, _ = handle(engine="llm", llm="claude-opus-5-5-api")
     out = vectorise.run(h, {"image": plate(tmp_path / "p.png")})
@@ -310,3 +310,15 @@ def test_fit_replaces_sizing_in_either_quote_style_and_fits_again():
     assert head.count("width=") == head.count("height=") == head.count("preserveAspectRatio=") == 1
     assert vectorise._fit(once, 240, 180) == once
     vectorise.render(once, 24, 18)
+
+
+def test_the_drawing_models_load_options_reach_the_delegate(tmp_path, monkeypatch):
+    from stratamodels.runtimes import delegate
+
+    got = []
+    monkeypatch.setattr(
+        delegate, "caller", lambda key, d, via, opts: got.append(opts) or ((lambda p: CIRCLE), lambda: None)
+    )
+    h, _ = handle(engine="llm", llm="qwen3.5-9b-vl", llm_options={"ctx": 32768})
+    vectorise.run(h, {"image": plate(tmp_path / "p.png")})
+    assert got == [{"ctx": 32768}]

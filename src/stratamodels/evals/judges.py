@@ -329,8 +329,10 @@ def verdict(answer):
 class QueueAsker:
     """A local judge: a job on its role through the queue (executor as in core.run)."""
 
-    def __init__(self, executor):
-        self.ex = executor
+    def __init__(self, executor, parallel=1):
+        # `parallel`: verdicts asked at once. A judge on a model with a batch API asks many together, so the batcher sends them as one batch
+        # (half price, minutes) instead of one batch per verdict, one after another (asker_for)
+        self.ex, self.parallel = executor, parallel
 
     def __call__(self, j, system, text, images, schema):
         params = {
@@ -375,7 +377,11 @@ def asker_for(j, executor=None):
         return CliAsker()
     if executor is None:
         raise C.EvalError(f"judge {j['name']} is a local model: its jobs need the service's queue")
-    return QueueAsker(executor)
+    test = getattr(executor, "batchable", None)
+    return QueueAsker(executor, PARALLEL if test and test(j["role"], j.get("resolved") or j["model"]) else 1)
+
+
+PARALLEL = 64  # verdicts asked at once by a judge whose model batches: they go out together in the batcher's next batch
 
 
 # ---- which pairs -------------------------------------------------------------------------------------------------------------------------
@@ -503,13 +509,34 @@ def run_judge(spec, engine, name, ask, limit=None, only=None, log=print):
         pairs = pairs[:cap]
     log(f"{spec.name}: judge {name}: {left} pairs to judge, {len(pairs)} now")
     jk, judged, failed, stopped = judge_key(j, j["resolved"]), 0, 0, None
-    for n, (i, a, b) in enumerate(pairs, 1):
+    jobs = []
+    for i, a, b in pairs:
         it = ds.items[i]
         ka, kb = current[(a, it["id"])], current[(b, it["id"])]
         if not _first(it["id"], ka, kb):
             a, b, ka, kb = b, a, kb, ka
+        jobs.append((it, a, b, ka, kb, i))
+
+    def verdict(t):
+        it, a, b, _ka, _kb, i = t
+        return judge_pair(spec, j, it, a, outs[a][i][0], b, outs[b][i][0], ask)
+
+    width = int(getattr(ask, "parallel", 1) or 1)
+    if width > 1:  # asked together (a batch); each answer, or its error, is then taken in order as below
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(width) as pool:
+            futures = [pool.submit(verdict, t) for t in jobs]
+            got = [f.exception() or f.result() for f in futures]
+    else:
+        got = None
+    for n, t in enumerate(jobs, 1):
+        it, a, b, ka, kb, _i = t
         try:
-            winner, detail = judge_pair(spec, j, it, a, outs[a][i][0], b, outs[b][i][0], ask)
+            r = verdict(t) if got is None else got[n - 1]
+            if isinstance(r, BaseException):
+                raise r
+            winner, detail = r
         except cloud.QuotaError as e:
             stopped = f"quota: {e}"
             log(f"  quota: stopping after {n - 1} pairs; run again later. {e}")

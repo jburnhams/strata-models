@@ -67,7 +67,8 @@ def available(timeout=2.0):
 def submit(role, params, app, priority="normal", model=None, options=None):
     """Queue one job and return its row at once (poll with `wait`). `options` changes the model's load options (a variant loaded apart:
     evals). A `high` job (someone waiting on it) goes to POST /api/jobs; normal and low work is queued in bulk, as a call of one (see
-    `submit_many`, which an app with many jobs should use instead: only a bulk call of 20 or more is batched)."""
+    `submit_many`, which an app with many jobs should use instead). On a Claude model only a `high` job is answered at once; any other is
+    batched (half price, usually minutes)."""
     if priority == "high":
         return _call("POST", "/api/jobs", dict(role=role, params=params or {}, app=app, model=model, options=options))
     (job_id,) = submit_many(role, [params or {}], app, priority, model, options)
@@ -76,8 +77,8 @@ def submit(role, params, app, priority="normal", model=None, options=None):
 
 def submit_many(role, items, app, priority="normal", model=None, options=None, batch=None):
     """Queue one job per params dict in `items` in a single call; returns their ids, in order (wait on each with `wait`). On a Claude model
-    a call of 20 or more goes through the batch API (half the price, answered within 24 hours: wait accordingly); `batch=True` always,
-    `batch=False` never. Nothing is queued when the role or model is refused."""
+    every job goes through the batch API (half the price, usually answered in minutes, at most 24 hours: wait accordingly), except one job at
+    high priority; `batch` is accepted and not read. Nothing is queued when the role or model is refused."""
     return _call(
         "POST",
         "/api/jobs/bulk",

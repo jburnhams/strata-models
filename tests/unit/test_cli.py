@@ -127,7 +127,7 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
 
         def submit_many(self, *a, **kw):
             calls.append(a)
-            return [len(calls)]
+            return [len(calls)] * len(a[1])
 
         def wait_job(self, i):
             return dict(id=i, status="done", result=dict(segments=[dict(text="x")]))
@@ -137,7 +137,8 @@ def test_eval_commands(capsys, monkeypatch, tmp_path, setup):
     assert (
         cli.main(["eval", "run", "fake-asr", "--limit", "2"]) == 0
         and '"ran": 6' in capsys.readouterr().out
-        and len(calls) == 6
+        and sum(len(a[1]) for a in calls) == 6
+        and len(calls) == 3  # one bulk call per candidate
     )
 
 

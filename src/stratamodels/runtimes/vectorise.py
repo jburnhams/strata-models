@@ -362,7 +362,10 @@ def _llm(h: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
         from stratamodels.runtimes import delegate
 
         h["llm"], h["llm_unload"] = delegate.caller(
-            str(h["options"]["llm"]), h.get("models_dir", ""), h["options"].get("via")
+            str(h["options"]["llm"]),
+            h.get("models_dir", ""),
+            h["options"].get("via"),
+            h["options"].get("llm_options"),  # the model's load options changed (a variant: Qwen with a longer context)
         )
     return cast("Callable[[dict[str, Any]], Any]", h["llm"])
 

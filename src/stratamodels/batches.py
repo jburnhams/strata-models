@@ -1,13 +1,11 @@
 """Jobs sent through a vendor's batch API (the Claude Message Batches API: half the price of the same calls made at once, answered within
 24 hours, most within one), for bulk work that can wait: an archive of photos to caption, an eval's candidate run.
 
-Only a bulk submission is batched (POST /api/jobs/bulk, Scheduler.submit_many): nothing is ever held to see whether more will come, so a
-job queued on its own runs at once, as it always did. The bulk call's `batch` decides it, on a model whose runtime has a batch API
-(claude-api; on any other the flag is dropped and the jobs run at once):
-  batch = false   never batched
-  batch = true    always batched, however few
-  (not given)     batched when the call has `min_jobs` (20) or more (a handful of calls is not worth waiting up to a day for)
-Submit_many marks each such job (`batch = true` in its params); the batcher sends the marked jobs of each model at its next step. Nothing
+Every job on a model whose runtime has a batch API (claude-api) is batched, however it was queued, with one exception: a single job at high
+priority (POST /api/jobs, someone waiting on it now) is sent at once (Jonathan, 2026-11-28: "fix so all models and evals use batch. only
+thing allow single run is individual high priority calls"; a batch usually answers within minutes). A bulk call's `batch` flag and an item's
+own `batch` key are accepted and not read: the priority and the count decide. On a model without a batch API nothing changes.
+Submit and submit_many mark each such job (`batch = true` in its params); the batcher sends the marked jobs of each model at its next step. Nothing
 else changes for the app: it waits for each job as it always does, and each ends done or failed with the same result as a call made at once
 (plus `batch`, the vendor's id). What to do with an entry that failed (retry it at once, or later) stays with the app.
 
@@ -70,13 +68,11 @@ class Batcher:
     def __init__(
         self,
         scheduler,
-        min_jobs=20,
         poll_s=60.0,
         max_jobs=10_000,
         max_bytes=200 * 1024 * 1024,
     ):
         self.s = scheduler
-        self.min_jobs = int(min_jobs)
         self.poll_s, self.max_jobs, self.max_bytes = float(poll_s), int(max_jobs), int(max_bytes)
         self.handles = {}  # model key -> (settings hash, handle): the batcher's own client, apart from the CPU lane's
         self.tickets = {}  # job id -> its spend hold, until its outcome is recorded
@@ -89,9 +85,10 @@ class Batcher:
         """Whether jobs on `model` can go through a batch API (a served model whose runtime has one)."""
         return model is not None and model.served and self._runtime(model) is not None
 
-    def decide(self, model, n, batch):
-        """Whether a bulk submission of `n` jobs on `model` is batched: `batch` True always, False never, None from min_jobs."""
-        return self.batchable(model) and batch is not False and (batch is True or n >= self.min_jobs)
+    def decide(self, model, n, priority):
+        """Whether `n` jobs queued together on `model` at `priority` are batched: always on a model with a batch API, except one job at high
+        priority (someone waiting on that one answer)."""
+        return self.batchable(model) and not (priority == "high" and n == 1)
 
     def _runtime(self, model):
         try:

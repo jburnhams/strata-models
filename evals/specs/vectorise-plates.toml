@@ -93,7 +93,14 @@ name = "qwen"
 model = "vectorise-llm"
 options = { llm = "qwen3.5-9b-vl", max_tokens = 12000 }
 items = 12
-note = "the local Qwen 3.5 9B through the service's queue; its 16k context bounds the drawing"
+note = "the local Qwen 3.5 9B through the service's queue; its 16k context bounds the drawing (7 of 8 were cut off before </svg>)"
+
+[[candidates]]
+name = "qwen-32k"
+model = "vectorise-llm"
+options = { llm = "qwen3.5-9b-vl", llm_options = { ctx = 32768 }, max_tokens = 28000 }
+items = 12
+note = "Jonathan, 2026-11-28: let Qwen write more. Loaded with a 32k context (a variant beside the service's own), 28k tokens for the SVG"
 
 [[candidates]]
 name = "plan-sonnet"
@@ -118,6 +125,24 @@ note = "potrace's trace tidied by Sonnet (preset vectorise-clean-v1); only trace
 name = "opus-agy"
 cli = "agy"
 model = "claude-opus-5-5-low"
+kind = "vision"
+pairs = "baseline"
+limit = 120
+criteria = "The first picture is an illustration from a scanned book; X and Y are two SVG redrawings of it, each drawn at the same size. Prefer the one that would be the better replacement for the picture in a reprinted book: the same figures, lines and shading in the same places, looking like the original print, with no specks, blobs, smears or missing parts. A clean, faithful drawing beats a messy exact one and a tidy but wrong one."
+
+[[judges]]
+name = "gpt-codex"  # Jonathan, 2026-11-28: the ChatGPT plan through codex may be used freely (agy's quota ran out after 9 of 120 pairs)
+cli = "codex"
+model = "gpt-6.1-sol"
+kind = "vision"
+pairs = "baseline"
+limit = 120
+criteria = "The first picture is an illustration from a scanned book; X and Y are two SVG redrawings of it, each drawn at the same size. Prefer the one that would be the better replacement for the picture in a reprinted book: the same figures, lines and shading in the same places, looking like the original print, with no specks, blobs, smears or missing parts. A clean, faithful drawing beats a messy exact one and a tidy but wrong one."
+
+[[judges]]
+name = "gemini-agy"  # agy's quota for Claude models ran out; its Gemini models are on their own allowance
+cli = "agy"
+model = "gemini-3.8-flash-low"
 kind = "vision"
 pairs = "baseline"
 limit = 120

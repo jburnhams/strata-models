@@ -273,12 +273,12 @@ def _local_executor(engine):
     sch.start()
 
     class Local(C.SchedulerExecutor):
-        def submit(self, role, params, model, options):
+        def submit_many(self, role, items, model, options):
             key = model or registry.roles[role].model
             m = registry.models.get(key)
             if m is not None and m.vram_gb > 0:
                 raise SystemExit(f"model {key} needs the GPU ({m.vram_gb} GB): run it through the service, not --local")
-            return super().submit(role, params, model, options)
+            return super().submit_many(role, items, model, options)
 
     return Local(sch)
 

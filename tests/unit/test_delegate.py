@@ -56,3 +56,35 @@ def test_a_gpu_model_is_never_loaded_in_a_runtime(monkeypatch):
     monkeypatch.setattr(settings, "engine", lambda: None)
     with pytest.raises(RunError, match="needs the GPU .* only as a job on the service"):
         delegate.caller("qwen3.5-9b-vl", "")
+
+
+def test_a_model_with_a_batch_api_is_always_asked_as_a_job(monkeypatch):
+    """Claude is never called from inside a runtime: its job goes to the batcher (half price)."""
+    from stratamodels import settings
+
+    sent = []
+    sm = types.ModuleType("strata_models_client")
+    sm.run = lambda role, params, app, priority, model: sent.append((priority, model)) or {"text": "ok"}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "strata_models_client", sm)
+    monkeypatch.delenv("STRATAMODELS_DELEGATE_VIA", raising=False)
+    monkeypatch.setattr(settings, "engine", lambda: None)
+    run, _ = delegate.caller("claude-haiku-5-5-api", "")
+    assert run({"prompt": "hi"}) == {"text": "ok"} and sent == [("low", "claude-haiku-5-5-api")]
+
+
+def test_load_options_make_a_variant_the_service_loads(monkeypatch):
+    sent = []
+    sm = types.ModuleType("strata_models_client")
+    sm.submit_many = lambda role, items, app, priority, model, options: sent.append((model, options, items)) or [9]  # type: ignore[attr-defined]
+    sm.wait = lambda jid: {"text": f"job {jid}"}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "strata_models_client", sm)
+    run, _ = delegate.caller("qwen3.5-9b-vl", "", "service", {"ctx": 32768})
+    assert run({"prompt": "draw"}) == {"text": "job 9"} and sent == [
+        ("qwen3.5-9b-vl", {"ctx": 32768}, [{"prompt": "draw"}])
+    ]
+    monkeypatch.delenv("STRATAMODELS_DELEGATE_VIA", raising=False)
+    from stratamodels import settings
+
+    monkeypatch.setattr(settings, "engine", lambda: None)
+    with pytest.raises(RunError, match="a variant the service loads"):
+        delegate.caller("image-kind-rules", "", None, {"engine": "clip"})

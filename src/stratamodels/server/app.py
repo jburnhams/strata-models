@@ -14,10 +14,11 @@ API (JSON), for apps (through the client in client/) and for the web app:
   PUT/DELETE /api/preferences/{app}/{role}   {model?, params?, note?} the model and default params an app's jobs for a role get
   GET  /api/files?path=|job=             which jobs read or wrote a file, or the files a job touched (paths only)
   POST /api/models/{key}/load|unload     ask the worker to load or free a model
-  POST /api/jobs                         {role, params, app, model?, options?} queue one high priority job (someone is waiting on it): never batched
-  POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?, batch?} queue normal or low work, one job per
-                                         item: {ids}. 20 or more on a Claude model go through its batch API (half price, answered within a day;
-                                         batch: true always, false never; batches.py)
+  POST /api/jobs                         {role, params, app, model?, options?} queue one high priority job (someone is waiting on it): the only
+                                         call a Claude model answers at once
+  POST /api/jobs/bulk                    {role, items: [params, ...], app, priority?, model?, options?} queue work, one job per item: {ids}. On a
+                                         Claude model every job goes through its batch API (half price, usually minutes), except one job at high
+                                         priority (batches.py; `batch` is accepted and not read)
   POST /api/run/{role}                   {params, app, model?, timeout?} queue one high priority job and wait for the result (504 with the job if it takes longer)
   GET  /api/jobs?status=&role=&app=&kind=&before=&limit=   history, newest first, cursor `before` = the last id shown
   GET  /api/jobs/{id}?wait=              one job with its result; waits up to `wait` seconds for it to finish

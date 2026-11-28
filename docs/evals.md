@@ -14,6 +14,10 @@ can be compared and revisited when a new model appears.
    `scripts/eval_faces_dataset.py`).
 3. **Runs through the GPU queue** (`./strata-models eval run NAME`, or Run on the experiment's page): batch jobs like any app's, so an eval
    never fights other work for the card. Outputs are cached by everything that decides them; adding a candidate runs only that candidate.
+   A candidate on a model with a batch API (Claude) has all its items queued in one call, so they go as one Message Batch at half price
+   (usually minutes); other models are queued 32 at a time. A model judge on a batch API asks 64 verdicts at once for the same reason, and
+   a runtime that asks Claude in turn (image-kind's reader, vectorise's drawer) sends it as a job. Jonathan, 2026-11-28: every Claude call
+   is batched but a single high-priority one ([`batches.py`](../src/stratamodels/batches.py)).
 4. **Metrics** (`src/stratamodels/evals/metrics.py`): each knows which way is better. Text: WER, CER (normalised the same way every time).
    Faces: found, missed, verification AUC and TAR at 1 % FAR. Generic: exact match, JSON parse rate, failure rate, run time, peak VRAM.
 5. **Statistics** (`stats.py`), the same everywhere: Wilson intervals for shares, item bootstrap for means and corpus rates, **paired**
