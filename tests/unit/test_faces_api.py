@@ -358,3 +358,20 @@ def test_delete_pictures_one_or_by_tag_with_their_kept_copies(client, scheduler,
     done = client.post("/api/faces/images/delete", json=dict(tag="eval", dry_run=False)).json()
     assert done["deleted"] and done["images"] == 1
     assert client.get(f"/api/faces/images/{two['id']}").status_code == 404
+
+
+def test_group_tracks_answers_groups_and_refuses_a_bad_request(client):
+    tracks = [
+        dict(key="a", embedding=person(1, seed=1)),
+        dict(key="b", embedding=person(1, seed=2)),
+        dict(key="c", embedding=person(4, seed=3)),
+    ]
+    r = client.post("/api/faces/group-tracks", json=dict(app="strata-reels", tracks=tracks, apart=[["a", "b"]]))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model"] == "fakeface"
+    assert sorted(len(g["tracks"]) for g in body["groups"]) == [1, 1, 1]  # a and b look alike, but were seen together
+    assert all(g["suggested"] is None for g in body["groups"])
+    assert body["hidden"] == []
+    r = client.post("/api/faces/group-tracks", json=dict(app="strata-reels", tracks=[tracks[0], tracks[0]]))
+    assert r.status_code == 400 and "key of its own" in r.json()["detail"]
